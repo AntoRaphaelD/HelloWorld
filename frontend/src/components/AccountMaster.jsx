@@ -1,163 +1,373 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { mastersAPI } from '../service/api';
 import { 
-    Save, Plus, Trash2, X, Search, User, 
-    MapPin, Phone, Mail, Globe, Hash, 
-    CreditCard, Building2, ChevronRight 
+    Plus, Search, Edit, Trash2, X, ChevronLeft, 
+    ChevronRight, Filter, Download, MoreVertical 
 } from 'lucide-react';
 
 const AccountMaster = () => {
+    // --- State Management ---
     const [list, setList] = useState([]);
-    const [formData, setFormData] = useState(initialState());
-    const [searchQuery, setSearchQuery] = useState("");
+    const [isModalOpen, setIsModalOpen] = useState(false);
     const [loading, setLoading] = useState(false);
+    
+    // UI Input State (What the user types)
+    const [searchField, setSearchField] = useState('account_name');
+    const [searchCondition, setSearchCondition] = useState('Like');
+    const [searchValue, setSearchValue] = useState('');
+    
+    // Active Filter State (What the table actually uses)
+    const [activeFilter, setActiveFilter] = useState({ field: 'account_name', condition: 'Like', value: '' });
+
+    // Pagination & Sorting State
+    const [currentPage, setCurrentPage] = useState(1);
+    const [itemsPerPage] = useState(10);
+    const [sortConfig, setSortConfig] = useState({ key: 'account_name', direction: 'asc' });
+
+    const [formData, setFormData] = useState(initialState());
 
     function initialState() {
         return {
-            account_code: '', account_group: 'Sundry Debtors', account_name: '',
-            place: '', address: '', pincode: '', state: '', delivery_address: '',
-            tin_no: '', cst_no: '', ph_no: '', email: '', fax: '', website: '',
-            account_no: '', contact_person: '', cell_no: '', gst_no: '',
-            opening_credit: 0, opening_debit: 0
+            id: null, account_code: '', account_group: 'Sundry Debtors', account_name: '',
+            place: '', address: '', pincode: '', gst_no: '', opening_credit: 0, opening_debit: 0
         };
     }
 
     useEffect(() => { fetchRecords(); }, []);
 
     const fetchRecords = async () => {
-        try {
-            const res = await mastersAPI.accounts.getAll();
-            const data = res.data.data || [];
-            setList(data);
-            if (!formData.id) generateNextCode(data);
-        } catch (err) { console.error(err); }
-    };
-
-    const generateNextCode = (currentList) => {
-        const nextId = currentList.length > 0 ? Math.max(...currentList.map(i => i.id)) + 1 : 1;
-        setFormData(prev => ({ ...prev, account_code: `${String(nextId)}` }));
-    };
-
-    const handleAddNew = () => {
-        const reset = initialState();
-        setFormData(reset);
-        generateNextCode(list);
-    };
-
-    const handleSelect = (item) => setFormData(item);
-
-    const handleChange = (e) => {
-        const { name, value } = e.target;
-        setFormData(prev => ({ ...prev, [name]: value }));
-    };
-
-    const handleSave = async () => {
-        if (!formData.account_name) return alert("Account Name Required");
         setLoading(true);
         try {
-            formData.id ? await mastersAPI.accounts.update(formData.id, formData) : await mastersAPI.accounts.create(formData);
-            fetchRecords();
-            handleAddNew();
-        } catch (err) { alert("Error saving"); } finally { setLoading(false); }
+            const res = await mastersAPI.accounts.getAll();
+            setList(res.data.data || []);
+        } catch (err) { 
+            console.error(err); 
+        } finally { 
+            setLoading(false); 
+        }
     };
 
-    const filteredList = list.filter(item => 
-        item.account_name.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+    // --- Search Actions ---
+    const handleSearch = () => {
+        setCurrentPage(1); // Reset to page 1 on new search
+        setActiveFilter({ field: searchField, condition: searchCondition, value: searchValue });
+    };
+
+    const handleShowAll = () => {
+        setSearchValue('');
+        setCurrentPage(1);
+        setActiveFilter({ field: 'account_name', condition: 'Like', value: '' });
+    };
+
+    // --- CRUD Actions ---
+    const handleAddNew = () => {
+        setFormData(initialState());
+        setIsModalOpen(true);
+    };
+
+    const handleEdit = (item) => {
+        setFormData(item);
+        setIsModalOpen(true);
+    };
+
+    const handleDelete = async (id) => {
+        if (window.confirm("Are you sure you want to delete this record?")) {
+            try {
+                await mastersAPI.accounts.delete(id);
+                fetchRecords();
+                setIsModalOpen(false);
+            } catch (err) { alert("Delete failed"); }
+        }
+    };
+
+    const handleSave = async (e) => {
+        e.preventDefault();
+        setLoading(true);
+        try {
+            // Ensure numbers are sent as numbers, not strings
+            const payload = {
+                ...formData,
+                opening_credit: Number(formData.opening_credit),
+                opening_debit: Number(formData.opening_debit)
+            };
+
+            formData.id 
+                ? await mastersAPI.accounts.update(formData.id, payload) 
+                : await mastersAPI.accounts.create(payload);
+            
+            fetchRecords();
+            setIsModalOpen(false);
+        } catch (err) { alert("Error saving record"); } 
+        finally { setLoading(false); }
+    };
+
+    // --- Filter & Sort Logic ---
+    const filteredData = useMemo(() => {
+        return list.filter(item => {
+            if (!activeFilter.value) return true;
+            const val = String(item[activeFilter.field] || '').toLowerCase();
+            const search = activeFilter.value.toLowerCase();
+            return activeFilter.condition === 'Like' ? val.includes(search) : val === search;
+        });
+    }, [list, activeFilter]);
+
+    const sortedData = useMemo(() => {
+        let sortableItems = [...filteredData];
+        if (sortConfig.key) {
+            sortableItems.sort((a, b) => {
+                const aVal = a[sortConfig.key] || '';
+                const bVal = b[sortConfig.key] || '';
+                if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
+                if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
+                return 0;
+            });
+        }
+        return sortableItems;
+    }, [filteredData, sortConfig]);
+
+    // Pagination Logic
+    const indexOfLastItem = currentPage * itemsPerPage;
+    const currentItems = sortedData.slice(indexOfLastItem - itemsPerPage, indexOfLastItem);
+    const totalPages = Math.ceil(sortedData.length / itemsPerPage);
+
+    const requestSort = (key) => {
+        let direction = 'asc';
+        if (sortConfig.key === key && sortConfig.direction === 'asc') direction = 'desc';
+        setSortConfig({ key, direction });
+    };
 
     return (
-        <div className="flex h-screen bg-slate-50 overflow-hidden font-sans text-slate-900">
-            <div className="flex flex-col bg-white border-r border-slate-200 w-96">
-                <div className="p-4 border-b border-slate-100 bg-white sticky top-0 z-10">
-                    <div className="flex justify-between items-center mb-4">
-                        <h2 className="text-xl font-bold bg-gradient-to-r from-blue-700 to-indigo-600 bg-clip-text text-transparent">Accounts</h2>
-                        <button onClick={handleAddNew} className="p-2 bg-blue-50 text-blue-600 rounded-lg shadow-sm"><Plus size={20} /></button>
-                    </div>
-                    <div className="relative group">
-                        <Search className="absolute left-3 top-2.5 text-slate-400" size={18} />
-                        <input type="text" placeholder="Search..." className="w-full pl-10 pr-4 py-2 bg-slate-100 border-none rounded-xl text-sm" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
-                    </div>
+        <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-sans text-slate-900">
+            {/* 1. TOP HEADER SECTION */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
+                <div>
+                    <h1 className="text-2xl font-bold text-slate-800">Account Master</h1>
+                    <p className="text-sm text-slate-500">Manage your ledger and account information</p>
                 </div>
-                <div className="flex-1 overflow-y-auto">
-                    {filteredList.map((item) => (
-                        <div key={item.id} onClick={() => handleSelect(item)} className={`p-4 border-b cursor-pointer transition-all ${formData.id === item.id ? 'bg-blue-50 border-l-4 border-l-blue-600' : 'hover:bg-slate-50'}`}>
-                            <p className="font-semibold text-slate-700">{item.account_name}</p>
-                            <div className="flex items-center gap-2 mt-1 text-xs text-slate-500">
-                                <span className="bg-slate-200 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase">{item.account_code}</span>
-                                <span>•</span><span>{item.account_group}</span>
-                            </div>
-                        </div>
-                    ))}
+                <div className="flex gap-2">
+                    <button 
+                        onClick={handleAddNew}
+                        className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-all shadow-sm"
+                    >
+                        <Plus size={18} /> New Account
+                    </button>
                 </div>
             </div>
 
-            <div className="flex-1 flex flex-col min-w-0">
-                <header className="h-16 bg-white border-b flex items-center justify-between px-6 shadow-sm z-10">
-                    <div className="flex items-center gap-3">
-                        <div className="h-10 w-10 bg-indigo-100 text-indigo-600 rounded-xl flex items-center justify-center"><Building2 size={24} /></div>
-                        <div>
-                            <h1 className="text-lg font-bold text-slate-800">{formData.id ? 'Edit Profile' : 'New Account Entry'}</h1>
-                            <p className="text-xs text-slate-500">Master Ledger Configuration</p>
-                        </div>
+            {/* 2. FILTER BAR */}
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-6">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                    <div>
+                        <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Search Field</label>
+                        <select 
+                            value={searchField} 
+                            onChange={(e) => setSearchField(e.target.value)}
+                            className="w-full border border-slate-200 p-2 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white"
+                        >
+                            <option value="account_name">Account Name</option>
+                            <option value="account_code">Account Code</option>
+                            <option value="place">Place</option>
+                            <option value="account_group">Group</option>
+                        </select>
                     </div>
-                    <div className="flex items-center gap-2">
-                        <button onClick={handleSave} disabled={loading} className="bg-blue-600 text-white px-5 py-2 rounded-xl font-medium flex items-center gap-2 shadow-md">
-                            <Save size={18} /> {loading ? 'Saving...' : 'Save Account'}
+                    <div>
+                        <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Condition</label>
+                        <select 
+                            value={searchCondition}
+                            onChange={(e) => setSearchCondition(e.target.value)}
+                            className="w-full border border-slate-200 p-2 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white"
+                        >
+                            <option value="Like">Contains (Like)</option>
+                            <option value="Equal">Exact Match</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Value</label>
+                        <input 
+                            type="text" 
+                            placeholder="Type to search..."
+                            value={searchValue}
+                            onChange={(e) => setSearchValue(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                            className="w-full border border-slate-200 p-2 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                        />
+                    </div>
+                    <div className="flex gap-2">
+                        <button 
+                            onClick={handleSearch}
+                            className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center justify-center gap-2 transition-colors"
+                        >
+                            <Search size={16}/> Search
                         </button>
-                        <button onClick={handleAddNew} className="p-2 text-slate-400 hover:bg-slate-100 rounded-lg"><X size={20} /></button>
+                        <button 
+                            onClick={handleShowAll}
+                            className="flex-1 border border-slate-200 py-2 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors"
+                        >
+                            Show All
+                        </button>
                     </div>
-                </header>
+                </div>
+            </div>
 
-                <div className="flex-1 overflow-y-auto p-8 bg-slate-50/50">
-                    <div className="max-w-5xl mx-auto space-y-6">
-                        <div className="bg-white rounded-2xl shadow-sm border p-6">
-                            <div className="flex items-center gap-2 mb-6 text-slate-400 font-bold text-xs uppercase tracking-widest"><User size={18} /> General Information</div>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* 3. DATA TABLE */}
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                        <thead>
+                            <tr className="bg-blue-600 text-white">
+                                <th onClick={() => requestSort('account_code')} className="p-4 text-sm font-semibold cursor-pointer hover:bg-blue-700 transition-colors">Code</th>
+                                <th onClick={() => requestSort('account_name')} className="p-4 text-sm font-semibold cursor-pointer hover:bg-blue-700 transition-colors">Account Name</th>
+                                <th onClick={() => requestSort('account_group')} className="p-4 text-sm font-semibold cursor-pointer hover:bg-blue-700 transition-colors">Group</th>
+                                <th onClick={() => requestSort('place')} className="p-4 text-sm font-semibold cursor-pointer hover:bg-blue-700 transition-colors">Place</th>
+                                <th className="p-4 text-sm font-semibold">Opening Bal</th>
+                                <th className="p-4 text-sm font-semibold text-center w-20">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {loading ? (
+                                <tr><td colSpan="6" className="p-8 text-center text-slate-400">Loading records...</td></tr>
+                            ) : currentItems.length > 0 ? (
+                                currentItems.map((item) => (
+                                    <tr key={item.id} className="hover:bg-blue-50/50 cursor-pointer transition-colors group">
+                                        <td onClick={() => handleEdit(item)} className="p-4 text-sm font-medium text-slate-700">{item.account_code}</td>
+                                        <td onClick={() => handleEdit(item)} className="p-4 text-sm text-slate-600">{item.account_name}</td>
+                                        <td onClick={() => handleEdit(item)} className="p-4 text-sm text-slate-600">{item.account_group}</td>
+                                        <td onClick={() => handleEdit(item)} className="p-4 text-sm text-slate-600">{item.place}</td>
+                                        <td onClick={() => handleEdit(item)} className="p-4 text-sm">
+                                            <span className="text-red-600 font-medium">Dr: {item.opening_debit}</span> / 
+                                            <span className="text-green-600 font-medium ml-1">Cr: {item.opening_credit}</span>
+                                        </td>
+                                        <td className="p-4 text-center">
+                                            <button onClick={() => handleEdit(item)} className="p-2 text-slate-400 hover:text-blue-600 transition-colors">
+                                                <Edit size={16}/>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))
+                            ) : (
+                                <tr><td colSpan="6" className="p-8 text-center text-slate-400">No records found matching your search.</td></tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+
+                {/* 4. PAGINATION */}
+                <div className="p-4 border-t border-slate-100 flex items-center justify-between bg-slate-50/50">
+                    <span className="text-xs text-slate-500 font-medium">
+                        Showing {sortedData.length > 0 ? indexOfLastItem - itemsPerPage + 1 : 0} to {Math.min(indexOfLastItem, sortedData.length)} of {sortedData.length} records
+                    </span>
+                    <div className="flex gap-2">
+                        <button 
+                            disabled={currentPage === 1}
+                            onClick={() => setCurrentPage(prev => prev - 1)}
+                            className="p-2 rounded border bg-white disabled:opacity-50 hover:bg-slate-50 transition-all shadow-sm"
+                        >
+                            <ChevronLeft size={16} />
+                        </button>
+                        <button 
+                            disabled={currentPage >= totalPages}
+                            onClick={() => setCurrentPage(prev => prev + 1)}
+                            className="p-2 rounded border bg-white disabled:opacity-50 hover:bg-slate-50 transition-all shadow-sm"
+                        >
+                            <ChevronRight size={16} />
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            {/* 5. MODAL POPUP */}
+            {isModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+                        <div className="bg-blue-600 p-4 flex justify-between items-center text-white">
+                            <h2 className="font-bold text-lg">{formData.id ? 'Modify Account' : 'Add New Account'}</h2>
+                            <button onClick={() => setIsModalOpen(false)} className="hover:bg-blue-500 p-1 rounded-full transition-colors"><X size={20}/></button>
+                        </div>
+                        
+                        <form onSubmit={handleSave} className="p-6">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div className="space-y-1">
-                                    <label className="text-xs font-semibold text-slate-500">Account Code</label>
-                                    <input name="account_code" value={formData.account_code} readOnly className="w-full border p-2.5 rounded-xl bg-slate-50 font-mono text-blue-600" />
+                                    <label className="text-xs font-bold text-slate-500 uppercase">Account Name *</label>
+                                    <input 
+                                        required
+                                        value={formData.account_name} 
+                                        onChange={(e) => setFormData({...formData, account_name: e.target.value})}
+                                        className="w-full border border-slate-200 p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" 
+                                    />
                                 </div>
                                 <div className="space-y-1">
-                                    <label className="text-xs font-semibold text-slate-500">Account Group</label>
-                                    <select name="account_group" value={formData.account_group} onChange={handleChange} className="w-full border p-2.5 rounded-xl outline-none focus:ring-2 focus:ring-blue-500">
-                                        <option value="Sundry Debtors">Sundry Debtors (Customers)</option>
-                                        <option value="Sundry Creditors">Sundry Creditors (Suppliers)</option>
-                                        <option value="Depot">Depot (Branch/Warehouse)</option>
+                                    <label className="text-xs font-bold text-slate-500 uppercase">Account Group</label>
+                                    <select 
+                                        value={formData.account_group}
+                                        onChange={(e) => setFormData({...formData, account_group: e.target.value})}
+                                        className="w-full border border-slate-200 p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white"
+                                    >
+                                        <option value="Sundry Debtors">Sundry Debtors</option>
+                                        <option value="Sundry Creditors">Sundry Creditors</option>
                                         <option value="Bank Accounts">Bank Accounts</option>
+                                        <option value="Cash-in-hand">Cash-in-hand</option>
                                     </select>
                                 </div>
+                                <div className="space-y-1 md:col-span-2">
+                                    <label className="text-xs font-bold text-slate-500 uppercase">Address</label>
+                                    <textarea 
+                                        rows="2"
+                                        value={formData.address}
+                                        onChange={(e) => setFormData({...formData, address: e.target.value})}
+                                        className="w-full border border-slate-200 p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" 
+                                    />
+                                </div>
                                 <div className="space-y-1">
-                                    <label className="text-xs font-semibold text-slate-500">Account Name *</label>
-                                    <input name="account_name" value={formData.account_name} onChange={handleChange} className="w-full border p-2.5 rounded-xl focus:ring-2 focus:ring-blue-500" />
+                                    <label className="text-xs font-bold text-slate-500 uppercase">Opening Debit</label>
+                                    <input 
+                                        type="number"
+                                        value={formData.opening_debit}
+                                        onChange={(e) => setFormData({...formData, opening_debit: e.target.value})}
+                                        className="w-full border border-slate-200 p-2.5 rounded-lg text-red-600 font-semibold focus:ring-2 focus:ring-red-500 outline-none" 
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-xs font-bold text-slate-500 uppercase">Opening Credit</label>
+                                    <input 
+                                        type="number"
+                                        value={formData.opening_credit}
+                                        onChange={(e) => setFormData({...formData, opening_credit: e.target.value})}
+                                        className="w-full border border-slate-200 p-2.5 rounded-lg text-green-600 font-semibold focus:ring-2 focus:ring-green-500 outline-none" 
+                                    />
                                 </div>
                             </div>
-                        </div>
 
-                        <div className="grid grid-cols-2 gap-6">
-                            <div className="bg-white rounded-2xl border p-6 shadow-sm">
-                                <div className="flex items-center gap-2 mb-6 text-slate-400 font-bold text-xs uppercase tracking-widest"><MapPin size={18} /> Address Details</div>
-                                <div className="space-y-4">
-                                    <textarea name="address" value={formData.address} onChange={handleChange} placeholder="Billing Address" rows="2" className="w-full border p-2.5 rounded-xl" />
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <input name="place" value={formData.place} onChange={handleChange} placeholder="Place" className="w-full border p-2.5 rounded-xl" />
-                                        <input name="pincode" value={formData.pincode} onChange={handleChange} placeholder="Pincode" className="w-full border p-2.5 rounded-xl" />
-                                    </div>
+                            <div className="mt-8 flex justify-between items-center border-t pt-6">
+                                {formData.id && (
+                                    <button 
+                                        type="button"
+                                        onClick={() => handleDelete(formData.id)}
+                                        className="flex items-center gap-2 text-red-500 hover:bg-red-50 px-4 py-2 rounded-lg transition-colors"
+                                    >
+                                        <Trash2 size={18}/> Delete
+                                    </button>
+                                )}
+                                <div className="flex gap-3 ml-auto">
+                                    <button 
+                                        type="button"
+                                        onClick={() => setIsModalOpen(false)}
+                                        className="px-6 py-2 rounded-lg text-slate-600 hover:bg-slate-100 font-medium transition-colors"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button 
+                                        type="submit"
+                                        disabled={loading}
+                                        className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-2 rounded-lg font-bold shadow-lg disabled:opacity-50 transition-all active:scale-95"
+                                    >
+                                        {loading ? 'Saving...' : 'Save Changes'}
+                                    </button>
                                 </div>
                             </div>
-                            <div className="bg-white rounded-2xl border p-6 shadow-sm">
-                                <div className="flex items-center gap-2 mb-6 text-slate-400 font-bold text-xs uppercase tracking-widest"><Hash size={18} /> Tax & Financials</div>
-                                <div className="space-y-4">
-                                    <input name="gst_no" value={formData.gst_no} onChange={handleChange} placeholder="GST Number (22AAAAA...)" className="w-full border p-2.5 rounded-xl uppercase font-bold text-blue-700" />
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <input type="number" name="opening_debit" value={formData.opening_debit} onChange={handleChange} placeholder="Op. Debit" className="w-full border p-2.5 rounded-xl text-red-600" />
-                                        <input type="number" name="opening_credit" value={formData.opening_credit} onChange={handleChange} placeholder="Op. Credit" className="w-full border p-2.5 rounded-xl text-green-600" />
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
+                        </form>
                     </div>
                 </div>
-            </div>
+            )}
         </div>
     );
 };

@@ -1,13 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { mastersAPI } from '../service/api';
+import React, { useState, useEffect, useMemo } from 'react';
+import { mastersAPI } from '../service/api'; // Path to your api file
 import { 
-    Save, Plus, Search, BookOpen, 
-    Hash, Tag, Box, Trash2, 
-    ChevronRight, Filter, Info
+    Plus, Search, Edit, Trash2, X, ChevronLeft, 
+    ChevronRight, BookOpen, Hash, Save, CheckSquare, Square, RefreshCw 
 } from 'lucide-react';
 
 const TariffMaster = () => {
+    // --- Initial State ---
     const emptyState = { 
+        id: null,
         tariff_code: '', 
         tariff_name: '', 
         tariff_no: '', 
@@ -17,11 +18,25 @@ const TariffMaster = () => {
         yarn_type: '' 
     };
 
+    // --- Core Data States ---
     const [list, setList] = useState([]);
     const [formData, setFormData] = useState(emptyState);
-    const [search, setSearch] = useState("");
     const [loading, setLoading] = useState(false);
+    const [isModalOpen, setIsModalOpen] = useState(false);
 
+    // --- UI/Selection States ---
+    const [isSelectionMode, setIsSelectionMode] = useState(false);
+    const [selectedIds, setSelectedIds] = useState([]);
+
+    // --- Filter & Pagination States ---
+    const [searchField, setSearchField] = useState('tariff_name');
+    const [searchCondition, setSearchCondition] = useState('Like');
+    const [searchValue, setSearchValue] = useState('');
+    const [currentPage, setCurrentPage] = useState(1);
+    const [itemsPerPage] = useState(10);
+    const [sortConfig, setSortConfig] = useState({ key: 'tariff_name', direction: 'asc' });
+
+    // --- API Integration ---
     useEffect(() => { 
         fetchRecords(); 
     }, []);
@@ -30,33 +45,19 @@ const TariffMaster = () => {
         setLoading(true);
         try {
             const res = await mastersAPI.tariffs.getAll();
-            const data = res.data.data || [];
-            setList(data);
-            // Generate code for new entry if we aren't currently editing an existing one
-            if (!formData.id) generateNextCode(data);
+            // Maps res.data.data based on common Axios response structures
+            const data = res.data?.data || res.data || [];
+            setList(Array.isArray(data) ? data : []);
         } catch (err) {
             console.error("Fetch Error:", err);
+            setList([]);
         } finally {
             setLoading(false);
         }
     };
 
-    // Logic to calculate the next numeric ID
-    const generateNextCode = (currentList) => {
-        const nextId = currentList.length > 0 ? Math.max(...currentList.map(i => i.id)) + 1 : 1;
-        setFormData(prev => ({ ...prev, tariff_code: `${String(nextId)}` }));
-    };
-
-    const handleChange = (e) => {
-        const { name, value } = e.target;
-        setFormData(prev => ({ ...prev, [name]: value }));
-    };
-
-    const handleSave = async () => {
-        if (!formData.tariff_name || !formData.tariff_no) {
-            return alert("Tariff Name and HSN No are required.");
-        }
-        
+    const handleSave = async (e) => {
+        e.preventDefault();
         setLoading(true);
         try {
             if (formData.id) {
@@ -64,252 +65,246 @@ const TariffMaster = () => {
             } else {
                 await mastersAPI.tariffs.create(formData);
             }
-            alert("Tariff record saved successfully");
-            fetchRecords(); 
-            handleAddNew();
+            setIsModalOpen(false);
+            fetchRecords();
         } catch (err) {
-            alert("Error saving tariff record");
+            alert("Error saving record. Check console for details.");
         } finally {
             setLoading(false);
         }
     };
 
-    const handleDelete = async () => {
-        if (!formData.id) return;
-        if (window.confirm("Are you sure you want to delete this tariff?")) {
+    const handleBulkDelete = async () => {
+        if (selectedIds.length === 0) return;
+        if (window.confirm(`Are you sure you want to delete ${selectedIds.length} records?`)) {
+            setLoading(true);
             try {
-                await mastersAPI.tariffs.delete(formData.id);
+                await Promise.all(selectedIds.map(id => mastersAPI.tariffs.delete(id)));
+                setSelectedIds([]);
+                setIsSelectionMode(false);
                 fetchRecords();
-                handleAddNew();
             } catch (err) {
-                alert("Error deleting record");
+                alert("Bulk delete failed.");
+            } finally {
+                setLoading(false);
             }
         }
     };
 
+    // --- UI Logic Helpers ---
     const handleAddNew = () => {
-        setFormData(emptyState);
-        generateNextCode(list); // Generate code for the fresh form
+        const nextId = list.length > 0 ? Math.max(...list.map(i => i.id || 0)) + 1 : 1;
+        setFormData({ ...emptyState, tariff_code: String(nextId) });
+        setIsModalOpen(true);
     };
 
-    const filteredList = list.filter(i => 
-        i.tariff_name.toLowerCase().includes(search.toLowerCase()) ||
-        i.tariff_no.toLowerCase().includes(search.toLowerCase())
-    );
+    const handleEdit = (item) => {
+        if (isSelectionMode) {
+            setSelectedIds(prev => prev.includes(item.id) ? prev.filter(i => i !== item.id) : [...prev, item.id]);
+            return;
+        }
+        setFormData(item);
+        setIsModalOpen(true);
+    };
+
+    // --- Search & Sort Logic ---
+    const processedData = useMemo(() => {
+        let result = [...list];
+        if (searchValue) {
+            result = result.filter(item => {
+                const val = String(item[searchField] || '').toLowerCase();
+                const search = searchValue.toLowerCase();
+                return searchCondition === 'Like' ? val.includes(search) : val === search;
+            });
+        }
+        if (sortConfig.key) {
+            result.sort((a, b) => {
+                const aVal = String(a[sortConfig.key] || '');
+                const bVal = String(b[sortConfig.key] || '');
+                return sortConfig.direction === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+            });
+        }
+        return result;
+    }, [list, searchValue, searchField, searchCondition, sortConfig]);
+
+    const currentItems = processedData.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+    const totalPages = Math.ceil(processedData.length / itemsPerPage) || 1;
 
     return (
-        <div className="flex h-screen bg-slate-50 font-sans text-slate-900">
+        <div className="min-h-screen bg-[#f8fafc] p-6 font-sans">
             
-            {/* SIDEBAR: TARIFF EXPLORER */}
-            <div className="w-96 flex flex-col bg-white border-r border-slate-200 shadow-xl z-20">
-                <div className="p-6 bg-slate-900 text-white">
-                    <div className="flex justify-between items-center mb-6">
-                        <div className="flex items-center gap-2">
-                            <div className="p-2 bg-blue-600 rounded-lg">
-                                <BookOpen size={20} />
-                            </div>
-                            <h2 className="font-black text-lg tracking-tight uppercase">Tariff Master</h2>
-                        </div>
-                        <button 
-                            onClick={handleAddNew} 
-                            className="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-all"
-                            title="Add New"
-                        >
-                            <Plus size={20}/>
-                        </button>
-                    </div>
-                    
-                    <div className="relative">
-                        <Search className="absolute left-3 top-3 text-slate-400" size={16} />
-                        <input 
-                            className="w-full pl-10 pr-4 py-2.5 bg-slate-800 border-none rounded-xl text-sm placeholder-slate-500 focus:ring-2 focus:ring-blue-500 transition-all outline-none" 
-                            placeholder="Search by HSN or Name..." 
-                            value={search}
-                            onChange={e => setSearch(e.target.value)}
-                        />
-                    </div>
+            {/* 1. TOP HEADER ACTIONS */}
+            <div className="flex justify-between items-center mb-6">
+                <div>
+                    <h1 className="text-2xl font-black text-slate-800 tracking-tight">Tariff Machine Master</h1>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Manage HSN Codes and classifications</p>
                 </div>
+                
+                <div className="flex gap-2">
+                    <button onClick={handleAddNew} className="flex items-center gap-2 bg-[#2563eb] hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-bold shadow-md transition-all active:scale-95">
+                        <Plus size={18} /> New
+                    </button>
+                    
+                    <button 
+                        onClick={() => { setIsSelectionMode(!isSelectionMode); setSelectedIds([]); }}
+                        className={`px-6 py-2 border rounded-lg font-bold transition-all ${isSelectionMode ? 'bg-amber-100 border-amber-300 text-amber-700' : 'bg-white border-slate-200 text-blue-600 hover:bg-slate-50'}`}
+                    >
+                        {isSelectionMode ? 'Cancel Select' : 'Select'}
+                    </button>
 
-                <div className="flex-1 overflow-y-auto">
-                    {loading && list.length === 0 ? (
-                        <div className="p-10 text-center text-slate-400 text-sm italic">Loading records...</div>
-                    ) : filteredList.length > 0 ? (
-                        filteredList.map(item => (
-                            <div 
-                                key={item.id} 
-                                onClick={() => setFormData(item)} 
-                                className={`group p-4 border-b border-slate-50 cursor-pointer transition-all hover:bg-slate-50 ${
-                                    formData.id === item.id ? 'bg-blue-50/50 border-l-4 border-blue-600' : ''
-                                }`}
-                            >
-                                <div className="flex justify-between items-start">
-                                    <div className="space-y-1">
-                                        <p className={`font-bold text-sm uppercase ${formData.id === item.id ? 'text-blue-700' : 'text-slate-700'}`}>
-                                            {item.tariff_name}
-                                        </p>
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-[10px] font-black px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded uppercase tracking-tighter">
-                                                HSN: {item.tariff_no}
-                                            </span>
-                                            <span className="text-[10px] text-slate-400 italic">{item.product_type}</span>
-                                        </div>
-                                    </div>
-                                    <ChevronRight size={16} className={`text-slate-300 transition-transform ${formData.id === item.id ? 'text-blue-500 translate-x-1' : ''}`} />
-                                </div>
-                            </div>
-                        ))
-                    ) : (
-                        <div className="p-10 text-center text-slate-400 text-sm">No tariffs found.</div>
-                    )}
+                    <button 
+                        onClick={handleBulkDelete}
+                        disabled={selectedIds.length === 0}
+                        className={`px-6 py-2 border rounded-lg font-bold flex items-center gap-2 transition-all ${selectedIds.length > 0 ? 'bg-red-50 border-red-200 text-red-600 hover:bg-red-100' : 'bg-white border-slate-100 text-slate-300 cursor-not-allowed'}`}
+                    >
+                        <Trash2 size={18} /> Delete {selectedIds.length > 0 && `(${selectedIds.length})`}
+                    </button>
+                    <button onClick={fetchRecords} className="p-2 border rounded-lg bg-white text-slate-400 hover:text-blue-600"><RefreshCw size={18} className={loading ? 'animate-spin' : ''}/></button>
                 </div>
             </div>
 
-            {/* MAIN CONTENT: EDITOR */}
-            <div className="flex-1 flex flex-col bg-slate-50 overflow-hidden">
-                {/* TOOLBAR */}
-                <header className="h-20 bg-white border-b border-slate-200 px-10 flex items-center justify-between">
+            {/* 2. SEARCH BAR (SCREENSHOT STYLE) */}
+            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm mb-6">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
                     <div>
-                        <h1 className="text-sm font-black text-slate-400 uppercase tracking-[0.2em]">Tariff Configuration</h1>
-                        <p className="text-xl font-bold text-slate-800 tracking-tight">
-                            {formData.id ? `Editing: ${formData.tariff_name}` : 'Setup New Tariff Entry'}
-                        </p>
+                        <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block ml-1">Search Field</label>
+                        <select value={searchField} onChange={(e) => setSearchField(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="tariff_name">Tariff Name</option>
+                            <option value="tariff_no">HSN No</option>
+                            <option value="tariff_code">M/c No</option>
+                        </select>
                     </div>
-                    
-                    <div className="flex items-center gap-4">
-                        {formData.id && (
-                            <button 
-                                onClick={handleDelete}
-                                className="p-2.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all"
-                            >
-                                <Trash2 size={22} />
-                            </button>
-                        )}
-                        <button 
-                            onClick={handleSave} 
-                            disabled={loading}
-                            className="flex items-center gap-2 bg-blue-600 text-white px-8 py-3 rounded-xl font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all active:scale-95 disabled:opacity-50"
-                        >
-                            <Save size={18} />
-                            {formData.id ? 'UPDATE CHANGES' : 'SAVE TARIFF'}
-                        </button>
+                    <div>
+                        <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block ml-1">Condition</label>
+                        <select value={searchCondition} onChange={(e) => setSearchCondition(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="Like">Like</option>
+                            <option value="Equal">Equal</option>
+                        </select>
                     </div>
-                </header>
-
-                <div className="flex-1 overflow-y-auto p-10">
-                    <div className="max-w-4xl mx-auto space-y-8">
-                        
-                        {/* IDENTIFICATION SECTION */}
-                        <section className="bg-white rounded-3xl shadow-sm border border-slate-200 p-8">
-                            <div className="flex items-center gap-2 mb-8">
-                                <Tag size={18} className="text-blue-500" />
-                                <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Primary Identification</h3>
-                            </div>
-                            
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-8">
-                                <div className="md:col-span-2 space-y-2">
-                                    <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Tariff Head Name</label>
-                                    <input 
-                                        name="tariff_name"
-                                        className="w-full border-b-2 border-slate-100 p-2 focus:border-blue-500 outline-none text-lg font-bold transition-colors placeholder:font-normal placeholder:text-slate-300" 
-                                        placeholder="e.g. Cotton Yarn Dyed"
-                                        value={formData.tariff_name} 
-                                        onChange={handleChange}
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Tariff / HSN No</label>
-                                    <div className="relative">
-                                        <Hash className="absolute right-2 top-2 text-slate-300" size={18} />
-                                        <input 
-                                            name="tariff_no"
-                                            className="w-full border-b-2 border-slate-100 p-2 focus:border-blue-500 outline-none font-mono text-blue-600 font-bold tracking-widest transition-colors" 
-                                            placeholder="5205"
-                                            value={formData.tariff_no} 
-                                            onChange={handleChange}
-                                        />
-                                    </div>
-                                </div>
-                                <div className="space-y-2">
-                                    <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Internal Code</label>
-                                    <input 
-                                        name="tariff_code"
-                                        className="w-full border-b-2 border-slate-100 p-2 focus:border-blue-500 outline-none transition-colors font-mono text-blue-600 bg-slate-50" 
-                                        placeholder="T-001"
-                                        value={formData.tariff_code} 
-                                        readOnly // Set to readOnly as it's auto-generated
-                                    />
-                                </div>
-                            </div>
-                        </section>
-
-                        {/* CLASSIFICATION SECTION ... (Rest of the UI remains the same) */}
-                        <section className="bg-white rounded-3xl shadow-sm border border-slate-200 p-8">
-                            <div className="flex items-center gap-2 mb-8">
-                                <Filter size={18} className="text-amber-500" />
-                                <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Product Classification</h3>
-                            </div>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-8">
-                                <div className="space-y-2">
-                                    <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Product Type</label>
-                                    <input 
-                                        name="product_type"
-                                        className="w-full border-b-2 border-slate-100 p-2 focus:border-blue-500 outline-none transition-colors" 
-                                        placeholder="Yarn / Fabric / Waste"
-                                        value={formData.product_type} 
-                                        onChange={handleChange}
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Yarn Type</label>
-                                    <input 
-                                        name="yarn_type"
-                                        className="w-full border-b-2 border-slate-100 p-2 focus:border-blue-500 outline-none transition-colors" 
-                                        placeholder="Combed / Carded"
-                                        value={formData.yarn_type} 
-                                        onChange={handleChange}
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Commodity</label>
-                                    <input 
-                                        name="commodity"
-                                        className="w-full border-b-2 border-slate-100 p-2 focus:border-blue-500 outline-none transition-colors" 
-                                        value={formData.commodity} 
-                                        onChange={handleChange}
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Fibre</label>
-                                    <input 
-                                        name="fibre"
-                                        className="w-full border-b-2 border-slate-100 p-2 focus:border-blue-500 outline-none transition-colors" 
-                                        value={formData.fibre} 
-                                        onChange={handleChange}
-                                    />
-                                </div>
-                            </div>
-                        </section>
-
-                        <div className="flex items-start gap-4 p-6 bg-blue-50 border border-blue-100 rounded-2xl">
-                            <Info className="text-blue-500 shrink-0" size={20} />
-                            <div>
-                                <h4 className="text-xs font-black text-blue-900 uppercase mb-1">Taxation Info</h4>
-                                <p className="text-xs text-blue-700 leading-relaxed">
-                                    Tariff Heads define how products are categorized for GST and Export reports. 
-                                    Ensure the <strong>HSN No</strong> matches the latest GST Council notifications to prevent invoicing errors.
-                                </p>
-                            </div>
-                        </div>
-
+                    <div>
+                        <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block ml-1">Value</label>
+                        <input type="text" placeholder="Enter search value..." value={searchValue} onChange={(e) => setSearchValue(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+                    </div>
+                    <div className="flex gap-2">
+                        <button className="flex-1 bg-[#2563eb] text-white py-2.5 rounded-lg text-sm font-bold hover:bg-blue-700 transition-all">Search</button>
+                        <button onClick={() => {setSearchValue(''); fetchRecords();}} className="flex-1 border border-slate-200 py-2.5 rounded-lg text-sm font-bold hover:bg-slate-50 transition-all">Show All</button>
                     </div>
                 </div>
             </div>
+
+            {/* 3. BLUE HEADER DATA TABLE */}
+            <div className="bg-white rounded-xl border border-slate-200 shadow-md overflow-hidden">
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                        <thead className="bg-[#2563eb] text-white">
+                            <tr>
+                                {isSelectionMode && <th className="p-4 w-12 text-center"><Square size={20}/></th>}
+                                <th onClick={() => setSortConfig({key:'tariff_code', direction: sortConfig.direction === 'asc' ? 'desc' : 'asc'})} className="p-4 text-xs font-black uppercase tracking-widest cursor-pointer hover:bg-blue-700">M/c No.</th>
+                                <th onClick={() => setSortConfig({key:'tariff_name', direction: sortConfig.direction === 'asc' ? 'desc' : 'asc'})} className="p-4 text-xs font-black uppercase tracking-widest cursor-pointer hover:bg-blue-700">Description</th>
+                                <th className="p-4 text-xs font-black uppercase tracking-widest">HSN No.</th>
+                                <th className="p-4 text-xs font-black uppercase tracking-widest">Product Type</th>
+                                <th className="p-4 text-xs font-black uppercase tracking-widest text-center w-20">ActEffi</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {currentItems.length > 0 ? currentItems.map((item) => (
+                                <tr key={item.id} onClick={() => handleEdit(item)} className={`transition-colors cursor-pointer ${selectedIds.includes(item.id) ? 'bg-blue-50' : 'hover:bg-slate-50'}`}>
+                                    {isSelectionMode && (
+                                        <td className="p-4 text-center">
+                                            {selectedIds.includes(item.id) ? <CheckSquare size={20} className="text-blue-600 mx-auto"/> : <Square size={20} className="text-slate-200 mx-auto"/>}
+                                        </td>
+                                    )}
+                                    <td className="p-4 text-sm font-bold text-slate-400 font-mono">{item.tariff_code}</td>
+                                    <td className="p-4 text-sm font-bold text-slate-700 uppercase">{item.tariff_name}</td>
+                                    <td className="p-4 text-sm text-slate-600 font-bold">{item.tariff_no}</td>
+                                    <td className="p-4 text-sm text-slate-500 font-semibold">{item.product_type || 'General'}</td>
+                                    <td className="p-4 text-sm font-bold text-slate-400 text-center">80</td>
+                                </tr>
+                            )) : (
+                                <tr>
+                                    <td colSpan={isSelectionMode ? 6 : 5} className="p-24 text-center">
+                                        <div className="flex flex-col items-center opacity-10">
+                                            <RefreshCw size={64} className="mb-2" />
+                                            <p className="text-lg font-black uppercase tracking-widest">No Records Found</p>
+                                        </div>
+                                    </td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+
+                {/* 4. PAGINATION */}
+                <div className="p-4 bg-[#f8fafc] border-t flex items-center justify-between">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                        Showing {currentItems.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0} to {Math.min(currentPage * itemsPerPage, processedData.length)} of {processedData.length} Records
+                    </p>
+                    <div className="flex gap-2">
+                        <button disabled={currentPage === 1} onClick={() => setCurrentPage(prev => prev - 1)} className="p-2 border rounded-lg bg-white hover:bg-slate-50 disabled:opacity-30 transition-all shadow-sm">
+                            <ChevronLeft size={18}/>
+                        </button>
+                        <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(prev => prev + 1)} className="p-2 border rounded-lg bg-white hover:bg-slate-50 disabled:opacity-30 transition-all shadow-sm">
+                            <ChevronRight size={18}/>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            {/* 5. MODAL FORM (POPUP) */}
+            {isModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden animate-in fade-in zoom-in duration-200">
+                        <div className="bg-[#2563eb] p-5 flex justify-between items-center text-white">
+                            <div>
+                                <h2 className="font-black uppercase tracking-tight text-lg">{formData.id ? 'Modify Record' : 'New Entry'}</h2>
+                                <p className="text-[10px] font-bold text-blue-200 uppercase tracking-widest mt-1">Tariff Head Configuration</p>
+                            </div>
+                            <button onClick={() => setIsModalOpen(false)} className="hover:bg-blue-500 p-1 rounded-full"><X size={24}/></button>
+                        </div>
+                        
+                        <form onSubmit={handleSave} className="p-8 space-y-6">
+                            <div className="grid grid-cols-2 gap-6">
+                                <div className="space-y-1">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">M/c Code *</label>
+                                    <input required className="w-full border-b-2 border-slate-100 p-2 font-mono font-bold text-blue-600 outline-none focus:border-blue-500 transition-colors" value={formData.tariff_code} onChange={e => setFormData({...formData, tariff_code: e.target.value})} />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">HSN No *</label>
+                                    <input required className="w-full border-b-2 border-slate-100 p-2 font-bold outline-none focus:border-blue-500" value={formData.tariff_no} onChange={e => setFormData({...formData, tariff_no: e.target.value})} placeholder="5205" />
+                                </div>
+                            </div>
+
+                            <div className="space-y-1">
+                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Tariff Description *</label>
+                                <input required className="w-full border-b-2 border-slate-100 p-2 text-lg font-bold text-slate-700 outline-none focus:border-blue-500 uppercase" value={formData.tariff_name} onChange={e => setFormData({...formData, tariff_name: e.target.value})} placeholder="Cotton Yarn dyed" />
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-6">
+                                <div className="space-y-1">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Product Type</label>
+                                    <input className="w-full border-b-2 border-slate-100 p-2 text-sm font-semibold outline-none focus:border-blue-500" value={formData.product_type} onChange={e => setFormData({...formData, product_type: e.target.value})} placeholder="Yarn" />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Commodity</label>
+                                    <input className="w-full border-b-2 border-slate-100 p-2 text-sm font-semibold outline-none focus:border-blue-500" value={formData.commodity} onChange={e => setFormData({...formData, commodity: e.target.value})} />
+                                </div>
+                            </div>
+
+                            <div className="pt-8 border-t flex justify-end gap-4">
+                                <button type="button" onClick={() => setIsModalOpen(false)} className="px-6 py-2 font-bold text-slate-400 hover:text-slate-600 text-xs tracking-widest">CANCEL</button>
+                                <button type="submit" disabled={loading} className="bg-[#2563eb] hover:bg-blue-700 text-white px-10 py-3 rounded-xl font-black shadow-lg shadow-blue-100 flex items-center gap-2 active:scale-95 transition-all text-xs tracking-widest">
+                                    <Save size={16}/> {loading ? 'SAVING...' : 'SAVE RECORD'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
             <style jsx>{`
                 ::-webkit-scrollbar { width: 6px; }
                 ::-webkit-scrollbar-track { background: transparent; }
                 ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-                ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
             `}</style>
         </div>
     );

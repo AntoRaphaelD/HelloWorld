@@ -1,8 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { mastersAPI } from '../service/api';
-import { Save, Plus, Trash2, Search, Package, Hash, Layers, Scale, ChevronRight, Info, ShieldCheck } from 'lucide-react';
+import { 
+    Plus, Search, Edit, Trash2, X, ChevronLeft, 
+    ChevronRight, Package, Hash, Scale, Save 
+} from 'lucide-react';
 
 const ProductMaster = () => {
+    // --- Initial State ---
     const emptyState = { 
         product_code: '', product_name: '', short_description: '', 
         packing_type_id: '', tariff_id: '', wt_per_cone: 0, 
@@ -10,11 +14,21 @@ const ProductMaster = () => {
         charity_rs: 0, mill_stock: 0
     };
 
+    // --- State Management ---
     const [list, setList] = useState([]);
     const [tariffs, setTariffs] = useState([]);
     const [packingTypes, setPackingTypes] = useState([]);
+    const [isModalOpen, setIsModalOpen] = useState(false);
     const [formData, setFormData] = useState(emptyState);
-    const [search, setSearch] = useState("");
+    const [loading, setLoading] = useState(false);
+
+    // Search & Pagination State
+    const [searchField, setSearchField] = useState('product_name');
+    const [searchCondition, setSearchCondition] = useState('Like');
+    const [searchValue, setSearchValue] = useState('');
+    const [currentPage, setCurrentPage] = useState(1);
+    const [itemsPerPage] = useState(10);
+    const [sortConfig, setSortConfig] = useState({ key: 'product_name', direction: 'asc' });
 
     useEffect(() => { 
         fetchRecords();
@@ -23,99 +37,248 @@ const ProductMaster = () => {
     }, []);
 
     const fetchRecords = async () => {
-        const res = await mastersAPI.products.getAll();
-        const data = res.data.data || [];
-        setList(data);
-        if (!formData.id) generateNextCode(data);
+        setLoading(true);
+        try {
+            const res = await mastersAPI.products.getAll();
+            setList(res.data.data || []);
+        } catch (err) { console.error(err); }
+        finally { setLoading(false); }
     };
 
     const generateNextCode = (currentList) => {
         const nextId = currentList.length > 0 ? Math.max(...currentList.map(i => i.id)) + 1 : 1;
-        setFormData(prev => ({ ...prev, product_code: `${String(nextId)}` }));
+        return String(nextId);
     };
 
+    // --- Actions ---
     const handleAddNew = () => {
-        setFormData(emptyState);
-        generateNextCode(list);
+        const nextCode = generateNextCode(list);
+        setFormData({ ...emptyState, product_code: nextCode });
+        setIsModalOpen(true);
     };
 
-    const handleSave = async () => {
+    const handleEdit = (item) => {
+        setFormData(item);
+        setIsModalOpen(true);
+    };
+
+    const handleSave = async (e) => {
+        e.preventDefault();
         if (!formData.product_name) return alert("Product Name Required");
+        setLoading(true);
         try {
-            formData.id ? await mastersAPI.products.update(formData.id, formData) : await mastersAPI.products.create(formData);
+            formData.id 
+                ? await mastersAPI.products.update(formData.id, formData) 
+                : await mastersAPI.products.create(formData);
             fetchRecords();
-            handleAddNew();
+            setIsModalOpen(false);
         } catch (err) { alert("Error saving product"); }
+        finally { setLoading(false); }
+    };
+
+    const handleDelete = async (id) => {
+        if (window.confirm("Are you sure you want to delete this product?")) {
+            try {
+                await mastersAPI.products.delete(id);
+                fetchRecords();
+                setIsModalOpen(false);
+            } catch (err) { alert("Delete failed"); }
+        }
+    };
+
+    // --- Logic: Search, Sort, Pagination ---
+    const filteredAndSortedData = useMemo(() => {
+        let result = [...list];
+
+        // Search Logic
+        if (searchValue) {
+            result = result.filter(item => {
+                const val = String(item[searchField] || '').toLowerCase();
+                const search = searchValue.toLowerCase();
+                return searchCondition === 'Like' ? val.includes(search) : val === search;
+            });
+        }
+
+        // Sort Logic
+        if (sortConfig.key) {
+            result.sort((a, b) => {
+                if (a[sortConfig.key] < b[sortConfig.key]) return sortConfig.direction === 'asc' ? -1 : 1;
+                if (a[sortConfig.key] > b[sortConfig.key]) return sortConfig.direction === 'asc' ? 1 : -1;
+                return 0;
+            });
+        }
+        return result;
+    }, [list, searchValue, searchField, searchCondition, sortConfig]);
+
+    const indexOfLastItem = currentPage * itemsPerPage;
+    const currentItems = filteredAndSortedData.slice(indexOfLastItem - itemsPerPage, indexOfLastItem);
+    const totalPages = Math.ceil(filteredAndSortedData.length / itemsPerPage);
+
+    const requestSort = (key) => {
+        let direction = 'asc';
+        if (sortConfig.key === key && sortConfig.direction === 'asc') direction = 'desc';
+        setSortConfig({ key, direction });
     };
 
     return (
-        <div className="flex h-screen bg-slate-50 overflow-hidden font-sans">
-            <div className="w-80 flex flex-col bg-white border-r">
-                <div className="p-4 bg-slate-900 text-white">
-                    <div className="flex justify-between items-center mb-4">
-                        <div className="flex items-center gap-2"><Package size={20} className="text-blue-400" /><h2 className="font-bold">Products</h2></div>
-                        <button onClick={handleAddNew} className="p-1.5 bg-blue-600 rounded-lg"><Plus size={18}/></button>
-                    </div>
-                    <input className="w-full pl-3 pr-4 py-2 bg-slate-800 border-none rounded-lg text-xs" placeholder="Search..." onChange={e => setSearch(e.target.value)} />
+        <div className="min-h-screen bg-slate-50 p-6 font-sans">
+            {/* TOP HEADER */}
+            <div className="flex justify-between items-center mb-6">
+                <div>
+                    <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+                        <Package className="text-blue-600" /> Product Machine Master
+                    </h1>
+                    <p className="text-sm text-slate-500">Manage product information and inventory specifications</p>
                 </div>
-                <div className="flex-1 overflow-y-auto">
-                    {list.filter(i => i.product_name.toLowerCase().includes(search.toLowerCase())).map(item => (
-                        <div key={item.id} onClick={() => setFormData(item)} className={`p-4 border-b cursor-pointer transition-all ${formData.id === item.id ? 'bg-blue-50 border-r-4 border-blue-600' : 'hover:bg-slate-50'}`}>
-                            <p className="font-bold text-xs uppercase text-slate-700">{item.product_name}</p>
-                            <p className="text-[10px] text-emerald-600 font-black">STOCK: {item.mill_stock} KG</p>
-                        </div>
-                    ))}
+                <div className="flex gap-2">
+                    <button onClick={handleAddNew} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg font-semibold shadow-sm transition-all">
+                        <Plus size={18} /> New
+                    </button>
+                    <button className="px-5 py-2 border border-slate-200 bg-white text-blue-600 rounded-lg font-semibold hover:bg-slate-50">Select</button>
+                    <button className="px-5 py-2 border border-red-100 bg-white text-red-400 rounded-lg hover:bg-red-50"><Trash2 size={18}/></button>
                 </div>
             </div>
 
-            <div className="flex-1 flex flex-col overflow-hidden">
-                <header className="h-16 bg-white border-b flex items-center justify-between px-8">
-                    <div><h1 className="text-xl font-black text-slate-800 uppercase tracking-tight">{formData.id ? 'Edit Product' : 'New Product Entry'}</h1></div>
-                    <div className="flex gap-3"><button onClick={handleSave} className="bg-indigo-600 text-white px-8 py-2 rounded-lg font-black text-xs shadow-lg">SAVE PRODUCT</button></div>
-                </header>
-
-                <div className="flex-1 overflow-y-auto p-8 bg-slate-50/50">
-                    <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        <div className="lg:col-span-2 space-y-6">
-                            <div className="bg-white rounded-xl border p-6 shadow-sm">
-                                <div className="flex items-center gap-2 mb-6 border-b pb-2"><Hash size={18} className="text-blue-600"/><h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Product Identity</h3></div>
-                                <div className="grid grid-cols-2 gap-6">
-                                    <div className="space-y-1">
-                                        <label className="text-[10px] font-bold text-slate-500 uppercase">Product Name</label>
-                                        <input className="w-full border p-3 rounded-lg text-sm font-semibold" value={formData.product_name} onChange={e => setFormData({...formData, product_name: e.target.value})} />
-                                    </div>
-                                    <div className="space-y-1">
-                                        <label className="text-[10px] font-bold text-slate-500 uppercase">SKU Code</label>
-                                        <input className="w-full border p-3 rounded-lg text-sm font-mono bg-slate-50" readOnly value={formData.product_code} />
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="bg-white rounded-xl border p-6 shadow-sm">
-                                <div className="flex items-center gap-2 mb-6 border-b pb-2"><Scale size={18} className="text-amber-600"/><h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Specifications</h3></div>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <select className="w-full border p-3 rounded-lg text-sm" value={formData.packing_type_id} onChange={e => setFormData({...formData, packing_type_id: e.target.value})}>
-                                        <option value="">Select Packing Type</option>
-                                        {packingTypes.map(p => <option key={p.id} value={p.id}>{p.packing_type}</option>)}
-                                    </select>
-                                    <select className="w-full border p-3 rounded-lg text-sm" value={formData.tariff_id} onChange={e => setFormData({...formData, tariff_id: e.target.value})}>
-                                        <option value="">Select Tariff (HSN)</option>
-                                        {tariffs.map(t => <option key={t.id} value={t.id}>{t.tariff_name} - {t.tariff_no}</option>)}
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="space-y-6">
-                            <div className="bg-emerald-900 rounded-xl p-8 text-white shadow-2xl relative overflow-hidden flex flex-col justify-center">
-                                <ShieldCheck size={80} className="absolute -right-4 -top-4 opacity-10" />
-                                <p className="text-emerald-400 text-[10px] font-black uppercase tracking-widest">Mill Inventory Status</p>
-                                <h1 className="text-6xl font-black mt-4">{formData.mill_stock || 0} <span className="text-xl">KG</span></h1>
-                                <p className="text-[10px] text-emerald-300 mt-4 italic">Updated via Production & Sales Flow</p>
-                            </div>
-                        </div>
+            {/* SEARCH BAR */}
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-6">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Search Field</label>
+                        <select value={searchField} onChange={(e) => setSearchField(e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-sm outline-none">
+                            <option value="product_name">Product Name</option>
+                            <option value="product_code">Product Code</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Condition</label>
+                        <select value={searchCondition} onChange={(e) => setSearchCondition(e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-sm outline-none">
+                            <option value="Like">Like</option>
+                            <option value="Equal">Equal</option>
+                        </select>
+                    </div>
+                    <div className="md:col-span-1">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Value</label>
+                        <input type="text" placeholder="Enter search value..." value={searchValue} onChange={(e) => setSearchValue(e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-sm outline-none" />
+                    </div>
+                    <div className="flex gap-2">
+                        <button className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm font-bold hover:bg-blue-700 flex items-center justify-center gap-2">
+                            <Search size={16}/> Search
+                        </button>
+                        <button onClick={() => setSearchValue('')} className="flex-1 border border-slate-200 py-2 rounded-lg text-sm font-bold hover:bg-slate-50">Show All</button>
                     </div>
                 </div>
             </div>
+
+            {/* TABLE */}
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                        <thead className="bg-blue-600 text-white">
+                            <tr>
+                                <th onClick={() => requestSort('product_code')} className="p-4 text-sm font-semibold cursor-pointer hover:bg-blue-700">Code</th>
+                                <th onClick={() => requestSort('product_name')} className="p-4 text-sm font-semibold cursor-pointer hover:bg-blue-700">Product Name</th>
+                                <th className="p-4 text-sm font-semibold">Tariff (HSN)</th>
+                                <th className="p-4 text-sm font-semibold">Packing Type</th>
+                                <th onClick={() => requestSort('mill_stock')} className="p-4 text-sm font-semibold cursor-pointer hover:bg-blue-700">Stock (KG)</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {currentItems.map((item) => (
+                                <tr key={item.id} onClick={() => handleEdit(item)} className="hover:bg-blue-50 cursor-pointer transition-colors group">
+                                    <td className="p-4 text-sm font-mono text-slate-500">{item.product_code}</td>
+                                    <td className="p-4 text-sm font-bold text-slate-700 uppercase">{item.product_name}</td>
+                                    <td className="p-4 text-sm text-slate-600">
+                                        {tariffs.find(t => t.id === item.tariff_id)?.tariff_no || 'N/A'}
+                                    </td>
+                                    <td className="p-4 text-sm text-slate-600">
+                                        {packingTypes.find(p => p.id === item.packing_type_id)?.packing_type || 'N/A'}
+                                    </td>
+                                    <td className="p-4 text-sm font-black text-emerald-600">{item.mill_stock}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+
+                {/* PAGINATION */}
+                <div className="p-4 bg-slate-50 border-t flex items-center justify-between">
+                    <span className="text-xs text-slate-500 font-semibold uppercase tracking-wider">
+                        Records: {indexOfLastItem - itemsPerPage + 1} - {Math.min(indexOfLastItem, filteredAndSortedData.length)} of {filteredAndSortedData.length}
+                    </span>
+                    <div className="flex gap-2">
+                        <button disabled={currentPage === 1} onClick={() => setCurrentPage(prev => prev - 1)} className="p-2 border rounded bg-white hover:bg-slate-50 disabled:opacity-30">
+                            <ChevronLeft size={16}/>
+                        </button>
+                        <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(prev => prev + 1)} className="p-2 border rounded bg-white hover:bg-slate-50 disabled:opacity-30">
+                            <ChevronRight size={16}/>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            {/* MODAL POP-UP */}
+            {isModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden animate-in fade-in zoom-in duration-200">
+                        <div className="bg-blue-600 p-4 flex justify-between items-center text-white">
+                            <h2 className="font-black uppercase tracking-tight">{formData.id ? 'Modify Product' : 'Add New Product'}</h2>
+                            <button onClick={() => setIsModalOpen(false)} className="hover:bg-blue-500 p-1 rounded-full"><X size={20}/></button>
+                        </div>
+                        
+                        <form onSubmit={handleSave} className="p-8">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                {/* General Info */}
+                                <div className="md:col-span-2 grid grid-cols-2 gap-6">
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-bold text-slate-400 uppercase">Product Name *</label>
+                                        <input required className="w-full border p-3 rounded-xl font-bold" value={formData.product_name} onChange={e => setFormData({...formData, product_name: e.target.value})} />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-bold text-slate-400 uppercase">Product Code</label>
+                                        <input className="w-full border p-3 rounded-xl bg-slate-50 font-mono" readOnly value={formData.product_code} />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-bold text-slate-400 uppercase">Packing Type</label>
+                                        <select className="w-full border p-3 rounded-xl" value={formData.packing_type_id} onChange={e => setFormData({...formData, packing_type_id: e.target.value})}>
+                                            <option value="">Select Packing</option>
+                                            {packingTypes.map(p => <option key={p.id} value={p.id}>{p.packing_type}</option>)}
+                                        </select>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-bold text-slate-400 uppercase">Tariff (HSN)</label>
+                                        <select className="w-full border p-3 rounded-xl" value={formData.tariff_id} onChange={e => setFormData({...formData, tariff_id: e.target.value})}>
+                                            <option value="">Select Tariff</option>
+                                            {tariffs.map(t => <option key={t.id} value={t.id}>{t.tariff_name} ({t.tariff_no})</option>)}
+                                        </select>
+                                    </div>
+                                </div>
+
+                                {/* Stock Sidebar in Modal */}
+                                <div className="bg-slate-900 rounded-2xl p-6 text-white flex flex-col justify-center items-center text-center">
+                                    <Scale size={40} className="text-blue-400 mb-2" />
+                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Available Stock</p>
+                                    <h3 className="text-5xl font-black mt-1">{formData.mill_stock || 0} <span className="text-sm">KG</span></h3>
+                                    <input type="number" className="mt-4 w-full bg-slate-800 border-none rounded-lg p-2 text-center text-sm" placeholder="Adj. Stock" value={formData.mill_stock} onChange={e => setFormData({...formData, mill_stock: e.target.value})} />
+                                </div>
+                            </div>
+
+                            <div className="mt-10 pt-6 border-t flex justify-between">
+                                {formData.id && (
+                                    <button type="button" onClick={() => handleDelete(formData.id)} className="flex items-center gap-2 text-red-500 font-bold hover:bg-red-50 px-4 py-2 rounded-xl transition-all">
+                                        <Trash2 size={18}/> DELETE RECORD
+                                    </button>
+                                )}
+                                <div className="flex gap-4 ml-auto">
+                                    <button type="button" onClick={() => setIsModalOpen(false)} className="px-6 py-2 font-bold text-slate-500 hover:text-slate-800">CANCEL</button>
+                                    <button type="submit" disabled={loading} className="bg-blue-600 hover:bg-blue-700 text-white px-10 py-3 rounded-xl font-black shadow-xl flex items-center gap-2">
+                                        <Save size={18}/> {loading ? 'SAVING...' : 'SAVE PRODUCT'}
+                                    </button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
