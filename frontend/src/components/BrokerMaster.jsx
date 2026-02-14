@@ -2,336 +2,306 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { mastersAPI } from '../service/api';
 import { 
     Plus, Search, Edit, Trash2, X, ChevronLeft, 
-    ChevronRight, Briefcase, Save, CheckSquare, Square, 
-    Percent, CircleDollarSign, Info, RefreshCw 
+    ChevronRight, Loader2, CheckSquare, Square, 
+    Percent, CircleDollarSign, Info, RefreshCw, Briefcase
 } from 'lucide-react';
 
 const BrokerMaster = () => {
-    // --- Initial State ---
-    const emptyState = { 
-        id: null,
-        broker_code: '', 
-        broker_name: '', 
-        address: '', 
-        commission_pct: 0, 
-        is_comm_per_kg: false 
-    };
-
-    // --- Main States ---
+    // --- State Management ---
     const [list, setList] = useState([]);
-    const [formData, setFormData] = useState(emptyState);
-    const [loading, setLoading] = useState(false);
     const [isModalOpen, setIsModalOpen] = useState(false);
-
-    // --- Selection & Bulk Action States ---
-    const [isSelectionMode, setIsSelectionMode] = useState(false);
+    const [loading, setLoading] = useState(false);
+    const [submitLoading, setSubmitLoading] = useState(false);
+    
+    // Selection State
     const [selectedIds, setSelectedIds] = useState([]);
-
-    // --- Search, Sort & Pagination States ---
+    
+    // Search/Filter State
     const [searchField, setSearchField] = useState('broker_name');
     const [searchCondition, setSearchCondition] = useState('Like');
     const [searchValue, setSearchValue] = useState('');
+    const [activeFilter, setActiveFilter] = useState({ field: 'broker_name', condition: 'Like', value: '' });
+
+    // Pagination & Sorting State
     const [currentPage, setCurrentPage] = useState(1);
     const [itemsPerPage] = useState(10);
     const [sortConfig, setSortConfig] = useState({ key: 'broker_name', direction: 'asc' });
 
-    // --- API Integration ---
-    useEffect(() => { 
-        fetchRecords(); 
-    }, []);
+    // Form Data - Aligned with Sequelize Model
+    const [formData, setFormData] = useState(initialState());
+
+    function initialState() {
+        return {
+            id: null,
+            broker_code: '',
+            broker_name: '',
+            commission_pct: 0,
+            is_comm_per_kg: false 
+        };
+    }
+
+    useEffect(() => { fetchRecords(); }, []);
 
     const fetchRecords = async () => {
         setLoading(true);
         try {
             const res = await mastersAPI.brokers.getAll();
-            const data = res.data?.data || res.data || [];
-            setList(Array.isArray(data) ? data : []);
-        } catch (err) {
-            console.error("Fetch error:", err);
-            setList([]);
-        } finally {
-            setLoading(false);
+            setList(res.data.data || res.data || []);
+        } catch (err) { console.error(err); } 
+        finally { setLoading(false); }
+    };
+
+    // --- Bulk Selection Logic ---
+    const toggleSelectAll = () => {
+        if (selectedIds.length === currentItems.length) setSelectedIds([]);
+        else setSelectedIds(currentItems.map(item => item.id));
+    };
+
+    const toggleSelectOne = (id) => {
+        setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+    };
+
+    const handleBulkDelete = async () => {
+        if (window.confirm(`Delete ${selectedIds.length} records?`)) {
+            setLoading(true);
+            try {
+                await Promise.all(selectedIds.map(id => mastersAPI.brokers.delete(id)));
+                setSelectedIds([]);
+                fetchRecords();
+            } catch (err) { alert("Bulk delete failed."); } 
+            finally { setLoading(false); }
+        }
+    };
+
+    // --- CRUD Actions ---
+    const handleAddNew = () => {
+        setFormData(initialState());
+        setIsModalOpen(true);
+    };
+
+    const handleEdit = (item) => {
+        setFormData({ ...item });
+        setIsModalOpen(true);
+    };
+
+    const handleDeleteOne = async (id) => {
+        if (window.confirm("Are you sure you want to delete this broker?")) {
+            try {
+                await mastersAPI.brokers.delete(id);
+                fetchRecords();
+                setIsModalOpen(false);
+            } catch (err) { alert("Delete failed."); }
         }
     };
 
     const handleSave = async (e) => {
         e.preventDefault();
-        if (!formData.broker_name) return alert("Broker Name is required");
-        setLoading(true);
+        setSubmitLoading(true);
         try {
-            if (formData.id) {
-                await mastersAPI.brokers.update(formData.id, formData);
-            } else {
-                await mastersAPI.brokers.create(formData);
-            }
-            setIsModalOpen(false);
+            formData.id 
+                ? await mastersAPI.brokers.update(formData.id, formData) 
+                : await mastersAPI.brokers.create(formData);
             fetchRecords();
-        } catch (err) {
-            alert("Error saving broker record.");
-        } finally {
-            setLoading(false);
-        }
+            setIsModalOpen(false);
+        } catch (err) { alert("Error saving record"); } 
+        finally { setSubmitLoading(false); }
     };
 
-    const handleBulkDelete = async () => {
-        if (selectedIds.length === 0) return;
-        if (window.confirm(`Are you sure you want to delete ${selectedIds.length} selected brokers?`)) {
-            setLoading(true);
-            try {
-                await Promise.all(selectedIds.map(id => mastersAPI.brokers.delete(id)));
-                setSelectedIds([]);
-                setIsSelectionMode(false);
-                fetchRecords();
-            } catch (err) {
-                alert("Bulk delete failed.");
-            } finally {
-                setLoading(false);
-            }
-        }
-    };
+    // --- Search, Sort & Pagination Logic ---
+    const filteredData = useMemo(() => {
+        return list.filter(item => {
+            if (!activeFilter.value) return true;
+            const val = String(item[activeFilter.field] || '').toLowerCase();
+            const search = activeFilter.value.toLowerCase();
+            return activeFilter.condition === 'Like' ? val.includes(search) : val === search;
+        });
+    }, [list, activeFilter]);
 
-    // --- UI Logic Helpers ---
-    const handleAddNew = () => {
-        const nextId = list.length > 0 ? Math.max(...list.map(i => i.id || 0)) + 1 : 1;
-        setFormData({ ...emptyState, broker_code: String(nextId) });
-        setIsModalOpen(true);
-    };
-
-    const handleRowClick = (item) => {
-        if (isSelectionMode) {
-            setSelectedIds(prev => prev.includes(item.id) ? prev.filter(i => i !== item.id) : [...prev, item.id]);
-            return;
-        }
-        setFormData(item);
-        setIsModalOpen(true);
-    };
-
-    // --- Logic: Search, Sort & Pagination ---
-    const processedData = useMemo(() => {
-        let result = [...list];
-        // 1. Filtering
-        if (searchValue) {
-            result = result.filter(item => {
-                const val = String(item[searchField] || '').toLowerCase();
-                const search = searchValue.toLowerCase();
-                return searchCondition === 'Like' ? val.includes(search) : val === search;
-            });
-        }
-        // 2. Sorting
+    const sortedData = useMemo(() => {
+        let sortableItems = [...filteredData];
         if (sortConfig.key) {
-            result.sort((a, b) => {
-                const aVal = String(a[sortConfig.key] || '');
-                const bVal = String(b[sortConfig.key] || '');
-                return sortConfig.direction === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+            sortableItems.sort((a, b) => {
+                const aVal = String(a[sortConfig.key] || '').toLowerCase();
+                const bVal = String(b[sortConfig.key] || '').toLowerCase();
+                if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
+                if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
+                return 0;
             });
         }
-        return result;
-    }, [list, searchValue, searchField, searchCondition, sortConfig]);
+        return sortableItems;
+    }, [filteredData, sortConfig]);
 
-    const currentItems = processedData.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
-    const totalPages = Math.ceil(processedData.length / itemsPerPage) || 1;
+    const indexOfLastItem = currentPage * itemsPerPage;
+    const currentItems = sortedData.slice(indexOfLastItem - itemsPerPage, indexOfLastItem);
+    const totalPages = Math.ceil(sortedData.length / itemsPerPage);
 
     return (
-        <div className="min-h-screen bg-[#f8fafc] p-6 font-sans select-none">
-            
-            {/* 1. TOP HEADER & PRIMARY ACTIONS */}
-            <div className="flex justify-between items-center mb-6">
+        <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-sans text-slate-900">
+            {/* 1. HEADER */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
                 <div>
-                    <h1 className="text-2xl font-black text-slate-800 tracking-tight flex items-center gap-2">
+                    <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
                         <Briefcase className="text-blue-600" /> Broker Master
                     </h1>
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Commission and Contact management system</p>
+                    <p className="text-sm text-slate-500 font-medium tracking-tight">Manage broker commissions and identification</p>
                 </div>
-                
-                <div className="flex gap-2">
-                    <button onClick={handleAddNew} className="flex items-center gap-2 bg-[#2563eb] hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-bold shadow-md transition-all active:scale-95">
-                        <Plus size={18} /> New
-                    </button>
-                    
-                    <button 
-                        onClick={() => { setIsSelectionMode(!isSelectionMode); setSelectedIds([]); }}
-                        className={`px-6 py-2 border rounded-lg font-bold transition-all ${isSelectionMode ? 'bg-amber-100 border-amber-300 text-amber-700' : 'bg-white border-slate-200 text-blue-600 hover:bg-slate-50'}`}
-                    >
-                        {isSelectionMode ? 'Cancel Select' : 'Select'}
-                    </button>
-
-                    <button 
-                        onClick={handleBulkDelete}
-                        disabled={selectedIds.length === 0}
-                        className={`px-6 py-2 border rounded-lg font-bold flex items-center gap-2 transition-all ${selectedIds.length > 0 ? 'bg-red-50 border-red-200 text-red-600 hover:bg-red-100 shadow-sm' : 'bg-white border-slate-100 text-slate-300 cursor-not-allowed'}`}
-                    >
-                        <Trash2 size={18} /> Delete {selectedIds.length > 0 && `(${selectedIds.length})`}
-                    </button>
-                    <button onClick={fetchRecords} className="p-2 border rounded-lg bg-white text-slate-400 hover:text-blue-600 transition-colors">
-                        <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+                <div className="flex gap-3">
+                    {selectedIds.length > 0 && (
+                        <button onClick={handleBulkDelete} className="flex items-center gap-2 bg-red-50 text-red-600 border border-red-200 px-5 py-2.5 rounded-lg font-bold hover:bg-red-100 transition-all shadow-sm">
+                            <Trash2 size={18} /> Delete Selected ({selectedIds.length})
+                        </button>
+                    )}
+                    <button onClick={handleAddNew} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg font-bold shadow-md active:scale-95 transition-all">
+                        <Plus size={20} /> New Broker
                     </button>
                 </div>
             </div>
 
             {/* 2. SEARCH BAR */}
-            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm mb-6">
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-                    <div>
-                        <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block ml-1">Search Field</label>
-                        <select value={searchField} onChange={(e) => setSearchField(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 transition-all">
-                            <option value="broker_name">Broker Name</option>
-                            <option value="broker_code">Broker Code</option>
-                            <option value="address">Address</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block ml-1">Condition</label>
-                        <select value={searchCondition} onChange={(e) => setSearchCondition(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500">
-                            <option value="Like">Like</option>
-                            <option value="Equal">Equal</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block ml-1">Value</label>
-                        <input type="text" placeholder="Enter search value..." value={searchValue} onChange={(e) => setSearchValue(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" />
-                    </div>
-                    <div className="flex gap-2">
-                        <button className="flex-1 bg-[#2563eb] text-white py-2.5 rounded-lg text-sm font-bold hover:bg-blue-700 transition-all active:scale-95 shadow-lg shadow-blue-100">Search</button>
-                        <button onClick={() => {setSearchValue(''); fetchRecords();}} className="flex-1 border border-slate-200 py-2.5 rounded-lg text-sm font-bold hover:bg-slate-50 transition-all active:scale-95">Show All</button>
-                    </div>
+            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm mb-6 grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Field</label>
+                    <select value={searchField} onChange={(e) => setSearchField(e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-sm bg-slate-50 outline-none">
+                        <option value="broker_name">Broker Name</option>
+                        <option value="broker_code">Broker Code</option>
+                    </select>
+                </div>
+                <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Search Value</label>
+                    <input 
+                        type="text" 
+                        value={searchValue} 
+                        onChange={(e) => setSearchValue(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && setActiveFilter({ field: searchField, condition: searchCondition, value: searchValue })}
+                        placeholder="Type to search..." 
+                        className="w-full border border-slate-200 p-2 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                </div>
+                <div className="flex gap-2 md:col-span-2">
+                    <button onClick={() => setActiveFilter({ field: searchField, condition: searchCondition, value: searchValue })} className="flex-1 bg-slate-800 text-white py-2 rounded-lg text-sm font-bold hover:bg-slate-900 transition-colors">Apply Filter</button>
+                    <button onClick={() => { setSearchValue(''); setActiveFilter({ field: 'broker_name', condition: 'Like', value: '' }); fetchRecords(); }} className="flex-1 border border-slate-200 py-2 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors">Reset</button>
                 </div>
             </div>
 
             {/* 3. BLUE HEADER DATA TABLE */}
-            <div className="bg-white rounded-xl border border-slate-200 shadow-md overflow-hidden">
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                 <div className="overflow-x-auto">
-                    <table className="w-full text-left">
-                        <thead className="bg-[#2563eb] text-white">
-                            <tr>
-                                {isSelectionMode && <th className="p-4 w-12 text-center"><Square size={20} className="mx-auto" /></th>}
-                                <th onClick={() => setSortConfig({key:'broker_code', direction: sortConfig.direction === 'asc' ? 'desc' : 'asc'})} className="p-4 text-xs font-black uppercase tracking-widest cursor-pointer hover:bg-blue-700">Broker Code</th>
-                                <th onClick={() => setSortConfig({key:'broker_name', direction: sortConfig.direction === 'asc' ? 'desc' : 'asc'})} className="p-4 text-xs font-black uppercase tracking-widest cursor-pointer hover:bg-blue-700">Broker Name</th>
-                                <th className="p-4 text-xs font-black uppercase tracking-widest">Commission Rate</th>
-                                <th className="p-4 text-xs font-black uppercase tracking-widest">Calculation Type</th>
-                                <th className="p-4 text-xs font-black uppercase tracking-widest text-center w-20">Action</th>
+                    <table className="w-full text-left border-collapse">
+                        <thead>
+                            <tr className="bg-blue-600 text-white">
+                                <th className="p-4 w-12 text-center">
+                                    <button onClick={toggleSelectAll}>
+                                        {selectedIds.length === currentItems.length && currentItems.length > 0 ? <CheckSquare size={18}/> : <Square size={18}/>}
+                                    </button>
+                                </th>
+                                <th className="p-4 text-xs font-bold uppercase tracking-wider">Code</th>
+                                <th className="p-4 text-xs font-bold uppercase tracking-wider">Broker Name</th>
+                                <th className="p-4 text-xs font-bold uppercase tracking-wider">Rate</th>
+                                <th className="p-4 text-xs font-bold uppercase tracking-wider">Type</th>
+                                <th className="p-4 text-xs font-bold uppercase tracking-wider text-center w-48">Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                            {currentItems.length > 0 ? currentItems.map((item) => (
-                                <tr key={item.id} onClick={() => handleRowClick(item)} className={`transition-colors cursor-pointer ${selectedIds.includes(item.id) ? 'bg-blue-50' : 'hover:bg-slate-50'}`}>
-                                    {isSelectionMode && (
-                                        <td className="p-4 text-center">
-                                            {selectedIds.includes(item.id) ? <CheckSquare size={20} className="text-blue-600 mx-auto"/> : <Square size={20} className="text-slate-200 mx-auto"/>}
-                                        </td>
-                                    )}
-                                    <td className="p-4 text-sm font-bold text-slate-400 font-mono uppercase">{item.broker_code}</td>
-                                    <td className="p-4 text-sm font-bold text-slate-700 uppercase">{item.broker_name}</td>
-                                    <td className="p-4 text-sm font-black text-emerald-600">
-                                        {item.commission_pct}{item.is_comm_per_kg ? ' fixed' : '%'}
+                            {loading ? (
+                                <tr><td colSpan="6" className="p-12 text-center text-slate-400 font-medium">Loading...</td></tr>
+                            ) : currentItems.map((item) => (
+                                <tr key={item.id} onClick={() => handleEdit(item)} className={`hover:bg-blue-50/30 transition-colors cursor-pointer group ${selectedIds.includes(item.id) ? 'bg-blue-50/50' : ''}`}>
+                                    <td className="p-4 text-center" onClick={(e) => e.stopPropagation()}>
+                                        <button onClick={() => toggleSelectOne(item.id)} className="text-slate-300 hover:text-blue-500">
+                                            {selectedIds.includes(item.id) ? <CheckSquare size={18} className="text-blue-600"/> : <Square size={18}/>}
+                                        </button>
                                     </td>
-                                    <td className="p-4 text-sm text-slate-500 font-semibold italic">
-                                        {item.is_comm_per_kg ? 'Per Net KG' : 'Percentage of Invoice'}
-                                    </td>
-                                    <td className="p-4 text-center">
-                                        <button className="p-2 text-slate-300 hover:text-blue-600 transition-colors"><Edit size={16}/></button>
-                                    </td>
-                                </tr>
-                            )) : (
-                                <tr>
-                                    <td colSpan={isSelectionMode ? 6 : 5} className="p-24 text-center">
-                                        <div className="flex flex-col items-center opacity-10">
-                                            <Briefcase size={64} className="mb-2" />
-                                            <p className="text-lg font-black uppercase tracking-widest">No Brokers Displayed</p>
+                                    <td className="p-4 text-sm font-bold text-slate-700 font-mono">{item.broker_code}</td>
+                                    <td className="p-4 text-sm font-medium text-slate-600 uppercase">{item.broker_name}</td>
+                                    <td className="p-4 text-sm font-bold text-emerald-600">{item.commission_pct}</td>
+                                    <td className="p-4 text-sm text-slate-500 italic">{item.is_comm_per_kg ? 'Per KG' : 'Percentage %'}</td>
+                                    <td className="p-4 text-center" onClick={(e) => e.stopPropagation()}>
+                                        <div className="flex justify-center gap-2">
+                                            <button onClick={() => handleEdit(item)} className="flex items-center gap-1 bg-blue-50 text-blue-600 px-3 py-1.5 rounded-md text-xs font-bold hover:bg-blue-600 hover:text-white transition-all"><Edit size={14}/> UPDATE</button>
+                                            <button onClick={() => handleDeleteOne(item.id)} className="flex items-center gap-1 bg-red-50 text-red-600 px-3 py-1.5 rounded-md text-xs font-bold hover:bg-red-600 hover:text-white transition-all"><Trash2 size={14}/> DELETE</button>
                                         </div>
                                     </td>
                                 </tr>
-                            )}
+                            ))}
                         </tbody>
                     </table>
                 </div>
-
-                {/* 4. PAGINATION FOOTER */}
-                <div className="p-4 bg-[#f8fafc] border-t flex items-center justify-between">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                        Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, processedData.length)} of {processedData.length} Records
-                    </p>
+                <div className="p-4 border-t border-slate-100 flex items-center justify-between bg-slate-50">
+                    <span className="text-xs text-slate-500 font-bold uppercase">Page {currentPage} of {totalPages || 1}</span>
                     <div className="flex gap-2">
-                        <button disabled={currentPage === 1} onClick={() => setCurrentPage(prev => prev - 1)} className="p-2 border rounded-lg bg-white hover:bg-slate-50 disabled:opacity-30 transition-all shadow-sm active:scale-95">
-                            <ChevronLeft size={18}/>
-                        </button>
-                        <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(prev => prev + 1)} className="p-2 border rounded-lg bg-white hover:bg-slate-50 disabled:opacity-30 transition-all shadow-sm active:scale-95">
-                            <ChevronRight size={18}/>
-                        </button>
+                        <button disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)} className="p-2 border rounded bg-white disabled:opacity-40"><ChevronLeft size={18}/></button>
+                        <button disabled={currentPage >= totalPages} onClick={() => setCurrentPage(p => p + 1)} className="p-2 border rounded bg-white disabled:opacity-40"><ChevronRight size={18}/></button>
                     </div>
                 </div>
             </div>
 
-            {/* 5. MODAL FORM POPUP (Add/Edit) */}
+            {/* 4. MODAL FORM */}
             {isModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden animate-in fade-in zoom-in duration-200">
-                        {/* Modal Header */}
-                        <div className="bg-[#2563eb] p-5 flex justify-between items-center text-white">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in duration-200">
+                        <div className="bg-blue-600 p-5 flex justify-between items-center text-white">
                             <div>
-                                <h2 className="font-black uppercase tracking-tight text-lg">{formData.id ? 'Modify Broker Profile' : 'New Broker Registration'}</h2>
-                                <p className="text-[10px] font-bold text-blue-200 uppercase tracking-widest mt-1">Management Console</p>
+                                <h2 className="font-bold text-xl">{formData.id ? 'Edit Broker' : 'New Broker Registration'}</h2>
+                                <p className="text-[10px] text-blue-100 uppercase tracking-widest font-bold">Profile Management</p>
                             </div>
-                            <button onClick={() => setIsModalOpen(false)} className="hover:bg-blue-500 p-1 rounded-full transition-colors"><X size={24}/></button>
+                            <button onClick={() => setIsModalOpen(false)} className="hover:bg-blue-500 p-2 rounded-full transition-colors"><X size={20}/></button>
                         </div>
                         
-                        {/* Modal Body */}
-                        <form onSubmit={handleSave} className="p-8 space-y-6">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div className="space-y-1 md:col-span-2">
-                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Broker Full Name *</label>
-                                    <input required className="w-full border-b-2 border-slate-100 p-2 text-lg font-bold text-slate-700 outline-none focus:border-blue-500 transition-colors uppercase" value={formData.broker_name} onChange={e => setFormData({...formData, broker_name: e.target.value})} placeholder="Paramount Textiles" />
-                                </div>
+                        <form onSubmit={handleSave} className="p-6 space-y-4">
+                            <div className="space-y-4">
                                 <div className="space-y-1">
-                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Internal Code</label>
-                                    <input className="w-full border-b-2 border-slate-100 p-2 font-mono font-bold text-blue-600 bg-slate-50 outline-none" readOnly value={formData.broker_code} />
+                                    <label className="text-xs font-bold text-slate-500 uppercase ml-1">Broker Name *</label>
+                                    <input required value={formData.broker_name} onChange={e => setFormData({...formData, broker_name: e.target.value.toUpperCase()})} placeholder="e.g. TEXTILE AGENTS" className="w-full border border-slate-200 p-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none uppercase font-bold" />
                                 </div>
-                                <div className="space-y-1">
-                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Commission Rate</label>
-                                    <div className="relative">
-                                        <div className="absolute left-1 top-2.5 text-slate-300">
-                                            {formData.is_comm_per_kg ? <CircleDollarSign size={18}/> : <Percent size={18}/>}
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-1">
+                                        <label className="text-xs font-bold text-slate-500 uppercase ml-1">Broker Code</label>
+                                        <input value={formData.broker_code} onChange={e => setFormData({...formData, broker_code: e.target.value})} placeholder="BRK001" className="w-full border border-slate-200 p-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-mono" />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-xs font-bold text-slate-500 uppercase ml-1">Commission Rate</label>
+                                        <div className="relative">
+                                            <div className="absolute left-3 top-3.5 text-slate-300">
+                                                {formData.is_comm_per_kg ? <CircleDollarSign size={18}/> : <Percent size={18}/>}
+                                            </div>
+                                            <input type="number" step="0.01" value={formData.commission_pct} onChange={e => setFormData({...formData, commission_pct: e.target.value})} className="w-full pl-10 border border-slate-200 p-3 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none font-bold text-emerald-600" />
                                         </div>
-                                        <input type="number" step="0.01" className="w-full pl-7 border-b-2 border-slate-100 p-2 font-black text-emerald-600 outline-none focus:border-emerald-500" value={formData.commission_pct} onChange={e => setFormData({...formData, commission_pct: e.target.value})} />
                                     </div>
                                 </div>
-                            </div>
 
-                            <div className="bg-slate-50 p-4 rounded-xl border border-dashed border-slate-200 flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                    <div className={`p-2 rounded-lg ${formData.is_comm_per_kg ? 'bg-amber-100 text-amber-600' : 'bg-blue-100 text-blue-600'}`}>
-                                        <Info size={18} />
+                                {/* Calculation Toggle */}
+                                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                        <div className={`p-2 rounded-lg ${formData.is_comm_per_kg ? 'bg-amber-100 text-amber-600' : 'bg-blue-100 text-blue-600'}`}>
+                                            <Info size={18} />
+                                        </div>
+                                        <div>
+                                            <p className="text-[10px] font-bold text-slate-400 uppercase">Calculation Mode</p>
+                                            <p className="text-xs font-bold text-slate-700 uppercase tracking-tighter">
+                                                {formData.is_comm_per_kg ? 'Flat Rate per KG' : 'Percentage of Invoice'}
+                                            </p>
+                                        </div>
                                     </div>
-                                    <div>
-                                        <p className="text-xs font-bold text-slate-700">Commission is calculated {formData.is_comm_per_kg ? 'per net KG' : 'as percentage (%)'}</p>
-                                        <p className="text-[10px] text-slate-400 uppercase font-bold">Switch calculation mode</p>
-                                    </div>
-                                </div>
-                                <div className="relative inline-flex items-center cursor-pointer" onClick={() => setFormData({...formData, is_comm_per_kg: !formData.is_comm_per_kg})}>
-                                    <div className={`w-11 h-6 rounded-full transition-colors ${formData.is_comm_per_kg ? 'bg-emerald-500' : 'bg-slate-300'}`}>
-                                        <div className={`absolute top-[2px] left-[2px] bg-white w-5 h-5 rounded-full shadow-sm transition-transform ${formData.is_comm_per_kg ? 'translate-x-5' : 'translate-x-0'}`} />
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="space-y-1">
-                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Office Address</label>
-                                <textarea className="w-full border-b-2 border-slate-100 p-2 font-semibold text-slate-600 outline-none focus:border-blue-500 transition-colors" rows="3" value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} placeholder="Complete mailing address..." />
-                            </div>
-
-                            <div className="pt-8 border-t flex justify-between items-center">
-                                {formData.id && (
-                                    <button 
-                                        type="button" 
-                                        onClick={() => { if(window.confirm("Delete record?")) { mastersAPI.brokers.delete(formData.id); setIsModalOpen(false); fetchRecords(); }}} 
-                                        className="text-red-400 hover:text-red-600 font-bold flex items-center gap-1 text-[10px] tracking-tighter"
+                                    <div 
+                                        className="relative inline-flex h-6 w-11 items-center rounded-full cursor-pointer transition-colors"
+                                        style={{ backgroundColor: formData.is_comm_per_kg ? '#10b981' : '#cbd5e1' }}
+                                        onClick={() => setFormData({...formData, is_comm_per_kg: !formData.is_comm_per_kg})}
                                     >
-                                        <Trash2 size={14}/> REMOVE FROM SYSTEM
+                                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${formData.is_comm_per_kg ? 'translate-x-6' : 'translate-x-1'}`} />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="pt-6 flex justify-between gap-3 border-t">
+                                {formData.id && (
+                                    <button type="button" onClick={() => handleDeleteOne(formData.id)} className="flex items-center gap-2 text-red-600 hover:bg-red-50 px-4 py-2 rounded-xl font-bold transition-all">
+                                        <Trash2 size={18}/> DELETE
                                     </button>
                                 )}
-                                <div className="flex gap-4 ml-auto">
-                                    <button type="button" onClick={() => setIsModalOpen(false)} className="px-6 py-2 font-bold text-slate-400 hover:text-slate-600 text-xs tracking-widest">CANCEL</button>
-                                    <button type="submit" disabled={loading} className="bg-[#2563eb] hover:bg-blue-700 text-white px-10 py-3 rounded-xl font-black shadow-lg shadow-blue-100 flex items-center gap-2 active:scale-95 transition-all text-xs tracking-widest">
-                                        <Save size={16}/> {loading ? 'SAVING...' : 'SAVE BROKER'}
+                                <div className="flex gap-2 ml-auto">
+                                    <button type="button" onClick={() => setIsModalOpen(false)} className="px-6 py-2.5 rounded-xl text-slate-500 font-bold hover:bg-slate-100 transition-all uppercase text-xs">Close</button>
+                                    <button type="submit" disabled={submitLoading} className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-2.5 rounded-xl font-black shadow-lg shadow-blue-200 flex items-center gap-2 transition-all active:scale-95 uppercase text-xs">
+                                        {submitLoading ? <Loader2 size={18} className="animate-spin" /> : 'Save Broker'}
                                     </button>
                                 </div>
                             </div>
@@ -339,13 +309,6 @@ const BrokerMaster = () => {
                     </div>
                 </div>
             )}
-
-            <style jsx>{`
-                ::-webkit-scrollbar { width: 6px; }
-                ::-webkit-scrollbar-track { background: transparent; }
-                ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-                ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-            `}</style>
         </div>
     );
 };

@@ -33,10 +33,25 @@ const Transport = sequelize.define('Transport', {
 
 const Account = sequelize.define('Account', {
   account_code: { type: DataTypes.STRING, unique: true },
-  account_group: { type: DataTypes.STRING }, // 'Sundry Debtors' or 'Depot'
+  account_group: { type: DataTypes.STRING },
   account_name: { type: DataTypes.STRING, allowNull: false },
   place: { type: DataTypes.STRING },
-  gst_no: { type: DataTypes.STRING }
+  address: { type: DataTypes.TEXT }, // Changed to TEXT for multiple lines
+  pincode: { type: DataTypes.STRING },
+  state: { type: DataTypes.STRING },
+  delivery_address: { type: DataTypes.TEXT },
+  tin_no: { type: DataTypes.STRING },
+  cst_no: { type: DataTypes.STRING },
+  phone_no: { type: DataTypes.STRING },
+  email: { type: DataTypes.STRING },
+  fax: { type: DataTypes.STRING },
+  website: { type: DataTypes.STRING },
+  bank_account_no: { type: DataTypes.STRING },
+  contact_person: { type: DataTypes.STRING },
+  cell_no: { type: DataTypes.STRING },
+  gst_no: { type: DataTypes.STRING },
+  opening_credit: { type: DataTypes.DECIMAL(15, 2), defaultValue: 0 },
+  opening_debit: { type: DataTypes.DECIMAL(15, 2), defaultValue: 0 }
 }, { tableName: 'tbl_Accounts' });
 
 const Product = sequelize.define('Product', {

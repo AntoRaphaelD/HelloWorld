@@ -18,7 +18,10 @@ const createMasterController = (Model, includeModels = []) => ({
         try {
             const { searchField, searchValue } = req.query;
             let where = {};
-            if (searchField && searchValue) where[searchField] = { [Op.like]: `%${searchValue}%` };
+            // Enhanced search logic
+            if (searchField && searchValue) {
+                where[searchField] = { [Op.like]: `%${searchValue}%` };
+            }
             const data = await Model.findAll({ where, include: includeModels });
             res.status(200).json({ success: true, data });
         } catch (err) { res.status(500).json({ success: false, error: err.message }); }
@@ -32,6 +35,7 @@ const createMasterController = (Model, includeModels = []) => ({
     },
     update: async (req, res) => {
         try {
+            // Sequelize update returns an array, we want to know if it succeeded
             await Model.update(req.body, { where: { id: req.params.id } });
             res.status(200).json({ success: true });
         } catch (err) { res.status(500).json({ success: false, error: err.message }); }
@@ -44,7 +48,7 @@ const createMasterController = (Model, includeModels = []) => ({
     }
 });
 
-// 2. Transactional Controllers
+// 2. Transactional Controllers (Orders, Production, Invoices)
 const orderCtrl = createMasterController(OrderHeader, [{ model: OrderDetail, include: [Product] }, 'Party']);
 orderCtrl.create = async (req, res) => {
     const t = await sequelize.transaction();
@@ -113,7 +117,6 @@ invoiceCtrl.reject = async (req, res) => {
  * 3. REPORTING LOGIC
  */
 const reportCtrl = {
-    // Fetches data for Day Books, Stock Statements etc.
     getReportData: async (req, res) => {
         const { reportId } = req.params;
         const { start, end } = req.query;
@@ -131,65 +134,43 @@ const reportCtrl = {
         } catch (err) { res.status(500).json({ error: err.message }); }
     },
 
-    // Fetches one invoice with all details for the Print Template
     getInvoicePrintData: async (req, res) => {
-    try {
-        const { id } = req.params;
-        console.log("Fetching print data for Invoice No:", id); // Debug Log
+        try {
+            const { id } = req.params;
+            const invoice = await InvoiceHeader.findOne({
+                where: { invoice_no: id },
+                include: [
+                    { model: Account, as: 'Party' }, 
+                    { model: Transport }, 
+                    { model: InvoiceDetail, include: [Product] }
+                ]
+            });
 
-        const invoice = await InvoiceHeader.findOne({
-            where: { invoice_no: id },
-            include: [
-                { 
-                    model: Account, 
-                    as: 'Party' // THIS MUST MATCH models/index.js
-                }, 
-                { 
-                    model: Transport 
-                }, 
-                { 
-                    model: InvoiceDetail, 
-                    include: [Product] 
-                }
-            ]
-        });
+            if (!invoice) return res.status(404).json({ success: false, message: "Invoice not found" });
 
-        if (!invoice) {
-            return res.status(404).json({ success: false, message: "Invoice not found in database" });
+            const details = invoice.InvoiceDetails || [];
+            const formattedData = {
+                party_name: invoice.Party?.account_name || "N/A",
+                address: invoice.Party?.address || "",
+                gst_no: invoice.Party?.gst_no || "N/A",
+                invoice_no: invoice.invoice_no,
+                date: invoice.date,
+                ebill: invoice.ebill_no || "---",
+                vehicle: invoice.vehicle_no || "---",
+                delivery: invoice.delivery || "---",
+                bags: details.reduce((sum, d) => sum + (parseInt(d.packs) || 0), 0),
+                weight: details.reduce((sum, d) => sum + (parseFloat(d.total_kgs) || 0), 0),
+                rate: details.length > 0 ? details[0].rate : 0,
+                product_name: details.length > 0 ? details[0].Product?.product_name : "---",
+                hsn_code: details.length > 0 ? (details[0].Product?.product_code || "---") : "---",
+                total: parseFloat(invoice.assessable_value || 0),
+                grand_total: parseFloat(invoice.final_invoice_value || 0)
+            };
+            res.json({ success: true, data: formattedData });
+        } catch (err) {
+            res.status(500).json({ success: false, error: err.message });
         }
-
-        const details = invoice.InvoiceDetails || [];
-
-        // Formatting with fallbacks to avoid .reduce() crashes
-        const formattedData = {
-            party_name: invoice.Party?.account_name || "N/A",
-            address: invoice.Party?.address || "",
-            gst_no: invoice.Party?.gst_no || "N/A",
-            invoice_no: invoice.invoice_no,
-            date: invoice.date,
-            ebill: invoice.ebill_no || "---",
-            vehicle: invoice.vehicle_no || "---",
-            delivery: invoice.delivery || "---",
-            
-            // Safe Calculations
-            bags: details.reduce((sum, d) => sum + (parseInt(d.packs) || 0), 0),
-            weight: details.reduce((sum, d) => sum + (parseFloat(d.total_kgs) || 0), 0),
-            rate: details.length > 0 ? details[0].rate : 0,
-            product_name: details.length > 0 ? details[0].Product?.product_name : "---",
-            hsn_code: details.length > 0 ? (details[0].Product?.product_code || "---") : "---",
-            
-            total: parseFloat(invoice.assessable_value || 0),
-            grand_total: parseFloat(invoice.final_invoice_value || 0),
-            total_in_words: "" // Add numbering-to-words logic if required
-        };
-
-        res.json({ success: true, data: formattedData });
-    } catch (err) {
-        // CHECK YOUR TERMINAL FOR THIS ERROR MESSAGE
-        console.error("CRITICAL BACKEND ERROR:", err); 
-        res.status(500).json({ success: false, error: err.message });
     }
-}
 };
 
 module.exports = {
@@ -205,5 +186,5 @@ module.exports = {
     invoice: invoiceCtrl,
     depotReceived: createMasterController(DepotReceived, ['Depot']),
     despatch: createMasterController(DespatchEntry),
-    reports: reportCtrl // Added
+    reports: reportCtrl
 };
