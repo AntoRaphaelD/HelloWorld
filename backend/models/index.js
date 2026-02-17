@@ -11,16 +11,21 @@ const TariffSubHead = sequelize.define('TariffSubHead', {
   tariff_code: { type: DataTypes.STRING, unique: true },
   tariff_name: { type: DataTypes.STRING },
   tariff_no: { type: DataTypes.STRING }, // HSN Code
-  product_type: { type: DataTypes.STRING }
+  product_type: { type: DataTypes.STRING, defaultValue: 'CONE' },
+  commodity: { type: DataTypes.STRING, defaultValue: 'COTTON' },
+  fibre: { type: DataTypes.STRING, defaultValue: 'COTTON' },
+  yarn_type: { type: DataTypes.STRING, defaultValue: 'SINGLE' }
 }, { tableName: 'tbl_TariffSubHeads' });
 
 const PackingType = sequelize.define('PackingType', {
-  packing_type: { type: DataTypes.STRING, allowNull: false }
+    // packing_code: {type: DataTypes.STRING, unique: true, allowNull: false },
+    packing_type: {type: DataTypes.STRING, allowNull: false }
 }, { tableName: 'tbl_PackingTypes' });
 
 const Broker = sequelize.define('Broker', {
   broker_code: { type: DataTypes.STRING, unique: true },
   broker_name: { type: DataTypes.STRING, allowNull: false },
+  address: { type: DataTypes.TEXT },
   commission_pct: { type: DataTypes.DECIMAL(5, 2), defaultValue: 0 },
   is_comm_per_kg: { type: DataTypes.BOOLEAN, defaultValue: false }
 }, { tableName: 'tbl_Brokers' });

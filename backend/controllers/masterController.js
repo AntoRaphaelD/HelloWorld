@@ -45,6 +45,28 @@ const createMasterController = (Model, includeModels = []) => ({
             await Model.destroy({ where: { id: req.params.id } });
             res.status(200).json({ success: true });
         } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+    },
+     bulkDelete: async (req, res) => {
+        try {
+            const { ids } = req.body; // Expecting { ids: [1, 2, 5] }
+            
+            if (!ids || !Array.isArray(ids) || ids.length === 0) {
+                return res.status(400).json({ success: false, message: "No IDs provided for deletion" });
+            }
+
+            await Model.destroy({
+                where: {
+                    id: { [Op.in]: ids }
+                }
+            });
+
+            res.status(200).json({ 
+                success: true, 
+                message: `${ids.length} records deleted successfully` 
+            });
+        } catch (err) {
+            res.status(500).json({ success: false, error: err.message });
+        }
     }
 });
 

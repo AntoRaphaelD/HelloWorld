@@ -1,76 +1,108 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { mastersAPI } from '../service/api'; // Path to your api file
+import { mastersAPI } from '../service/api';
 import { 
-    Plus, Search, Edit, Trash2, X, ChevronLeft, 
-    ChevronRight, BookOpen, Hash, Save, CheckSquare, Square, RefreshCw 
+    Plus, Edit, Trash2, X, ChevronLeft, 
+    ChevronRight, Loader2, CheckSquare, Square, RefreshCw, 
+    Save, CheckCircle2, BookOpen, Hash, Layers
 } from 'lucide-react';
 
 const TariffMaster = () => {
-    // --- Initial State ---
-    const emptyState = { 
+    // --- State Management ---
+    const [list, setList] = useState([]);
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [loading, setLoading] = useState(false);
+    const [submitLoading, setSubmitLoading] = useState(false);
+    
+    // Selection & Bulk Actions
+    const [isSelectionMode, setIsSelectionMode] = useState(false);
+    const [selectedIds, setSelectedIds] = useState([]);
+    
+    // Success Animation State
+    const [showSuccess, setShowSuccess] = useState(false);
+    const [successMessage, setSuccessMessage] = useState("");
+    
+    // Search & Pagination States
+    const [searchField, setSearchField] = useState('tariff_name');
+    const [searchValue, setSearchValue] = useState('');
+    const [activeFilter, setActiveFilter] = useState({ field: 'tariff_name', value: '' });
+    const [currentPage, setCurrentPage] = useState(1);
+    const [itemsPerPage] = useState(10);
+
+    const initialState = () => ({
         id: null,
         tariff_code: '', 
         tariff_name: '', 
         tariff_no: '', 
-        product_type: '', 
-        commodity: '', 
-        fibre: '', 
-        yarn_type: '' 
-    };
+        product_type: 'CONE', 
+        commodity: 'COTTON', 
+        fibre: 'COTTON', 
+        yarn_type: 'SINGLE' 
+    });
 
-    // --- Core Data States ---
-    const [list, setList] = useState([]);
-    const [formData, setFormData] = useState(emptyState);
-    const [loading, setLoading] = useState(false);
-    const [isModalOpen, setIsModalOpen] = useState(false);
-
-    // --- UI/Selection States ---
-    const [isSelectionMode, setIsSelectionMode] = useState(false);
-    const [selectedIds, setSelectedIds] = useState([]);
-
-    // --- Filter & Pagination States ---
-    const [searchField, setSearchField] = useState('tariff_name');
-    const [searchCondition, setSearchCondition] = useState('Like');
-    const [searchValue, setSearchValue] = useState('');
-    const [currentPage, setCurrentPage] = useState(1);
-    const [itemsPerPage] = useState(10);
-    const [sortConfig, setSortConfig] = useState({ key: 'tariff_name', direction: 'asc' });
+    const [formData, setFormData] = useState(initialState());
 
     // --- API Integration ---
-    useEffect(() => { 
-        fetchRecords(); 
+    useEffect(() => {
+        fetchRecords();
     }, []);
 
     const fetchRecords = async () => {
         setLoading(true);
         try {
             const res = await mastersAPI.tariffs.getAll();
-            // Maps res.data.data based on common Axios response structures
-            const data = res.data?.data || res.data || [];
-            setList(Array.isArray(data) ? data : []);
-        } catch (err) {
-            console.error("Fetch Error:", err);
+            const rawData = res?.data?.data || res?.data || [];
+            setList(Array.isArray(rawData) ? rawData : []);
+        } catch (err) { 
+            console.error("Fetch error:", err); 
             setList([]);
-        } finally {
-            setLoading(false);
+        } finally { 
+            setLoading(false); 
         }
+    };
+
+    const triggerSuccess = (msg) => {
+        setSuccessMessage(msg);
+        setShowSuccess(true);
+        setTimeout(() => setShowSuccess(false), 2000);
+    };
+
+    // --- Actions ---
+    const handleAddNew = () => {
+        const safeList = Array.isArray(list) ? list : [];
+        const maxCode = safeList.reduce((max, item) => {
+            const currentCode = parseInt(item.tariff_code, 10);
+            return !isNaN(currentCode) && currentCode > max ? currentCode : max;
+        }, 0);
+        setFormData({ ...initialState(), tariff_code: (maxCode + 1).toString() });
+        setIsModalOpen(true);
+    };
+
+    const handleEdit = (item) => {
+        if (isSelectionMode) {
+            toggleSelection(item.id);
+            return;
+        }
+        setFormData({ ...item });
+        setIsModalOpen(true);
     };
 
     const handleSave = async (e) => {
         e.preventDefault();
-        setLoading(true);
+        setSubmitLoading(true);
         try {
-            if (formData.id) {
+            const isUpdate = !!formData.id;
+            if (isUpdate) {
                 await mastersAPI.tariffs.update(formData.id, formData);
             } else {
                 await mastersAPI.tariffs.create(formData);
             }
-            setIsModalOpen(false);
             fetchRecords();
-        } catch (err) {
-            alert("Error saving record. Check console for details.");
-        } finally {
-            setLoading(false);
+            setIsModalOpen(false);
+            triggerSuccess(isUpdate ? "Tariff Updated!" : "Tariff Created!");
+        } catch (err) { 
+            alert("Error saving record."); 
+        } finally { 
+            setSubmitLoading(false); 
         }
     };
 
@@ -79,7 +111,8 @@ const TariffMaster = () => {
         if (window.confirm(`Are you sure you want to delete ${selectedIds.length} records?`)) {
             setLoading(true);
             try {
-                await Promise.all(selectedIds.map(id => mastersAPI.tariffs.delete(id)));
+                await mastersAPI.tariffs.bulkDelete(selectedIds);
+                triggerSuccess(`${selectedIds.length} Records Deleted!`);
                 setSelectedIds([]);
                 setIsSelectionMode(false);
                 fetchRecords();
@@ -91,221 +124,264 @@ const TariffMaster = () => {
         }
     };
 
-    // --- UI Logic Helpers ---
-    const handleAddNew = () => {
-        const nextId = list.length > 0 ? Math.max(...list.map(i => i.id || 0)) + 1 : 1;
-        setFormData({ ...emptyState, tariff_code: String(nextId) });
-        setIsModalOpen(true);
+    // --- Selection Logic ---
+    const toggleSelection = (id) => {
+        setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
     };
 
-    const handleEdit = (item) => {
-        if (isSelectionMode) {
-            setSelectedIds(prev => prev.includes(item.id) ? prev.filter(i => i !== item.id) : [...prev, item.id]);
-            return;
-        }
-        setFormData(item);
-        setIsModalOpen(true);
+    const toggleSelectAll = () => {
+        if (selectedIds.length === currentItems.length) setSelectedIds([]);
+        else setSelectedIds(currentItems.map(item => item.id));
     };
 
-    // --- Search & Sort Logic ---
+    // --- Logic: Search & Pagination ---
     const processedData = useMemo(() => {
-        let result = [...list];
-        if (searchValue) {
-            result = result.filter(item => {
-                const val = String(item[searchField] || '').toLowerCase();
-                const search = searchValue.toLowerCase();
-                return searchCondition === 'Like' ? val.includes(search) : val === search;
-            });
-        }
-        if (sortConfig.key) {
-            result.sort((a, b) => {
-                const aVal = String(a[sortConfig.key] || '');
-                const bVal = String(b[sortConfig.key] || '');
-                return sortConfig.direction === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
-            });
-        }
-        return result;
-    }, [list, searchValue, searchField, searchCondition, sortConfig]);
+        const safeList = Array.isArray(list) ? list : [];
+        if (!activeFilter.value) return safeList;
+        
+        return safeList.filter(item => {
+            const fieldValue = item[activeFilter.field];
+            return String(fieldValue || '').toLowerCase().includes(activeFilter.value.toLowerCase());
+        });
+    }, [list, activeFilter]);
 
-    const currentItems = processedData.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
     const totalPages = Math.ceil(processedData.length / itemsPerPage) || 1;
+    const currentItems = processedData.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
     return (
-        <div className="min-h-screen bg-[#f8fafc] p-6 font-sans">
+        <div className="min-h-screen bg-slate-100 p-4 md:p-8 font-sans text-slate-900">
             
-            {/* 1. TOP HEADER ACTIONS */}
-            <div className="flex justify-between items-center mb-6">
-                <div>
-                    <h1 className="text-2xl font-black text-slate-800 tracking-tight">Tariff Machine Master</h1>
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Manage HSN Codes and classifications</p>
+            {showSuccess && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/20 backdrop-blur-sm transition-all">
+                    <div className="bg-white p-10 rounded-3xl shadow-2xl flex flex-col items-center gap-4">
+                        <CheckCircle2 size={80} className="text-emerald-500 animate-bounce" />
+                        <h3 className="text-2xl font-black text-slate-800 uppercase tracking-tight">{successMessage}</h3>
+                    </div>
                 </div>
-                
-                <div className="flex gap-2">
-                    <button onClick={handleAddNew} className="flex items-center gap-2 bg-[#2563eb] hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-bold shadow-md transition-all active:scale-95">
-                        <Plus size={18} /> New
+            )}
+
+            <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
+                <div>
+                    <h1 className="text-3xl font-black text-slate-900 tracking-tight">Tariff Sub Head Master</h1>
+                    <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mt-1">Classification & HSN Management</p>
+                </div>
+
+                <div className="flex gap-3">
+                    {/* SELECTION ACTIONS */}
+                    {!isSelectionMode ? (
+                        <button onClick={() => setIsSelectionMode(true)} className="px-6 py-3 border-2 border-slate-200 bg-white rounded-xl font-black text-xs hover:bg-slate-50 transition-all active:scale-95">
+                            SELECT
+                        </button>
+                    ) : (
+                        <div className="flex gap-2">
+                             <button onClick={() => {setIsSelectionMode(false); setSelectedIds([]);}} className="px-6 py-3 bg-slate-800 text-white rounded-xl font-black text-xs transition-all active:scale-95">
+                                CANCEL
+                            </button>
+                            <button 
+                                onClick={handleBulkDelete}
+                                disabled={selectedIds.length === 0}
+                                className={`flex items-center gap-2 px-6 py-3 rounded-xl font-black text-xs transition-all shadow-lg active:scale-95 ${selectedIds.length > 0 ? 'bg-red-600 text-white shadow-red-100' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}
+                            >
+                                <Trash2 size={16}/> DELETE SELECTED ({selectedIds.length})
+                            </button>
+                        </div>
+                    )}
+
+                    <button onClick={handleAddNew} className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-xl font-black shadow-lg flex items-center gap-2 transition-all active:scale-95">
+                        <Plus size={20} /> NEW TARIFF
                     </button>
                     
-                    <button 
-                        onClick={() => { setIsSelectionMode(!isSelectionMode); setSelectedIds([]); }}
-                        className={`px-6 py-2 border rounded-lg font-bold transition-all ${isSelectionMode ? 'bg-amber-100 border-amber-300 text-amber-700' : 'bg-white border-slate-200 text-blue-600 hover:bg-slate-50'}`}
-                    >
-                        {isSelectionMode ? 'Cancel Select' : 'Select'}
+                    <button onClick={fetchRecords} className="p-3 border-2 border-slate-200 rounded-xl bg-white text-slate-400 hover:text-blue-600 transition-all">
+                        <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
                     </button>
-
-                    <button 
-                        onClick={handleBulkDelete}
-                        disabled={selectedIds.length === 0}
-                        className={`px-6 py-2 border rounded-lg font-bold flex items-center gap-2 transition-all ${selectedIds.length > 0 ? 'bg-red-50 border-red-200 text-red-600 hover:bg-red-100' : 'bg-white border-slate-100 text-slate-300 cursor-not-allowed'}`}
-                    >
-                        <Trash2 size={18} /> Delete {selectedIds.length > 0 && `(${selectedIds.length})`}
-                    </button>
-                    <button onClick={fetchRecords} className="p-2 border rounded-lg bg-white text-slate-400 hover:text-blue-600"><RefreshCw size={18} className={loading ? 'animate-spin' : ''}/></button>
                 </div>
             </div>
 
-            {/* 2. SEARCH BAR (SCREENSHOT STYLE) */}
-            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm mb-6">
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-                    <div>
-                        <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block ml-1">Search Field</label>
-                        <select value={searchField} onChange={(e) => setSearchField(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500">
-                            <option value="tariff_name">Tariff Name</option>
-                            <option value="tariff_no">HSN No</option>
-                            <option value="tariff_code">M/c No</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block ml-1">Condition</label>
-                        <select value={searchCondition} onChange={(e) => setSearchCondition(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500">
-                            <option value="Like">Like</option>
-                            <option value="Equal">Equal</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block ml-1">Value</label>
-                        <input type="text" placeholder="Enter search value..." value={searchValue} onChange={(e) => setSearchValue(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" />
-                    </div>
-                    <div className="flex gap-2">
-                        <button className="flex-1 bg-[#2563eb] text-white py-2.5 rounded-lg text-sm font-bold hover:bg-blue-700 transition-all">Search</button>
-                        <button onClick={() => {setSearchValue(''); fetchRecords();}} className="flex-1 border border-slate-200 py-2.5 rounded-lg text-sm font-bold hover:bg-slate-50 transition-all">Show All</button>
-                    </div>
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm mb-8 flex flex-wrap gap-4 items-end">
+                <div className="flex-1 min-w-[200px]">
+                    <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block">Search Field</label>
+                    <select value={searchField} onChange={(e) => setSearchField(e.target.value)} className="w-full border-2 border-slate-50 p-2.5 rounded-xl text-sm font-bold bg-slate-50 outline-none focus:border-blue-500">
+                        <option value="tariff_name">Description</option>
+                        <option value="tariff_no">HSN Number</option>
+                        <option value="tariff_code">Tariff Code</option>
+                    </select>
                 </div>
+                <div className="flex-[2] min-w-[300px]">
+                    <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block">Value</label>
+                    <input type="text" value={searchValue} onChange={(e) => setSearchValue(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && setActiveFilter({ field: searchField, value: searchValue })} className="w-full border-2 border-slate-50 p-2.5 rounded-xl text-sm outline-none focus:border-blue-500 font-semibold" placeholder="Search records..." />
+                </div>
+                <button onClick={() => setActiveFilter({ field: searchField, value: searchValue })} className="bg-slate-900 text-white px-8 py-2.5 rounded-xl text-xs font-black uppercase hover:bg-black transition-all">Apply Filter</button>
             </div>
 
-            {/* 3. BLUE HEADER DATA TABLE */}
-            <div className="bg-white rounded-xl border border-slate-200 shadow-md overflow-hidden">
+            <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
                 <div className="overflow-x-auto">
                     <table className="w-full text-left">
-                        <thead className="bg-[#2563eb] text-white">
+                        <thead className="bg-blue-600 border-b border-slate-100 text-[10px] uppercase text-white tracking-widest font-bold">
                             <tr>
-                                {isSelectionMode && <th className="p-4 w-12 text-center"><Square size={20}/></th>}
-                                <th onClick={() => setSortConfig({key:'tariff_code', direction: sortConfig.direction === 'asc' ? 'desc' : 'asc'})} className="p-4 text-xs font-black uppercase tracking-widest cursor-pointer hover:bg-blue-700">M/c No.</th>
-                                <th onClick={() => setSortConfig({key:'tariff_name', direction: sortConfig.direction === 'asc' ? 'desc' : 'asc'})} className="p-4 text-xs font-black uppercase tracking-widest cursor-pointer hover:bg-blue-700">Description</th>
-                                <th className="p-4 text-xs font-black uppercase tracking-widest">HSN No.</th>
-                                <th className="p-4 text-xs font-black uppercase tracking-widest">Product Type</th>
-                                <th className="p-4 text-xs font-black uppercase tracking-widest text-center w-20">ActEffi</th>
+                                {isSelectionMode && (
+                                    <th className="p-5 w-16 text-center">
+                                        <button onClick={toggleSelectAll}>
+                                            {selectedIds.length === currentItems.length && currentItems.length > 0 ? <CheckSquare size={20} /> : <Square size={20} />}
+                                        </button>
+                                    </th>
+                                )}
+                                <th className="p-5">Code</th>
+                                <th className="p-5">Tariff Description</th>
+                                <th className="p-5">HSN No.</th>
+                                <th className="p-5">Commodity</th>
+                                {!isSelectionMode && <th className="p-5 text-center">Actions</th>}
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-100">
-                            {currentItems.length > 0 ? currentItems.map((item) => (
-                                <tr key={item.id} onClick={() => handleEdit(item)} className={`transition-colors cursor-pointer ${selectedIds.includes(item.id) ? 'bg-blue-50' : 'hover:bg-slate-50'}`}>
-                                    {isSelectionMode && (
-                                        <td className="p-4 text-center">
-                                            {selectedIds.includes(item.id) ? <CheckSquare size={20} className="text-blue-600 mx-auto"/> : <Square size={20} className="text-slate-200 mx-auto"/>}
-                                        </td>
-                                    )}
-                                    <td className="p-4 text-sm font-bold text-slate-400 font-mono">{item.tariff_code}</td>
-                                    <td className="p-4 text-sm font-bold text-slate-700 uppercase">{item.tariff_name}</td>
-                                    <td className="p-4 text-sm text-slate-600 font-bold">{item.tariff_no}</td>
-                                    <td className="p-4 text-sm text-slate-500 font-semibold">{item.product_type || 'General'}</td>
-                                    <td className="p-4 text-sm font-bold text-slate-400 text-center">80</td>
-                                </tr>
-                            )) : (
-                                <tr>
-                                    <td colSpan={isSelectionMode ? 6 : 5} className="p-24 text-center">
-                                        <div className="flex flex-col items-center opacity-10">
-                                            <RefreshCw size={64} className="mb-2" />
-                                            <p className="text-lg font-black uppercase tracking-widest">No Records Found</p>
-                                        </div>
-                                    </td>
-                                </tr>
+                        <tbody className="divide-y divide-slate-50">
+                            {loading ? (
+                                <tr><td colSpan="6" className="p-20 text-center"><Loader2 className="animate-spin mx-auto text-blue-500" size={40} /></td></tr>
+                            ) : currentItems.length > 0 ? (
+                                currentItems.map((item) => (
+                                    <tr 
+                                        key={item.id} 
+                                        onClick={() => handleEdit(item)} 
+                                        className={`transition-all cursor-pointer ${selectedIds.includes(item.id) ? 'bg-blue-50' : 'hover:bg-blue-50/30'}`}
+                                    >
+                                        {isSelectionMode && (
+                                            <td className="p-5 text-center" onClick={(e) => {e.stopPropagation(); toggleSelection(item.id);}}>
+                                                {selectedIds.includes(item.id) ? <CheckSquare size={20} className="text-blue-600 mx-auto"/> : <Square size={20} className="text-slate-200 mx-auto"/>}
+                                            </td>
+                                        )}
+                                        <td className="p-5 text-sm font-black text-blue-600 font-mono">{item.tariff_code}</td>
+                                        <td className="p-5 text-sm font-black text-slate-800 uppercase">{item.tariff_name}</td>
+                                        <td className="p-5 text-sm font-bold text-slate-500 font-mono italic">{item.tariff_no}</td>
+                                        <td className="p-5 text-sm font-bold text-slate-500 uppercase">{item.commodity}</td>
+                                        {!isSelectionMode && (
+                                            <td className="p-5 text-center" onClick={(e) => e.stopPropagation()}>
+                                                <div className="flex justify-center gap-2">
+                                                    <button onClick={() => handleEdit(item)} className="p-2 bg-slate-50 rounded-lg hover:bg-blue-600 hover:text-white transition-all"><Edit size={16}/></button>
+                                                    <button onClick={() => {if(window.confirm("Delete?")) mastersAPI.tariffs.delete(item.id).then(() => {fetchRecords(); triggerSuccess("Deleted!");}); }} className="p-2 bg-slate-50 rounded-lg hover:bg-red-600 hover:text-white transition-all"><Trash2 size={16}/></button>
+                                                </div>
+                                            </td>
+                                        )}
+                                    </tr>
+                                ))
+                            ) : (
+                                <tr><td colSpan="6" className="p-24 text-center text-slate-400 font-black uppercase tracking-widest opacity-20 text-2xl">No Data Found</td></tr>
                             )}
                         </tbody>
                     </table>
                 </div>
 
-                {/* 4. PAGINATION */}
-                <div className="p-4 bg-[#f8fafc] border-t flex items-center justify-between">
+                <div className="p-6 bg-slate-50/50 border-t flex items-center justify-between">
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                        Showing {currentItems.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0} to {Math.min(currentPage * itemsPerPage, processedData.length)} of {processedData.length} Records
+                        Showing {currentItems.length} of {processedData.length} Records
                     </p>
                     <div className="flex gap-2">
-                        <button disabled={currentPage === 1} onClick={() => setCurrentPage(prev => prev - 1)} className="p-2 border rounded-lg bg-white hover:bg-slate-50 disabled:opacity-30 transition-all shadow-sm">
-                            <ChevronLeft size={18}/>
+                        <button disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)} className="p-2 rounded-xl bg-white border disabled:opacity-30 hover:bg-blue-50 transition-all shadow-sm">
+                            <ChevronLeft size={20}/>
                         </button>
-                        <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(prev => prev + 1)} className="p-2 border rounded-lg bg-white hover:bg-slate-50 disabled:opacity-30 transition-all shadow-sm">
-                            <ChevronRight size={18}/>
+                        <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)} className="p-2 rounded-xl bg-white border disabled:opacity-30 hover:bg-blue-50 transition-all shadow-sm">
+                            <ChevronRight size={20}/>
                         </button>
                     </div>
                 </div>
             </div>
 
-            {/* 5. MODAL FORM (POPUP) */}
             {isModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden animate-in fade-in zoom-in duration-200">
-                        <div className="bg-[#2563eb] p-5 flex justify-between items-center text-white">
-                            <div>
-                                <h2 className="font-black uppercase tracking-tight text-lg">{formData.id ? 'Modify Record' : 'New Entry'}</h2>
-                                <p className="text-[10px] font-bold text-blue-200 uppercase tracking-widest mt-1">Tariff Head Configuration</p>
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-md p-4 overflow-y-auto">
+                    <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-4xl overflow-hidden animate-in zoom-in duration-300">
+                        <div className="bg-white border-b border-slate-100 p-8 flex justify-between items-center px-10">
+                            <div className="flex items-center gap-4">
+                                <div className="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-blue-200">
+                                    <BookOpen size={28} />
+                                </div>
+                                <div>
+                                    <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">{formData.id ? 'Modify Tariff Sub Head' : 'New Tariff Entry'}</h2>
+                                    <p className="text-[10px] font-bold text-blue-600 font-mono uppercase tracking-widest mt-1">CODE: #{formData.tariff_code}</p>
+                                </div>
                             </div>
-                            <button onClick={() => setIsModalOpen(false)} className="hover:bg-blue-500 p-1 rounded-full"><X size={24}/></button>
+                            <button onClick={() => setIsModalOpen(false)} className="text-slate-300 hover:text-red-500 transition-all"><X size={32}/></button>
                         </div>
                         
-                        <form onSubmit={handleSave} className="p-8 space-y-6">
-                            <div className="grid grid-cols-2 gap-6">
-                                <div className="space-y-1">
-                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">M/c Code *</label>
-                                    <input required className="w-full border-b-2 border-slate-100 p-2 font-mono font-bold text-blue-600 outline-none focus:border-blue-500 transition-colors" value={formData.tariff_code} onChange={e => setFormData({...formData, tariff_code: e.target.value})} />
+                        <form onSubmit={handleSave} className="p-10 space-y-8">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                
+                                <div className="space-y-6">
+                                    <div className="flex items-center gap-2">
+                                        <Hash size={14} className="text-blue-600" />
+                                        <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Core Identifiers</h3>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="text-[10px] font-black text-slate-400 uppercase block mb-1 ml-2">Tariff Code (Auto)</label>
+                                            <input 
+                                                readOnly 
+                                                value={formData.tariff_code} 
+                                                className="w-full border-2 border-slate-100 p-4 rounded-2xl text-sm font-black bg-slate-100/50 text-blue-600 outline-none cursor-not-allowed" 
+                                                title="Code is automatically generated"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] font-black text-slate-400 uppercase block mb-1 ml-2">Tariff Number *</label>
+                                            <input required value={formData.tariff_no} onChange={e => setFormData({...formData, tariff_no: e.target.value})} className="w-full border-2 border-slate-50 p-4 rounded-2xl text-sm font-bold bg-slate-50 outline-none focus:border-blue-500" placeholder="e.g. 5205 27 90" />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] font-black text-slate-400 uppercase block mb-1 ml-2">Tariff Name *</label>
+                                        <input required value={formData.tariff_name} onChange={e => setFormData({...formData, tariff_name: e.target.value.toUpperCase()})} className="w-full border-2 border-slate-50 p-4 rounded-2xl text-sm font-black bg-slate-50 outline-none uppercase focus:border-blue-500" placeholder="ENTER THE NAME" />
+                                    </div>
                                 </div>
-                                <div className="space-y-1">
-                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">HSN No *</label>
-                                    <input required className="w-full border-b-2 border-slate-100 p-2 font-bold outline-none focus:border-blue-500" value={formData.tariff_no} onChange={e => setFormData({...formData, tariff_no: e.target.value})} placeholder="5205" />
+
+                                <div className="space-y-6">
+                                    <div className="flex items-center gap-2">
+                                        <Layers size={14} className="text-blue-600" />
+                                        <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Classification Details</h3>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="text-[10px] font-black text-slate-400 uppercase block mb-1 ml-2">Product Type</label>
+                                            <select value={formData.product_type} onChange={e => setFormData({...formData, product_type: e.target.value})} className="w-full border-2 border-slate-50 p-4 rounded-2xl text-xs font-bold bg-slate-50 outline-none focus:border-blue-500">
+                                                <option value="CONE">CONE</option>
+                                                <option value="HANK">HANK</option>
+                                                <option value="CHEESE">CHEESE</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] font-black text-slate-400 uppercase block mb-1 ml-2">Commodity</label>
+                                            <select value={formData.commodity} onChange={e => setFormData({...formData, commodity: e.target.value})} className="w-full border-2 border-slate-50 p-4 rounded-2xl text-xs font-bold bg-slate-50 outline-none focus:border-blue-500">
+                                                <option value="COTTON">COTTON</option>
+                                                <option value="POLYESTER">POLYESTER</option>
+                                                <option value="VISCOSE">VISCOSE</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="text-[10px] font-black text-slate-400 uppercase block mb-1 ml-2">Fibre</label>
+                                            <select value={formData.fibre} onChange={e => setFormData({...formData, fibre: e.target.value})} className="w-full border-2 border-slate-50 p-4 rounded-2xl text-xs font-bold bg-slate-50 outline-none focus:border-blue-500">
+                                                <option value="COTTON">COTTON</option>
+                                                <option value="COMBED">COMBED</option>
+                                                <option value="CARDED">CARDED</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] font-black text-slate-400 uppercase block mb-1 ml-2">Yarn Type</label>
+                                            <select value={formData.yarn_type} onChange={e => setFormData({...formData, yarn_type: e.target.value})} className="w-full border-2 border-slate-50 p-4 rounded-2xl text-xs font-bold bg-slate-50 outline-none focus:border-blue-500">
+                                                <option value="SINGLE">SINGLE</option>
+                                                <option value="DOUBLE">DOUBLE</option>
+                                                <option value="MULTIFOLD">MULTIFOLD</option>
+                                            </select>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
 
-                            <div className="space-y-1">
-                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Tariff Description *</label>
-                                <input required className="w-full border-b-2 border-slate-100 p-2 text-lg font-bold text-slate-700 outline-none focus:border-blue-500 uppercase" value={formData.tariff_name} onChange={e => setFormData({...formData, tariff_name: e.target.value})} placeholder="Cotton Yarn dyed" />
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-6">
-                                <div className="space-y-1">
-                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Product Type</label>
-                                    <input className="w-full border-b-2 border-slate-100 p-2 text-sm font-semibold outline-none focus:border-blue-500" value={formData.product_type} onChange={e => setFormData({...formData, product_type: e.target.value})} placeholder="Yarn" />
-                                </div>
-                                <div className="space-y-1">
-                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Commodity</label>
-                                    <input className="w-full border-b-2 border-slate-100 p-2 text-sm font-semibold outline-none focus:border-blue-500" value={formData.commodity} onChange={e => setFormData({...formData, commodity: e.target.value})} />
-                                </div>
-                            </div>
-
-                            <div className="pt-8 border-t flex justify-end gap-4">
-                                <button type="button" onClick={() => setIsModalOpen(false)} className="px-6 py-2 font-bold text-slate-400 hover:text-slate-600 text-xs tracking-widest">CANCEL</button>
-                                <button type="submit" disabled={loading} className="bg-[#2563eb] hover:bg-blue-700 text-white px-10 py-3 rounded-xl font-black shadow-lg shadow-blue-100 flex items-center gap-2 active:scale-95 transition-all text-xs tracking-widest">
-                                    <Save size={16}/> {loading ? 'SAVING...' : 'SAVE RECORD'}
+                            <div className="mt-12 flex justify-end gap-4 border-t border-slate-100 pt-10">
+                                <button type="button" onClick={() => setIsModalOpen(false)} className="px-10 py-4 rounded-2xl text-xs font-black text-slate-400 hover:text-slate-600 uppercase tracking-widest transition-all">Cancel</button>
+                                <button type="submit" disabled={submitLoading} className="bg-blue-600 hover:bg-blue-700 text-white px-14 py-4 rounded-2xl font-black shadow-xl shadow-blue-100 flex items-center gap-2 uppercase text-xs tracking-widest transition-all active:scale-95">
+                                    {submitLoading ? <Loader2 className="animate-spin" size={18} /> : <><Save size={18} /> {formData.id ? 'UPDATE RECORD' : 'SAVE MASTER'}</>}
                                 </button>
                             </div>
                         </form>
                     </div>
                 </div>
             )}
-
-            <style jsx>{`
-                ::-webkit-scrollbar { width: 6px; }
-                ::-webkit-scrollbar-track { background: transparent; }
-                ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-            `}</style>
         </div>
     );
 };
