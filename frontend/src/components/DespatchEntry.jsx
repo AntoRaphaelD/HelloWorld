@@ -100,19 +100,31 @@ const DespatchEntry = () => {
     };
 
     const handleSave = async (e) => {
-        if (e) e.preventDefault();
-        if (!formData.vehicle_no) return alert("Vehicle Number is required");
-        
-        setLoading(true);
-        try {
-            if (formData.id) await transactionsAPI.despatch.update(formData.id, formData);
-            else await transactionsAPI.despatch.create(formData);
-            
-            setIsModalOpen(false);
-            fetchRecords();
-        } catch (err) { alert("Error saving despatch entry"); }
-        finally { setLoading(false); }
+    if (e) e.preventDefault();
+    if (!formData.vehicle_no) return alert("Vehicle Number is required");
+    
+    setLoading(true);
+
+    // CLEAN THE DATA: Convert empty strings to null for the database
+    const cleanedData = {
+        ...formData,
+        transport_id: formData.transport_id === '' ? null : parseInt(formData.transport_id),
+        no_of_bags: parseFloat(formData.no_of_bags) || 0,
+        freight: parseFloat(formData.freight) || 0
     };
+
+    try {
+        if (formData.id) await transactionsAPI.despatch.update(formData.id, cleanedData);
+        else await transactionsAPI.despatch.create(cleanedData);
+        
+        setIsModalOpen(false);
+        fetchRecords();
+    } catch (err) { 
+        console.error(err);
+        alert("Error saving: " + (err.response?.data?.error || err.message)); 
+    }
+    finally { setLoading(false); }
+};
 
     const handleBulkDelete = async () => {
         if (selectedIds.length === 0) return;

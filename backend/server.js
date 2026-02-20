@@ -45,6 +45,7 @@ app.use((err, req, res, next) => {
      * when you add new fields to your models.
      */
     await sequelize.sync({ alter: true }); 
+    // await sequelize.sync({ force: true }); 
     console.log('✅ All 9 Models synced with database');
 
     const PORT = process.env.PORT || 5000;

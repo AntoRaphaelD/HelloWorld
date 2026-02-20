@@ -142,8 +142,8 @@ export default function App() {
               <div className="h-1 w-1 bg-rose-600 rounded-full"></div>
               <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Factory Ops</span>
             </div>
-            <SidebarLink to="/order-with" label="Sales Order" icon={ClipboardCheck} color="text-rose-500" />
-            <SidebarLink to="/order-without" label="Direct Billing" icon={Zap} color="text-rose-500" />
+            <SidebarLink to="/order-with" label="Sales With Order" icon={ClipboardCheck} color="text-rose-500" />
+            <SidebarLink to="/order-without" label="Sales Without Order" icon={Zap} color="text-rose-500" />
             <SidebarLink to="/production" label="RG1 Production" icon={Factory} color="text-rose-500" />
             <SidebarLink to="/despatch" label="Despatch Entry" icon={Truck} color="text-rose-500" />
             <SidebarLink to="/invoice-prep" label="Invoice Gen" icon={FileText} color="text-rose-500" />

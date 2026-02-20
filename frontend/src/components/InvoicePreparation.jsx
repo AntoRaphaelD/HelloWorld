@@ -60,29 +60,29 @@ const InvoicePreparation = () => {
     useEffect(() => { fetchInitialData(); }, []);
 
     const fetchInitialData = async () => {
-        setLoading(true);
-        try {
-            const [invT, acc, tra, pro, ord, his] = await Promise.all([
-                mastersAPI.invoiceTypes.getAll(),
-                mastersAPI.accounts.getAll(),
-                mastersAPI.transports.getAll(),
-                mastersAPI.products.getAll(),
-                transactionsAPI.orders.getAll(),
-                transactionsAPI.invoices.getAll()
-            ]);
+    setLoading(true);
+    try {
+        const [invT, acc, tra, pro, ord, his] = await Promise.all([
+            mastersAPI.invoiceTypes.getAll().catch(() => ({ data: { data: [] } })),
+            mastersAPI.accounts.getAll().catch(() => ({ data: { data: [] } })),
+            mastersAPI.transports.getAll().catch(() => ({ data: { data: [] } })),
+            mastersAPI.products.getAll().catch(() => ({ data: { data: [] } })),
+            transactionsAPI.orders.getAll().catch(() => ({ data: { data: [] } })),
+            transactionsAPI.invoices.getAll().catch(() => ({ data: { data: [] } }))
+        ]);
 
-            setListData({ 
-                types: invT.data.data || [], 
-                parties: acc.data.data || [], 
-                transports: tra.data.data || [], 
-                products: pro.data.data || [], 
-                orders: ord.data.data || ord.data || [], 
-                history: his.data.data || his.data || [] 
-            });
-        } catch (error) { console.error("Load error", error); }
-        finally { setLoading(false); }
-    };
-
+        setListData({ 
+            types: invT.data?.data || [], 
+            parties: acc.data?.data || [], 
+            transports: tra.data?.data || [], 
+            products: pro.data?.data || [], 
+            orders: ord.data?.data || ord.data || [], 
+            history: his.data?.data || his.data || [] 
+        });
+    } catch (error) { 
+        console.error("Critical Load error", error); 
+    } finally { setLoading(false); }
+};
     // --- SEARCH & PAGINATION LOGIC ---
     const processedData = useMemo(() => {
         let result = [...listData.history];

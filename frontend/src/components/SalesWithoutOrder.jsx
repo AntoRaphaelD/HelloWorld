@@ -62,16 +62,16 @@ const SalesWithoutOrder = () => {
         } catch (err) { console.error("Error fetching masters", err); }
     };
 
-    const fetchRecords = async () => {
-        setLoading(true);
-        try {
-            const res = await transactionsAPI.orders.getAll();
-            const data = Array.isArray(res.data) ? res.data : (res.data.data || []);
-            // Filter only Direct Sales (Without Order)
-            setList(data.filter(o => o.is_with_order === false));
-        } catch (err) { console.error("Fetch error:", err); }
-        finally { setLoading(false); }
-    };
+const fetchRecords = async () => {
+    setLoading(true);
+    try {
+        // Change from orders to directInvoices
+        const res = await transactionsAPI.directInvoices.getAll();
+        const data = res.data.data || [];
+        setList(data); // No filter needed anymore!
+    } catch (err) { console.error("Fetch error:", err); }
+    finally { setLoading(false); }
+};
 
     // --- Logic: Search & Pagination ---
     const processedData = useMemo(() => {
@@ -110,34 +110,39 @@ const SalesWithoutOrder = () => {
     };
 
     const handleSave = async (e) => {
-        if (e) e.preventDefault();
-        if (!formData.party_id) return alert("Required: Please select a Party Name");
-        if (gridRows.length === 0 || !gridRows[0].product_id) return alert("Required: Add at least one item");
-        
-        setLoading(true);
-        const payload = { ...formData, Details: gridRows };
-        try {
-            if (formData.id) await transactionsAPI.orders.update(formData.id, payload);
-            else await transactionsAPI.orders.create(payload);
-            setIsModalOpen(false);
-            fetchRecords();
-        } catch (err) { alert("Save failed"); }
-        finally { setLoading(false); }
-    };
-
-    const handleBulkDelete = async () => {
-        if (selectedIds.length === 0) return;
-        if (window.confirm(`Delete ${selectedIds.length} direct entries permanently?`)) {
-            setLoading(true);
-            try {
-                await Promise.all(selectedIds.map(id => transactionsAPI.orders.delete(id)));
-                setSelectedIds([]);
-                setIsSelectionMode(false);
-                fetchRecords();
-            } catch (err) { alert("Delete failed"); }
-            finally { setLoading(false); }
+    if (e) e.preventDefault();
+    if (!formData.party_id) return alert("Required: Please select a Party Name");
+    if (gridRows.length === 0 || !gridRows[0].product_id) return alert("Required: Add at least one item");
+    
+    setLoading(true);
+    const payload = { ...formData, Details: gridRows };
+    try {
+        if (formData.id) {
+            // Point to directInvoices
+            await transactionsAPI.directInvoices.update(formData.id, payload);
+        } else {
+            // Point to directInvoices
+            await transactionsAPI.directInvoices.create(payload);
         }
-    };
+        setIsModalOpen(false);
+        fetchRecords();
+    } catch (err) { alert("Save failed"); }
+    finally { setLoading(false); }
+};
+    const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+    if (window.confirm(`Delete ${selectedIds.length} direct entries?`)) {
+        setLoading(true);
+        try {
+            // Point to directInvoices
+            await Promise.all(selectedIds.map(id => transactionsAPI.directInvoices.delete(id)));
+            setSelectedIds([]);
+            setIsSelectionMode(false);
+            fetchRecords();
+        } catch (err) { alert("Delete failed"); }
+        finally { setLoading(false); }
+    }
+};
 
     // --- Grid Logic ---
     const updateGrid = (index, field, value) => {

@@ -11,16 +11,15 @@ import {
 const SalesWithOrder = () => {
     // --- Initial States ---
     const emptyHeader = {
-        id: null,
-        order_no: '',
-        date: new Date().toISOString().split('T')[0],
-        party_id: '', 
-        broker_id: '', 
-        place: '', 
-        is_cancelled: false,
-        is_with_order: true, 
-        status: 'OPEN'
-    };
+    id: null,
+    order_no: '',
+    date: new Date().toISOString().split('T')[0],
+    party_id: '', 
+    broker_id: '', 
+    place: '', 
+    is_cancelled: false,
+    status: 'OPEN'
+};
 
     // --- Main States ---
     const [orders, setOrders] = useState([]);
@@ -62,15 +61,16 @@ const SalesWithOrder = () => {
         } catch (err) { console.error("Error fetching masters", err); }
     };
 
-    const fetchOrders = async () => {
-        setLoading(true);
-        try {
-            const res = await transactionsAPI.orders.getAll();
-            const data = Array.isArray(res.data) ? res.data : (res.data.data || []);
-            setOrders(data.filter(o => o.is_with_order === true));
-        } catch (err) { console.error("Error fetching orders", err); }
-        finally { setLoading(false); }
-    };
+const fetchOrders = async () => {
+    setLoading(true);
+    try {
+        const res = await transactionsAPI.orders.getAll();
+        // Since the backend 'orders' table is now separate, just take the data
+        const data = res.data.data || []; 
+        setOrders(data);
+    } catch (err) { console.error("Error", err); }
+    finally { setLoading(false); }
+};
 
     // --- Search & Pagination Logic ---
     const processedData = useMemo(() => {
