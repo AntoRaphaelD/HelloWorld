@@ -72,11 +72,12 @@ export const mastersAPI = {
  */
 export const transactionsAPI = {
   orders: {
-    getAll: () => api.get('/orders'),
-    create: (data) => api.post('/orders', data), 
-    delete: (id) => api.delete(`/orders/${id}`),
-    bulkDelete: (ids) => api.post('/orders/bulk-delete', { ids })
-  },
+  getAll: () => api.get('/orders'),
+  create: (data) => api.post('/orders', data),
+  update: (id, data) => api.put(`/orders/${id}`, data),   // ✅ ADD THIS LINE
+  delete: (id) => api.delete(`/orders/${id}`),
+  bulkDelete: (ids) => api.post('/orders/bulk-delete', { ids })
+},
   production: {
     getAll: () => api.get('/production'),
     create: (data) => api.post('/production', data), 
@@ -95,17 +96,19 @@ export const transactionsAPI = {
 
   // Sales WITHOUT Order (Direct Sales) - NEWLY ADDED
   directInvoices: {
-    getAll: () => api.get('/direct-invoices'),
-    create: (data) => api.post('/direct-invoices', data),
-    delete: (id) => api.delete(`/direct-invoices/${id}`)
-  },
+  getAll: () => api.get('/direct-invoices'),
+  create: (data) => api.post('/direct-invoices', data),
+  update: (id, data) => api.put(`/direct-invoices/${id}`, data),  // ✅ ADD THIS
+  delete: (id) => api.delete(`/direct-invoices/${id}`)
+},
 
   // service/api.js
 despatch: {
-    getAll: () => api.get('/despatch'), // Ensure this matches router.get('/despatch'...)
+    getAll: () => api.get('/despatch'),
     create: (data) => api.post('/despatch', data),
     update: (id, data) => api.put(`/despatch/${id}`, data),
-    delete: (id) => api.delete(`/despatch/${id}`)
+    delete: (id) => api.delete(`/despatch/${id}`),
+    bulkDelete: (ids) => api.post('/despatch/bulk-delete', { ids }) // ADD THIS
 },
 
   depotReceived: {
@@ -121,12 +124,17 @@ despatch: {
  * ==========================================
  */
 export const reportsAPI = {
+
     /**
      * Get Report Data
-     * @param {string} reportId - 'sales-with-order', 'sales-direct', or 'production'
-     * @param {object} params - { start: 'YYYY-MM-DD', end: 'YYYY-MM-DD' }
      */
-    getReportData: (reportId, params) => api.get(`/reports/${reportId}`, { params }),
-};
+    getReportData: (reportId, params) => 
+        api.get(`/reports/${reportId}`, { params }),
 
+    /**
+     * ✅ ADD THIS — Invoice Print
+     */
+    getInvoicePrint: (invoiceNo) =>
+        api.get(`/reports/invoice-print/${invoiceNo}`)
+};
 export default api;

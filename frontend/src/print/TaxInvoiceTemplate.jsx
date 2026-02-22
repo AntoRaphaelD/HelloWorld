@@ -1,98 +1,261 @@
-import React from 'react';
+import React, { forwardRef } from 'react';
 
-const TaxInvoiceTemplate = React.forwardRef(({ data }, ref) => {
-    // Helper for Indian Currency Formatting
-    const fmt = (val) => parseFloat(val || 0).toLocaleString('en-IN', { 
-        minimumFractionDigits: 2, 
-        maximumFractionDigits: 2 
-    });
+const TaxInvoiceTemplate = forwardRef(({ data }, ref) => {
+    if (!data) return null;
 
-    // We ALWAYS render the wrapper div so the 'ref' is never null
+    // Helper to calculate totals if not provided by backend
+    const totalBags = data.InvoiceDetails?.reduce((sum, item) => sum + (parseFloat(item.packs) || 0), 0);
+    const totalKgs = data.InvoiceDetails?.reduce((sum, item) => sum + (parseFloat(item.total_kgs) || 0), 0);
+
     return (
-        <div ref={ref} className="bg-white">
-            {data ? (
-                <div className="p-8 text-black font-sans text-[11px] leading-tight w-[210mm] min-h-[297mm]">
-                    {/* Header Checkboxes */}
-                    <div className="flex justify-between items-start mb-2">
-                        <div className="w-1/3"></div>
-                        <div className="w-1/3 text-center">
-                            <h1 className="text-sm font-black underline uppercase">Tax Invoice</h1>
-                        </div>
-                        <div className="w-1/3 space-y-0.5 text-[8px] font-bold">
-                            <div className="flex items-center gap-2"><div className="w-2.5 h-2.5 border border-black"></div> ORIGINAL FOR BUYER</div>
-                            <div className="flex items-center gap-2"><div className="w-2.5 h-2.5 border border-black"></div> DUPLICATE FOR TRANSPORTER</div>
-                        </div>
+        <div ref={ref} className="invoice-print-root">
+            <div className="invoice-page" style={{ height: "297mm", overflow: "hidden" }}>
+            {/* Header Border Wrapper */}
+            <div className="border-2 border-black">
+                
+                {/* 1. Title Row */}
+                <div className="border-b-2 border-black py-2 text-center relative">
+                    <h1 className="text-xl font-bold tracking-widest">TAX INVOICE</h1>
+                    <div className="absolute top-2 right-4 text-[10px] text-left border border-black p-1 leading-tight">
+                        <label className="flex items-center gap-1"><div className="w-3 h-3 border border-black"></div> ORIGINAL FOR BUYER</label>
+                        <label className="flex items-center gap-1"><div className="w-3 h-3 border border-black"></div> DUPLICATE FOR TRANSPORTER</label>
+                        <label className="flex items-center gap-1"><div className="w-3 h-3 border border-black"></div> TRIPLICATE FOR FILE COPY</label>
                     </div>
+                </div>
 
-                    <div className="border border-black">
-                        {/* Company Header */}
-                        <div className="flex border-b border-black">
-                            <div className="flex-1 p-3 text-center">
-                                <h2 className="text-lg font-black uppercase">KAYAAR EXPORTS PRIVATE LIMITED</h2>
-                                <p className="font-bold">D.No: 43/5, Railway Feeder Road, Kovilpatti</p>
-                                <p className="font-black mt-1">GSTIN : 33AAACK4468M1ZA</p>
-                            </div>
+                {/* 2. Company Info Row */}
+                <div className="border-b-2 border-black grid grid-cols-4">
+                    <div className="col-span-3 p-4 text-center border-r-2 border-black">
+                        <h2 className="text-lg font-black">KAYAAR EXPORTS PRIVATE LIMITED</h2>
+                        <p>D.No: 43/5, Railway Feeder Road,</p>
+                        <p>K.R. Nagar - 628 503, Kovilpatti - Taluk</p>
+                        <p>Tuticorin Dist., Tamilnadu, India</p>
+                        <p className="mt-2 font-bold">(04632) - 248258, 94432 38761</p>
+                        <p>E-Mail: ttnkrgroup@gmail.com</p>
+                        <p className="font-bold">GSTIN : 33AAACK4468M1ZA</p>
+                    </div>
+                    <div className="flex-1 p-2 text-[10px] flex flex-col justify-center items-center">
+                        <div className="border border-black p-2 text-center w-full">
+                            <p className="font-bold">OEKO-TEX ®</p>
+                            <p className="text-blue-600 font-bold text-[8px]">STANDARD 100</p>
+                            <p className="text-[7px]">Tested for harmful substances</p>
                         </div>
+                        <p className="mt-4">PAN: AAACK4468M</p>
+                        <p>CIN: U51101TN1991PTC020933</p>
+                    </div>
+                </div>
 
-                        {/* Party vs Invoice Details */}
-                        <div className="flex border-b border-black min-h-[100px]">
-                            <div className="flex-1 p-3 border-r border-black">
-                                <p className="font-bold mb-1 underline text-[9px]">Party Name & Address</p>
-                                <h3 className="text-sm font-black mb-1 uppercase">{data.party_name}</h3>
-                                <div className="whitespace-pre-line font-bold">{data.address}</div>
-                                <p className="mt-2 font-black">GST No: {data.gst_no}</p>
-                            </div>
-                            <div className="w-[200px] text-[10px]">
-                                <table className="w-full font-black">
+                {/* 3. Party & Invoice Info Row */}
+                <div className="border-b-2 border-black grid grid-cols-4 min-h-[150px]">
+                    <div className="col-span-3 p-4 border-r-2 border-black">
+                        <p className="font-bold underline mb-1">Party Name & Address</p>
+                        <h3 className="font-black text-sm uppercase">{data.Party?.account_name}</h3>
+                        <p className="whitespace-pre-wrap">{data.Party?.address}</p>
+                        <p className="mt-2 font-bold uppercase">GST No: {data.Party?.gst_no}</p>
+                    </div>
+                    <div className="w-[300px]">
+                        <table className="w-full h-full text-xs">
+                            <tbody>
+                                <tr className="border-b border-black">
+                                    <td className="p-1 font-bold pl-2">Invoice No</td>
+                                    <td className="p-1">:</td>
+                                    <td className="p-1 font-bold text-right pr-4">{data.invoice_no}</td>
+                                </tr>
+                                <tr className="border-b border-black">
+                                    <td className="p-1 font-bold pl-2">Invoice Dt</td>
+                                    <td className="p-1">:</td>
+                                    <td className="p-1 font-bold text-right pr-4">{data.date}</td>
+                                </tr>
+                                <tr className="border-b border-black">
+                                    <td className="p-1 font-bold pl-2">E-Way Bill No</td>
+                                    <td className="p-1">:</td>
+                                    <td className="p-1 text-right pr-4">{data.remarks?.match(/EWAY:(\d+)/)?.[1] || '-'}</td>
+                                </tr>
+                                <tr className="border-b border-black">
+                                    <td className="p-1 font-bold pl-2">Vehicle No</td>
+                                    <td className="p-1">:</td>
+                                    <td className="p-1 text-right pr-4 uppercase">{data.vehicle_no}</td>
+                                </tr>
+                                <tr>
+                                    <td className="p-1 font-bold pl-2">Delivery At</td>
+                                    <td className="p-1">:</td>
+                                    <td className="p-1 text-right pr-4 uppercase">{data.delivery}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                {/* 4. Description Table */}
+                <table className="w-full border-collapse text-xs">
+                    <thead>
+                        <tr className="border-b-2 border-black font-bold text-center">
+                            <th className="border-r-2 border-black p-2 w-20">No of Bags</th>
+                            <th className="border-r-2 border-black p-2 w-32">Net Weight</th>
+                            <th className="border-r-2 border-black p-2 w-40">S.L No</th>
+                            <th className="border-r-2 border-black p-2 w-32">Rate Per Kgs</th>
+                            <th className="p-2">Assessable Value</th>
+                        </tr>
+                    </thead>
+                    <tbody className="min-h-[300px]">
+                        {data.InvoiceDetails?.map((item, idx) => (
+                            <React.Fragment key={idx}>
+                                <tr className="text-center font-bold">
+                                    <td className="border-r-2 border-black p-2 align-top">{item.packs}</td>
+                                    <td className="border-r-2 border-black p-2 align-top">{parseFloat(item.total_kgs).toFixed(2)}</td>
+                                    <td className="border-r-2 border-black p-2 align-top text-[10px]">{item.sl_no || '-'}</td>
+                                    <td className="border-r-2 border-black p-2 align-top">{parseFloat(item.rate).toFixed(2)}</td>
+                                    <td className="p-2 text-right align-top pr-4">{(item.total_kgs * item.rate).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                                </tr>
+                                <tr>
+                                    <td colSpan={5} className="px-4 py-2">
+                                        <p className="font-black text-sm uppercase">{item.Product?.product_name}</p>
+                                        <p className="mt-2 font-bold">HSN CODE: {item.Product?.TariffSubHead?.tariff_no || '52052790'}</p>
+                                    </td>
+                                </tr>
+                            </React.Fragment>
+                        ))}
+                        {/* Filler Row to push footer down */}
+                        <tr style={{ height: "120px" }}>
+                            <td className="border-r-2 border-black"></td>
+                            <td className="border-r-2 border-black"></td>
+                            <td className="border-r-2 border-black"></td>
+                            <td className="border-r-2 border-black"></td>
+                            <td></td>
+                        </tr>
+                    </tbody>
+                    {/* Financial Summary Footer */}
+                    <tfoot>
+                        <tr className="border-t-2 border-black">
+                            <td colSpan={3} className="border-r-2 border-black p-4 align-bottom">
+                                <p className="font-bold">Amount in Words:</p>
+                                <p className="uppercase italic">Indian Rupees Only</p>
+                            </td>
+                            <td colSpan={2} className="p-0">
+                                <table className="w-full text-xs font-bold">
                                     <tbody>
                                         <tr className="border-b border-black">
-                                            <td className="p-1">Inv No</td><td>:</td><td className="text-right">{data.invoice_no}</td>
+                                            <td className="p-2 pl-4">CHARITY</td>
+                                            <td className="p-2 text-right pr-4">{parseFloat(data.charity || 0).toFixed(2)}</td>
                                         </tr>
                                         <tr className="border-b border-black">
-                                            <td className="p-1">Date</td><td>:</td><td className="text-right">{data.date}</td>
+                                            <td className="p-2 pl-4">FREIGHT</td>
+                                            <td className="p-2 text-right pr-4">{parseFloat(data.freight || 0).toFixed(2)}</td>
                                         </tr>
                                         <tr className="border-b border-black">
-                                            <td className="p-1">Vehicle</td><td>:</td><td className="text-right">{data.vehicle}</td>
+                                            <td className="p-2 pl-4">C.G.S.T &nbsp;&nbsp;&nbsp; : 0.00 %</td>
+                                            <td className="p-2 text-right pr-4">0.00</td>
+                                        </tr>
+                                        <tr className="border-b border-black">
+                                            <td className="p-2 pl-4">S.G.S.T &nbsp;&nbsp;&nbsp; : 0.00 %</td>
+                                            <td className="p-2 text-right pr-4">0.00</td>
+                                        </tr>
+                                        <tr className="bg-slate-100">
+                                            <td className="p-2 pl-4 text-sm font-black">TOTAL VALUE</td>
+                                            <td className="p-2 text-right pr-4 text-sm font-black">₹ {parseFloat(data.final_invoice_value).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
                                         </tr>
                                     </tbody>
                                 </table>
-                            </div>
-                        </div>
-
-                        {/* Items Table */}
-                        <div className="grid grid-cols-12 border-b border-black text-center font-black uppercase text-[9px]">
-                            <div className="col-span-1 border-r border-black py-1">Bags</div>
-                            <div className="col-span-2 border-r border-black py-1">Weight</div>
-                            <div className="col-span-5 border-r border-black py-1">Description</div>
-                            <div className="col-span-2 border-r border-black py-1">Rate</div>
-                            <div className="col-span-2 py-1">Value</div>
-                        </div>
-                        <div className="flex min-h-[150px]">
-                            <div className="grid grid-cols-12 w-full content-start">
-                                <div className="col-span-1 border-r border-black text-center p-2 font-bold">{data.bags}</div>
-                                <div className="col-span-2 border-r border-black text-center p-2 font-bold">{fmt(data.weight)}</div>
-                                <div className="col-span-5 border-r border-black p-2 font-black italic">{data.product_name}</div>
-                                <div className="col-span-2 border-r border-black text-center p-2 font-mono">{fmt(data.rate)}</div>
-                                <div className="col-span-2 text-right p-2 font-black">{fmt(data.total)}</div>
-                            </div>
-                        </div>
-
-                        {/* Grand Total */}
-                        <div className="border-t border-black flex items-center h-10 bg-gray-50">
-                            <div className="flex-1 px-2 font-black italic text-[9px] uppercase">
-                                Indian Rupees {data.total_in_words || '---'} Only.
-                            </div>
-                            <div className="w-[120px] border-l border-black h-full flex items-center justify-end px-2 text-sm font-black">
-                                ₹ {fmt(data.grand_total)}
-                            </div>
-                        </div>
-                    </div>
+                            </td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+            
+            {/* Disclaimer & Signatures */}
+            <div className="mt-4 flex justify-between text-[10px]">
+                <div className="w-2/3">
+                    <p className="font-bold underline">Terms & Conditions:</p>
+                    <p>1. Goods once sold will not be taken back.</p>
+                    <p>2. Interest @24% will be charged if payment is not made within due date.</p>
                 </div>
-            ) : (
-                <div className="p-10 text-center text-gray-300">Loading document structure...</div>
-            )}
+                <div className="text-center border-t border-black pt-8 w-64">
+                    <p className="font-bold">For KAYAAR EXPORTS PRIVATE LIMITED</p>
+                    <p className="mt-12 uppercase font-bold">Authorised Signatory</p>
+                </div>
+            </div>
         </div>
+          </div>
+// </div>
     );
 });
+<style>
+{`
+.invoice-print-root {
+  font-family: "Times New Roman", serif;
+}
 
+.invoice-page {
+  width: 210mm;
+  height: 297mm;   /* FIXED HEIGHT */
+  padding: 10mm;
+  margin: 0 auto;
+  background: white;
+  overflow: hidden;   /* PREVENT SPLIT */
+}
+
+.invoice-page table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.invoice-page tr,
+.invoice-page td,
+.invoice-page th {
+  page-break-inside: avoid !important;
+}
+
+.invoice-page {
+  page-break-after: avoid !important;
+  page-break-before: avoid !important;
+  page-break-inside: avoid !important;
+}
+
+.invoice-print-root {
+  page-break-inside: avoid !important;
+}
+
+@media print {
+
+  html, body {
+    width: 210mm;
+    height: 297mm;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+
+  body * {
+    visibility: hidden;
+  }
+
+  .invoice-print-root,
+  .invoice-print-root * {
+    visibility: visible;
+  }
+
+  .invoice-print-root {
+    position: absolute;
+    top: 0;
+    left: 0;
+  }
+
+  .invoice-page {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  table, tr, td, th {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  @page {
+    size: A4 portrait;
+    margin: 5mm;
+  }
+
+}
+`}
+</style>
 export default TaxInvoiceTemplate;

@@ -34,7 +34,6 @@ masters.forEach(m => {
     router.delete(`/${m.path}/:id`, validate(m.controller.delete));
     router.post(`/${m.path}/bulk-delete`, validate(m.controller.bulkDelete));
 });
-
 /**
  * 2. TRANSACTIONAL ROUTES
  */
@@ -42,40 +41,57 @@ masters.forEach(m => {
 // Orders
 router.post('/orders', validate(ctrl.order.create));
 router.get('/orders', validate(ctrl.order.getAll));
+router.put('/orders/:id', validate(ctrl.order.update));   // ✅ ADD THIS
 router.delete('/orders/:id', validate(ctrl.order.delete));
 router.post('/orders/bulk-delete', validate(ctrl.order.bulkDelete));
 
+
+// Production
 // Production
 router.post('/production', validate(ctrl.production.create));
 router.get('/production', validate(ctrl.production.getAll));
+router.get('/production/:id', validate(ctrl.production.getOne));
+router.put('/production/:id', validate(ctrl.production.update));
+router.delete('/production/:id', validate(ctrl.production.delete));
+router.post('/production/bulk-delete', validate(ctrl.production.bulkDelete));
+
 
 // Invoices (Sales WITH Order)
 router.post('/invoices', validate(ctrl.invoice.create));
 router.get('/invoices', validate(ctrl.invoice.getAll));
+router.put('/invoices/:id', validate(ctrl.invoice.update)); // ✅ OPTIONAL but recommended
 router.delete('/invoices/:id', validate(ctrl.invoice.delete));
-// Added back approve/reject
+
 router.put('/invoices/approve/:id', validate(ctrl.invoice.approve));
 router.put('/invoices/reject/:id', validate(ctrl.invoice.reject));
 
-// Direct Invoices (Sales WITHOUT Order) - NEW
+
+// Direct Invoices (Sales WITHOUT Order)
 router.post('/direct-invoices', validate(ctrl.directInvoice.create));
 router.get('/direct-invoices', validate(ctrl.directInvoice.getAll));
+router.put('/direct-invoices/:id', validate(ctrl.directInvoice.update));  // ✅ ADD THIS
 router.delete('/direct-invoices/:id', validate(ctrl.directInvoice.delete));
 
-// Despatch & Depot
+
 // Despatch
 router.get('/despatch', validate(ctrl.despatch.getAll));
 router.post('/despatch', validate(ctrl.despatch.create));
-router.put('/despatch/:id', validate(ctrl.despatch.update)); // Added
-router.delete('/despatch/:id', validate(ctrl.despatch.delete)); // Added
+router.put('/despatch/:id', validate(ctrl.despatch.update));
+router.delete('/despatch/:id', validate(ctrl.despatch.delete));
 router.post('/despatch/bulk-delete', validate(ctrl.despatch.bulkDelete));
 
+
+// Depot
 router.post('/depot-received', validate(ctrl.depotReceived.create));
 router.get('/depot-received', validate(ctrl.depotReceived.getAll));
-
+router.delete('/depot-received/:id', validate(ctrl.depotReceived.delete));
+router.post('/depot-received/bulk-delete', validate(ctrl.depotReceived.bulkDelete));
 /**
  * 3. REPORTING ROUTES
  */
+router.get('/reports/invoice-print/:invoiceNo', validate(ctrl.reports.getInvoicePrintData));
 router.get('/reports/:reportId', validate(ctrl.reports.getReportData));
+
+// router.get('/reports/invoice-print/:invoiceNo', reportCtrl.getInvoicePrintData);
 
 module.exports = router;

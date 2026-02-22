@@ -166,16 +166,31 @@ const InvoicePreparation = () => {
     };
 
     const triggerPrint = async (invoiceNo) => {
-        setLoading(true);
-        try {
-            const res = await reportsAPI.getInvoicePrintData(invoiceNo.toString());
-            if (res.data.success) {
-                setPrintData(res.data.data);
-                setTimeout(() => handlePrintAction(), 700);
-            }
-        } catch (err) { alert("Print Error"); }
-        finally { setLoading(false); }
-    };
+    setLoading(true);
+    try {
+        console.log("Printing invoice:", invoiceNo);
+
+        const res = await reportsAPI.getInvoicePrint(invoiceNo.toString());
+
+        console.log("Print response:", res.data);
+
+        if (res.data.success) {
+            setPrintData(res.data.data);
+
+            setTimeout(() => {
+                handlePrintAction();
+            }, 500);
+        } else {
+            alert("Invoice data not found");
+        }
+
+    } catch (err) {
+        console.error("Print Error:", err);
+        alert("Print Error: " + err.message);
+    } finally {
+        setLoading(false);
+    }
+};
 
     return (
         <div className="min-h-screen bg-[#f8fafc] p-6 font-sans">

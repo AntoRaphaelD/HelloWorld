@@ -1,30 +1,89 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { mastersAPI } from '../service/api';
 import { 
-    Save, Plus, Trash2, X, Search, Calculator, 
-    Percent, ShieldCheck, Truck, ChevronRight, 
-    Settings2, Landmark, Receipt, FileJson 
+    Plus, Search, Edit, Trash2, X, Settings2, 
+    Save, Calculator, Zap, Info, CheckCircle2, AlertCircle
 } from 'lucide-react';
+
+// --- Smart Formula Component ---
+const SmartFormulaInput = ({ label, value, onChange }) => {
+    const [showPicker, setShowPicker] = useState(false);
+    const inputRef = useRef(null);
+
+    const insertVar = (v) => {
+        const start = inputRef.current.selectionStart;
+        const end = inputRef.current.selectionEnd;
+        const text = value || '';
+        const newValue = text.substring(0, start) + v + text.substring(end);
+        onChange(newValue);
+        setShowPicker(false);
+    };
+
+    return (
+        <div className="relative w-full">
+            <div className="flex items-center justify-between mb-0.5 px-1">
+                <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">{label}</span>
+                <button type="button" onClick={() => setShowPicker(!showPicker)} className="text-[9px] text-blue-500 hover:text-blue-700 flex items-center gap-0.5 font-bold">
+                    <Zap size={10}/> Pick Variable
+                </button>
+            </div>
+            <input 
+                ref={inputRef}
+                className="w-full bg-slate-50 border border-slate-200 rounded p-1 text-[11px] font-mono text-blue-700 outline-none focus:ring-1 focus:ring-blue-400"
+                value={value || ''}
+                onChange={(e) => onChange(e.target.value)}
+                placeholder="e.g. [H]*0.05"
+            />
+            {showPicker && (
+                <div className="absolute z-[60] top-full left-0 w-64 bg-white shadow-2xl border border-slate-200 rounded-lg p-3 mt-1 animate-in zoom-in-95 duration-150">
+                    <div className="flex justify-between items-center mb-2 border-b pb-1">
+                        <span className="text-[10px] font-black text-slate-800">FIELDS REFERENCE</span>
+                        <X size={12} className="cursor-pointer" onClick={() => setShowPicker(false)}/>
+                    </div>
+                    <div className="max-h-48 overflow-y-auto space-y-2">
+                        {Object.entries(FORMULA_VARIABLES).map(([group, fields]) => (
+                            <div key={group}>
+                                <p className="text-[8px] font-bold text-slate-400 uppercase mb-1">{group}</p>
+                                <div className="grid grid-cols-1 gap-1">
+                                    {fields.map(f => (
+                                        <button key={f.key} type="button" onClick={() => insertVar(f.key)} className="flex justify-between items-center p-1 hover:bg-blue-50 rounded text-left group">
+                                            <span className="text-[10px] font-medium text-slate-600">{f.label}</span>
+                                            <code className="text-[9px] font-bold text-blue-500 bg-blue-50 px-1 rounded group-hover:bg-blue-100">{f.key}</code>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
 
 const InvoiceTypeMaster = () => {
     const emptyState = {
-        code: '', is_option_ii: false, type_name: '', sales_type: '', group_name: '', round_off_digits: 2, debit_acc: '', credit_acc: '',
-        assess_formula: '', assess_acc_name: '',
-        is_charity_enabled: false, charity_rate: 0, charity_formula: '', charity_acc: '',
-        vat_enabled: false, vat_val: 0, vat_formula: '', vat_dr: '', vat_cr: '',
-        duty_enabled: false, duty_val: 0, duty_formula: '', duty_dr: '', duty_cr: '',
-        cess_enabled: false, cess_val: 0, cess_formula: '', cess_dr: '', cess_cr: '',
-        tcs_enabled: false, tcs_val: 0, tcs_formula: '', tcs_dr: '', tcs_cr: '',
-        is_gst_enabled: true, is_igst_enabled: false, igst_pct: 0, igst_formula: '', igst_output_acc: '',
-        sgst_acc: '', cgst_acc: '', sgst_pct: 0, cgst_pct: 0,
-        sub_total_formula: '', total_value_formula: '',
-        round_off: 0, round_off_type: 'Forward', round_off_acc: '',
-        lorry_freight: 0, freight_acc: '', is_acc_posting: true
+        code: '', is_option_ii: false, type_name: '', sales_type: 'CST SALES', group_name: '', round_off_digits: 0,
+        assess_formula: '[Rate / Kg] * [Total Kgs]', assess_account: '',
+        rows: [
+            { id: 'charity', label: 'Charity / Bale', checked: false, val: '3', formula: '[Total Kgs]*[CharityRs]', account: '' },
+            { id: 'vat', label: 'Tax [ VAT ]', checked: false, val: '', formula: '', account: '' },
+            { id: 'duty', label: 'Duty', checked: false, val: '', formula: '', account: '' },
+            { id: 'cess', label: 'Cess', checked: false, val: '', formula: '', account: '' },
+            { id: 'hr_sec_cess', label: 'Hr.Sec.Cess', checked: false, val: '', formula: '', account: '' },
+            { id: 'tcs', label: 'T.C.S', checked: false, val: '', formula: '', account: '' },
+            { id: 'cst', label: 'CST', checked: false, val: '', formula: '', account: '' },
+            { id: 'cenvat', label: 'CENVAT', checked: false, val: '', formula: '', account: '' },
+        ],
+        igst_checked: false, igst_val: '5', igst_formula: 'Round(([H]/([igstper]+100))*[igstper],0)', igst_account: '',
+        gst_checked: false, sgst_pct: 0, cgst_pct: 0, sgst_account: '', cgst_account: '',
+        sub_total_formula: '[H]+[I]', total_value_formula: '[Rate / Kg] * [Total Kgs]', 
+        round_off_direction: 'Reverse', round_off_account: 'ROUND OFF', lorry_freight_account: 'FREIGHT OUTWARD', account_posting: true
     };
 
     const [list, setList] = useState([]);
+    const [isModalOpen, setIsModalOpen] = useState(false);
     const [formData, setFormData] = useState(emptyState);
-    const [search, setSearch] = useState("");
     const [loading, setLoading] = useState(false);
 
     useEffect(() => { fetchRecords(); }, []);
@@ -32,313 +91,243 @@ const InvoiceTypeMaster = () => {
     const fetchRecords = async () => {
         try {
             const res = await mastersAPI.invoiceTypes.getAll();
-            const data = res.data.data || [];
-            setList(data);
-            // Generate code for new entry if we aren't currently editing an existing one
-            if (!formData.id) generateNextCode(data);
-        } catch (err) { console.error("Fetch error", err); }
+            setList(res.data.data || []);
+        } catch (err) { console.error(err); }
     };
 
-    // Logic to calculate the next numeric ID
-    const generateNextCode = (currentList) => {
-        const nextId = currentList.length > 0 ? Math.max(...currentList.map(i => i.id || 0)) + 1 : 1;
-        setFormData(prev => ({ ...prev, code: `${String(nextId)}` }));
-    };
-
-    const handleSave = async () => {
-        if (!formData.type_name) return alert("Please enter Invoice Type Name");
+    const handleSave = async (e) => {
+        e.preventDefault();
         setLoading(true);
         try {
-            if (formData.id) await mastersAPI.invoiceTypes.update(formData.id, formData);
-            else await mastersAPI.invoiceTypes.create(formData);
-            alert("Configuration Synced Successfully");
-            handleAddNew(); fetchRecords();
-        } catch (err) { alert("Error saving configuration"); }
+            formData.id ? await mastersAPI.invoiceTypes.update(formData.id, formData) : await mastersAPI.invoiceTypes.create(formData);
+            fetchRecords(); setIsModalOpen(false);
+        } catch (err) { alert("Save failed"); }
         finally { setLoading(false); }
     };
 
-    const handleDelete = async () => {
-        if (!formData.id) return;
-        if (window.confirm("Delete this invoice configuration? This may affect existing transactions.")) {
-            await mastersAPI.invoiceTypes.delete(formData.id);
-            handleAddNew(); fetchRecords();
-        }
+    // --- Simulation Logic ---
+    const simulate = (formula) => {
+        if (!formula) return 0;
+        try {
+            let f = formula
+                .replace(/\[H\]/g, '1855060')
+                .replace(/\[Rate \/ Kg\]/g, '250')
+                .replace(/\[Total Kgs\]/g, '5280')
+                .replace(/\[CharityRs\]/g, '3')
+                .replace(/\[igstper\]/g, '5')
+                .replace(/Round\(/g, 'Math.round(');
+            return eval(f).toLocaleString();
+        } catch { return 'Err'; }
     };
-
-    const handleAddNew = () => {
-        setFormData(emptyState);
-        generateNextCode(list);
-    };
-
-    // Optimized Components for high-density forms
-    const InputField = ({ label, name, type = "text", isFormula = false, readOnly = false }) => (
-        <div className="flex flex-col">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-tighter mb-1 ml-0.5">{label}</label>
-            <input 
-                type={type} 
-                readOnly={readOnly}
-                className={`w-full border border-slate-200 p-2 rounded-lg text-xs focus:ring-2 focus:ring-indigo-500 outline-none transition-all 
-                    ${isFormula ? 'font-mono bg-slate-50 text-blue-700' : 'bg-white'} 
-                    ${readOnly ? 'cursor-not-allowed bg-slate-100 text-blue-600 font-mono' : ''}`}
-                value={formData[name] || ''} 
-                onChange={e => !readOnly && setFormData({...formData, [name]: e.target.value})}
-            />
-        </div>
-    );
-
-    const Toggle = ({ label, name }) => (
-        <label className="flex items-center justify-between group cursor-pointer p-1">
-            <span className="text-[11px] font-bold text-slate-600 group-hover:text-indigo-600 transition-colors uppercase">{label}</span>
-            <div className="relative inline-flex items-center cursor-pointer">
-                <input type="checkbox" className="sr-only peer" checked={formData[name] || false} 
-                onChange={e => setFormData({...formData, [name]: e.target.checked})} />
-                <div className="w-8 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-indigo-600"></div>
-            </div>
-        </label>
-    );
 
     return (
-        <div className="flex h-screen bg-slate-100 font-sans text-slate-900 overflow-hidden">
-            
-            {/* LEFT SIDEBAR */}
-            <div className="w-80 flex flex-col bg-white border-r border-slate-200 shadow-xl">
-                <div className="p-5 bg-slate-900 text-white">
-                    <div className="flex justify-between items-center mb-4">
-                        <div className="flex items-center gap-2">
-                            <Settings2 size={18} className="text-indigo-400" />
-                            <h2 className="font-black text-xs uppercase tracking-widest">Invoicing Engine</h2>
-                        </div>
-                        <button onClick={handleAddNew} className="p-1.5 bg-indigo-600 rounded-lg hover:bg-indigo-500 transition-all">
-                            <Plus size={16}/>
-                        </button>
-                    </div>
-                    <div className="relative">
-                        <Search className="absolute left-3 top-2.5 text-slate-500" size={14} />
-                        <input 
-                            className="w-full pl-9 pr-4 py-2 bg-slate-800 border-none rounded-lg text-xs text-slate-300 placeholder-slate-500 focus:ring-2 focus:ring-indigo-500 outline-none" 
-                            placeholder="Filter types..." 
-                            onChange={e => setSearch(e.target.value)}
-                        />
-                    </div>
+        <div className="min-h-screen bg-slate-50 p-6 font-sans">
+            <div className="flex justify-between items-center mb-6">
+                <div>
+                    <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2"><Settings2 className="text-blue-600" /> Invoice Type Master</h1>
+                    <p className="text-sm text-slate-500">Replicating core logic from legacy configuration engine</p>
                 </div>
-
-                <div className="flex-1 overflow-y-auto">
-                    {list.filter(i => i.type_name.toLowerCase().includes(search.toLowerCase())).map(item => (
-                        <div 
-                            key={item.id} 
-                            onClick={() => setFormData(item)} 
-                            className={`p-4 border-b border-slate-50 cursor-pointer transition-all flex justify-between items-center ${
-                                formData.id === item.id ? 'bg-indigo-50 border-r-4 border-indigo-600' : 'hover:bg-slate-50'
-                            }`}
-                        >
-                            <div>
-                                <p className={`font-bold text-[11px] uppercase ${formData.id === item.id ? 'text-indigo-700' : 'text-slate-600'}`}>
-                                    {item.type_name}
-                                </p>
-                                <p className="text-[10px] font-mono text-slate-400 mt-0.5">ID: {item.code || 'NO-CODE'}</p>
-                            </div>
-                            <ChevronRight size={14} className={formData.id === item.id ? 'text-indigo-400' : 'text-slate-200'} />
-                        </div>
-                    ))}
-                </div>
+                <button onClick={() => {setFormData(emptyState); setIsModalOpen(true);}} className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2 transition-all shadow-lg shadow-blue-100">
+                    <Plus size={18} /> New Configuration
+                </button>
             </div>
 
-            {/* MAIN CONTENT AREA */}
-            <div className="flex-1 flex flex-col min-w-0">
-                {/* TOOLBAR */}
-                <header className="h-16 bg-white border-b border-slate-200 px-8 flex items-center justify-between shrink-0 z-20">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 bg-slate-100 rounded-lg text-slate-500">
-                            <Calculator size={20} />
-                        </div>
-                        <h1 className="text-lg font-black text-slate-800 tracking-tight uppercase">
-                            {formData.id ? 'Edit Configuration' : 'Create New Engine'}
-                        </h1>
-                    </div>
-                    
-                    <div className="flex items-center gap-3">
-                        <button 
-                            onClick={handleSave} 
-                            disabled={loading}
-                            className="flex items-center gap-2 bg-indigo-600 text-white px-6 py-2 rounded-xl font-black text-[11px] shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-all"
-                        >
-                            <Save size={16}/> {formData.id ? 'UPDATE ENGINE' : 'SAVE ENGINE'}
-                        </button>
-                        {formData.id && (
-                            <button onClick={handleDelete} className="p-2 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all">
-                                <Trash2 size={20}/>
-                            </button>
-                        )}
-                        <button onClick={handleAddNew} className="p-2 text-slate-300 hover:text-slate-600 rounded-lg transition-all">
-                            <X size={20}/>
-                        </button>
-                    </div>
-                </header>
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <table className="w-full text-left text-sm">
+                    <thead className="bg-slate-50 border-b">
+                        <tr>
+                            <th className="p-4 font-black text-slate-400 uppercase text-[10px]">Code</th>
+                            <th className="p-4 font-black text-slate-400 uppercase text-[10px]">Invoice Type Description</th>
+                            <th className="p-4 font-black text-slate-400 uppercase text-[10px]">Sales Type</th>
+                            <th className="p-4 font-black text-slate-400 uppercase text-[10px] text-center">Setup</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                        {list.map((item) => (
+                            <tr key={item.id} className="hover:bg-blue-50/50 cursor-pointer" onClick={() => {setFormData(item); setIsModalOpen(true);}}>
+                                <td className="p-4 font-mono font-bold text-blue-600">{item.code}</td>
+                                <td className="p-4 font-bold text-slate-700 uppercase">{item.type_name}</td>
+                                <td className="p-4 text-slate-500">{item.sales_type}</td>
+                                <td className="p-4 text-center"><Edit size={16} className="mx-auto text-slate-300 group-hover:text-blue-600"/></td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
 
-                {/* SCROLLABLE FORM GRID */}
-                <div className="flex-1 overflow-y-auto p-8 bg-slate-50/50">
-                    <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {isModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 overflow-y-auto">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl my-8 flex flex-col max-h-[90vh]">
+                        {/* Modal Header */}
+                        <div className="bg-blue-600 p-4 flex justify-between items-center text-white shrink-0">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 bg-blue-500 rounded-lg"><Calculator size={20}/></div>
+                                <div>
+                                    <h2 className="font-black uppercase text-sm tracking-tight">Configuration Engine</h2>
+                                    <p className="text-[10px] opacity-80 font-bold">Manage formula logic & account posting</p>
+                                </div>
+                            </div>
+                            <button onClick={() => setIsModalOpen(false)} className="hover:bg-blue-500 p-2 rounded-full transition-colors"><X size={20}/></button>
+                        </div>
                         
-                        {/* COLUMN 1: IDENTITY & POSTING */}
-                        <div className="space-y-6">
-                            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 relative overflow-hidden">
-                                <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500"></div>
-                                <h3 className="text-[11px] font-black text-indigo-500 uppercase tracking-widest mb-6 flex items-center gap-2">
-                                    <ShieldCheck size={16}/> Identity & Posting
-                                </h3>
-                                <div className="space-y-4">
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <InputField label="Identifier Code" name="code" readOnly={true} />
-                                        <div className="pt-4"><Toggle label="Option II Mode" name="is_option_ii" /></div>
-                                    </div>
-                                    <InputField label="Invoice Description" name="type_name" />
-                                    <InputField label="Sales Classification" name="sales_type" />
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <InputField label="Account Group" name="group_name" />
-                                        <InputField label="Round Digits" name="round_off_digits" type="number" />
-                                    </div>
-                                    <div className="grid grid-cols-2 gap-4 p-3 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                                        <InputField label="Debit Ledger" name="debit_acc" />
-                                        <InputField label="Credit Ledger" name="credit_acc" />
-                                    </div>
+                        <form onSubmit={handleSave} className="flex-1 overflow-y-auto p-6 bg-slate-50/30">
+                            {/* TOP BAR: Primary Identifiers */}
+                            <div className="grid grid-cols-6 gap-4 mb-6 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                                <div className="col-span-1">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">Code</label>
+                                    <input className="w-full border p-2 rounded text-xs font-bold" value={formData.code} onChange={e => setFormData({...formData, code: e.target.value})} />
+                                </div>
+                                <div className="col-span-1 flex items-center pt-4">
+                                    <label className="flex items-center gap-2 cursor-pointer group">
+                                        <input type="checkbox" className="w-4 h-4 rounded border-slate-300 text-blue-600" checked={formData.is_option_ii} onChange={e => setFormData({...formData, is_option_ii: e.target.checked})} />
+                                        <span className="text-[11px] font-black text-slate-500 group-hover:text-blue-600 uppercase">Option II</span>
+                                    </label>
+                                </div>
+                                <div className="col-span-2">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">Invoice Type Description</label>
+                                    <input className="w-full border-2 border-blue-50 p-2 rounded font-black text-xs text-blue-800 uppercase focus:border-blue-200 outline-none" value={formData.type_name} onChange={e => setFormData({...formData, type_name: e.target.value})} />
+                                </div>
+                                <div className="col-span-1">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">Sales Type</label>
+                                    <select className="w-full border p-2 rounded text-xs font-bold" value={formData.sales_type} onChange={e => setFormData({...formData, sales_type: e.target.value})}>
+                                        <option value="CST SALES">CST SALES</option>
+                                        <option value="LOCAL SALES">LOCAL SALES</option>
+                                    </select>
+                                </div>
+                                <div className="col-span-1">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">Group Name</label>
+                                    <input className="w-full border p-2 rounded text-xs" value={formData.group_name} onChange={e => setFormData({...formData, group_name: e.target.value})} />
                                 </div>
                             </div>
 
-                            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 relative overflow-hidden">
-                                <div className="absolute top-0 left-0 w-1 h-full bg-amber-500"></div>
-                                <h3 className="text-[11px] font-black text-amber-600 uppercase tracking-widest mb-6 flex items-center gap-2">
-                                    <Landmark size={16}/> Assessable & Charity
-                                </h3>
-                                <div className="space-y-4">
-                                    <InputField label="Assessing Formula" name="assess_formula" isFormula={true} />
-                                    <InputField label="Assessing Posting A/c" name="assess_acc_name" />
-                                    <div className="mt-6 pt-6 border-t border-slate-100">
-                                        <Toggle label="Enable Charity Logic" name="is_charity_enabled" />
-                                        {formData.is_charity_enabled && (
-                                            <div className="grid grid-cols-2 gap-4 mt-4 animate-in fade-in duration-300">
-                                                <InputField label="Rate/Kg" name="charity_rate" type="number" />
-                                                <InputField label="Formula" name="charity_formula" isFormula={true} />
-                                                <div className="col-span-2">
-                                                    <InputField label="Charity Ledger" name="charity_acc" />
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
+                            {/* CALCULATION GRID - IMAGE 2 REPLICA */}
+                            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mb-6">
+                                <table className="w-full text-left">
+                                    <thead className="bg-slate-800 text-white text-[9px] uppercase tracking-wider font-bold">
+                                        <tr>
+                                            <th className="p-2 w-48">Tax Component</th>
+                                            <th className="p-2 w-24 text-center">Val / Rate</th>
+                                            <th className="p-2">Calculation Formula</th>
+                                            <th className="p-2 w-64">Ledger Account Name</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {/* Assessable Row */}
+                                        <tr className="bg-blue-50/40">
+                                            <td className="p-2 text-[11px] font-black text-blue-800 uppercase">Assess value</td>
+                                            <td className="p-1"></td>
+                                            <td className="p-1"><SmartFormulaInput value={formData.assess_formula} onChange={val => setFormData({...formData, assess_formula: val})} /></td>
+                                            <td className="p-1"><input className="w-full border border-slate-200 rounded p-1 text-[11px] uppercase font-bold text-slate-600" placeholder="DEBIT LEDGER" value={formData.assess_account} onChange={e => setFormData({...formData, assess_account: e.target.value})} /></td>
+                                        </tr>
+                                        {/* Tax Rows Mapping */}
+                                        {formData.rows.map((row, idx) => (
+                                            <tr key={row.id} className="hover:bg-slate-50 transition-colors">
+                                                <td className="p-2">
+                                                    <label className="flex items-center gap-2 cursor-pointer">
+                                                        <input type="checkbox" className="rounded" checked={row.checked} onChange={e => {
+                                                            const newRows = [...formData.rows];
+                                                            newRows[idx].checked = e.target.checked;
+                                                            setFormData({...formData, rows: newRows});
+                                                        }} />
+                                                        <span className="text-[11px] font-bold text-slate-600 uppercase">{row.label}</span>
+                                                    </label>
+                                                </td>
+                                                <td className="p-1"><input className="w-full border border-slate-200 rounded p-1 text-[11px] text-center font-bold" value={row.val} onChange={e => {
+                                                    const newRows = [...formData.rows];
+                                                    newRows[idx].val = e.target.value;
+                                                    setFormData({...formData, rows: newRows});
+                                                }} /></td>
+                                                <td className="p-1"><SmartFormulaInput value={row.formula} onChange={val => {
+                                                    const newRows = [...formData.rows];
+                                                    newRows[idx].formula = val;
+                                                    setFormData({...formData, rows: newRows});
+                                                }} /></td>
+                                                <td className="p-1"><input className="w-full border border-slate-200 rounded p-1 text-[11px] uppercase" value={row.account} onChange={e => {
+                                                    const newRows = [...formData.rows];
+                                                    newRows[idx].account = e.target.value;
+                                                    setFormData({...formData, rows: newRows});
+                                                }} /></td>
+                                            </tr>
+                                        ))}
 
-                        {/* COLUMN 2: REGULATORY (GST & DUTIES) */}
-                        <div className="space-y-6">
-                            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 relative overflow-hidden">
-                                <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500"></div>
-                                <h3 className="text-[11px] font-black text-emerald-600 uppercase tracking-widest mb-6 flex items-center gap-2">
-                                    <Percent size={16}/> GST Configuration
-                                </h3>
-                                <div className="space-y-4">
-                                    <Toggle label="Apply GST Logic" name="is_gst_enabled" />
-                                    <div className="p-4 bg-emerald-50 rounded-xl space-y-4">
-                                        <Toggle label="Inter-State (IGST)" name="is_igst_enabled" />
-                                        <div className="grid grid-cols-2 gap-3">
-                                            <InputField label="IGST %" name="igst_pct" type="number" />
-                                            <InputField label="IGST Formula" name="igst_formula" isFormula={true} />
-                                        </div>
-                                        <InputField label="IGST Output Ledger" name="igst_output_acc" />
-                                    </div>
-                                    <div className="grid grid-cols-2 gap-4 pt-2">
-                                        <InputField label="SGST %" name="sgst_pct" type="number" />
-                                        <InputField label="CGST %" name="cgst_pct" type="number" />
-                                        <InputField label="SGST Ledger" name="sgst_acc" />
-                                        <InputField label="CGST Ledger" name="cgst_acc" />
-                                    </div>
-                                </div>
+                                        {/* GST & IGST Special Logic Row */}
+                                        <tr className="bg-emerald-50/20 border-t-2 border-emerald-100">
+                                            <td className="p-2"><label className="flex items-center gap-2"><input type="checkbox" checked={formData.igst_checked} onChange={e => setFormData({...formData, igst_checked: e.target.checked})} /><span className="text-[11px] font-black text-emerald-700 uppercase">IGST (INTER-STATE)</span></label></td>
+                                            <td className="p-1"><input className="w-full border border-emerald-200 rounded p-1 text-[11px] text-center font-bold" value={formData.igst_val} onChange={e => setFormData({...formData, igst_val: e.target.value})} /></td>
+                                            <td className="p-1"><SmartFormulaInput value={formData.igst_formula} onChange={val => setFormData({...formData, igst_formula: val})} /></td>
+                                            <td className="p-1"><input className="w-full border border-emerald-200 rounded p-1 text-[11px] uppercase text-emerald-800" placeholder="OUTPUT IGST LEDGER" value={formData.igst_account} onChange={e => setFormData({...formData, igst_account: e.target.value})} /></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
                             </div>
 
-                            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-                                <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-6">Additional Duties</h3>
-                                <div className="space-y-4">
-                                    {['VAT', 'Duty', 'Cess', 'TCS'].map((tax) => {
-                                        const low = tax.toLowerCase();
-                                        return (
-                                            <div key={tax} className="p-3 border border-slate-100 rounded-xl hover:bg-slate-50 transition-colors">
-                                                <div className="flex justify-between items-center mb-3">
-                                                    <Toggle label={tax} name={`${low}_enabled`} />
-                                                    <div className="flex items-center gap-2">
-                                                        <span className="text-[10px] font-bold text-slate-400">VAL</span>
-                                                        <input className="w-12 border-b border-slate-200 bg-transparent text-xs font-bold text-center outline-none focus:border-indigo-500" value={formData[`${low}_val`] || ''} onChange={e => setFormData({...formData, [`${low}_val`]: e.target.value})} />
-                                                    </div>
-                                                </div>
-                                                <div className="grid grid-cols-2 gap-2">
-                                                    <input className="bg-white border border-slate-200 rounded p-1.5 text-[10px] outline-none focus:ring-1 focus:ring-indigo-500" placeholder="Dr Account" value={formData[`${low}_dr`] || ''} onChange={e => setFormData({...formData, [`${low}_dr`]: e.target.value})} />
-                                                    <input className="bg-white border border-slate-200 rounded p-1.5 text-[10px] outline-none focus:ring-1 focus:ring-indigo-500" placeholder="Cr Account" value={formData[`${low}_cr`] || ''} onChange={e => setFormData({...formData, [`${low}_cr`]: e.target.value})} />
-                                                </div>
-                                            </div>
-                                        )
-                                    })}
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* COLUMN 3: FORMULAS & FREIGHT */}
-                        <div className="space-y-6">
-                            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 relative overflow-hidden">
-                                <div className="absolute top-0 left-0 w-1 h-full bg-purple-500"></div>
-                                <h3 className="text-[11px] font-black text-purple-600 uppercase tracking-widest mb-6 flex items-center gap-2">
-                                    <FileJson size={16}/> Final Calculations
-                                </h3>
-                                <div className="space-y-5">
-                                    <InputField label="Sub-Total Calculation" name="sub_total_formula" isFormula={true} />
-                                    <InputField label="Net Invoice Value" name="total_value_formula" isFormula={true} />
-                                    
-                                    <div className="pt-5 border-t border-slate-100">
-                                        <div className="flex items-center justify-between mb-4">
-                                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Rounding Mode</span>
-                                            <div className="flex bg-slate-100 p-1 rounded-lg">
-                                                {['Forward', 'Reverse'].map(type => (
-                                                    <button 
-                                                        key={type}
-                                                        onClick={() => setFormData({...formData, round_off_type: type})}
-                                                        className={`px-3 py-1 rounded-md text-[10px] font-black transition-all ${formData.round_off_type === type ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-400'}`}
-                                                    >
-                                                        {type.toUpperCase()}
-                                                    </button>
+                            {/* FOOTER CALCS & SIMULATION */}
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                <div className="bg-slate-900 rounded-2xl p-6 text-white shadow-xl relative overflow-hidden">
+                                    <div className="absolute top-0 right-0 p-4 opacity-10"><Calculator size={100}/></div>
+                                    <h3 className="text-[11px] font-black uppercase text-blue-400 mb-4 tracking-widest flex items-center gap-2"><CheckCircle2 size={16}/> Final Calculation Logic</h3>
+                                    <div className="space-y-4 relative z-10">
+                                        <SmartFormulaInput label="Sub Total Calculation [I]" value={formData.sub_total_formula} onChange={val => setFormData({...formData, sub_total_formula: val})} />
+                                        <SmartFormulaInput label="Final Net Invoice Value" value={formData.total_value_formula} onChange={val => setFormData({...formData, total_value_formula: val})} />
+                                        <div className="flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/10">
+                                            <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={formData.account_posting} onChange={e => setFormData({...formData, account_posting: e.target.checked})} /><span className="text-[10px] font-black uppercase">Enable Ledger Posting</span></label>
+                                            <div className="flex gap-4">
+                                                {['Forward', 'Reverse'].map(dir => (
+                                                    <label key={dir} className="flex items-center gap-1 cursor-pointer">
+                                                        <input type="radio" name="round_dir" checked={formData.round_off_direction === dir} onChange={() => setFormData({...formData, round_off_direction: dir})} />
+                                                        <span className="text-[9px] uppercase font-bold tracking-tighter">{dir} Rounding</span>
+                                                    </label>
                                                 ))}
                                             </div>
                                         </div>
-                                        <InputField label="Round-Off Ledger" name="round_off_acc" />
+                                    </div>
+                                </div>
+
+                                {/* LIVE LOGIC PREVIEW */}
+                                <div className="bg-white rounded-2xl p-6 border-2 border-blue-50 shadow-sm">
+                                    <h3 className="text-[11px] font-black uppercase text-slate-400 mb-4 flex items-center gap-2"><AlertCircle size={16} className="text-blue-500"/> Logic Simulator (Test Run)</h3>
+                                    <div className="space-y-2">
+                                        <div className="flex justify-between p-3 bg-slate-50 rounded-lg border border-slate-100">
+                                            <span className="text-[10px] font-bold text-slate-500 uppercase">Input: Rate 250 @ 5280 Kg</span>
+                                            <span className="text-xs font-mono font-black text-blue-600">H = 1,320,000</span>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <div className="p-3 bg-emerald-50 rounded-lg border border-emerald-100">
+                                                <p className="text-[8px] font-black text-emerald-600 uppercase">IGST @ 5%</p>
+                                                <p className="text-lg font-mono font-black text-emerald-700">₹ {simulate(formData.igst_formula)}</p>
+                                            </div>
+                                            <div className="p-3 bg-blue-50 rounded-lg border border-blue-100">
+                                                <p className="text-[8px] font-black text-blue-600 uppercase">Final Value</p>
+                                                <p className="text-lg font-mono font-black text-blue-700">₹ {simulate(formData.total_value_formula)}</p>
+                                            </div>
+                                        </div>
+                                        <p className="text-[9px] text-slate-400 italic text-center mt-2">Simulator uses sample data to verify math syntax before saving.</p>
                                     </div>
                                 </div>
                             </div>
 
-                            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 relative overflow-hidden">
-                                <div className="absolute top-0 left-0 w-1 h-full bg-rose-500"></div>
-                                <h3 className="text-[11px] font-black text-rose-600 uppercase tracking-widest mb-6 flex items-center gap-2">
-                                    <Truck size={16}/> Freight & Logistics
-                                </h3>
-                                <div className="space-y-4">
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <InputField label="Lorry Freight Rate" name="lorry_freight" type="number" />
-                                        <InputField label="Freight Ledger" name="freight_acc" />
-                                    </div>
-                                    <div className="p-4 bg-rose-50 rounded-xl border border-rose-100">
-                                        <Toggle label="Auto-Post to Ledgers" name="is_acc_posting" />
-                                        <p className="text-[9px] text-rose-400 mt-2 italic font-medium leading-tight">
-                                            If disabled, this invoice type will only generate documents without affecting account balances.
-                                        </p>
-                                    </div>
+                            {/* LEDGER FOOTER */}
+                            <div className="mt-6 grid grid-cols-2 gap-4">
+                                <div className="bg-white p-4 rounded-xl border border-slate-200">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">Round Off Ledger Account</label>
+                                    <input className="w-full border p-2 rounded text-xs font-bold uppercase" value={formData.round_off_account} onChange={e => setFormData({...formData, round_off_account: e.target.value})} />
+                                </div>
+                                <div className="bg-white p-4 rounded-xl border border-slate-200">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">Freight Outward Ledger Account</label>
+                                    <input className="w-full border p-2 rounded text-xs font-bold uppercase" value={formData.lorry_freight_account} onChange={e => setFormData({...formData, lorry_freight_account: e.target.value})} />
                                 </div>
                             </div>
-                        </div>
 
+                            <div className="mt-8 pt-6 border-t flex justify-end gap-3">
+                                <button type="button" onClick={() => setIsModalOpen(false)} className="px-8 py-2 text-slate-400 hover:text-slate-600 font-bold uppercase text-[11px]">Discard Changes</button>
+                                <button type="submit" disabled={loading} className="bg-blue-600 hover:bg-blue-700 text-white px-10 py-3 rounded-xl font-black shadow-xl flex items-center gap-2 uppercase text-[11px] tracking-widest transition-all active:scale-95">
+                                    <Save size={18}/> {loading ? 'UPDATING...' : 'Sync Configuration'}
+                                </button>
+                            </div>
+                        </form>
                     </div>
                 </div>
-            </div>
-            
-            <style jsx>{`
-                ::-webkit-scrollbar { width: 4px; }
-                ::-webkit-scrollbar-track { background: transparent; }
-                ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-            `}</style>
+            )}
         </div>
     );
 };
