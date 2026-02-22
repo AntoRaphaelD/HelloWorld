@@ -5,7 +5,7 @@ import {
     ChevronRight, Activity, Scale, ArrowDownToLine, Database,
     Plus, Trash2, X, RefreshCw, ChevronLeft, Edit,
     Square, CheckSquare, Info, Calculator, Package, 
-    Calendar, ArrowRight, AlertCircle, Box
+    Calendar, ArrowRight, AlertCircle, Box, Filter, Hash
 } from 'lucide-react';
 
 const RG1Production = () => {
@@ -32,11 +32,12 @@ const RG1Production = () => {
     const [loading, setLoading] = useState(false);
     const [isModalOpen, setIsModalOpen] = useState(false);
 
-    // --- Search & Selection ---
+    // --- DYNAMIC FILTERING STATE ---
+    const [searchField, setSearchField] = useState('product_name');
+    const [searchCondition, setSearchCondition] = useState('Like');
+    const [searchValue, setSearchValue] = useState('');
     const [isSelectionMode, setIsSelectionMode] = useState(false);
     const [selectedIds, setSelectedIds] = useState([]);
-    const [searchField, setSearchField] = useState('product_name');
-    const [searchValue, setSearchValue] = useState('');
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 10;
 
@@ -123,137 +124,188 @@ const RG1Production = () => {
         finally { setLoading(false); }
     };
 
-    const processedData = useMemo(() => {
-        let result = [...list];
-        if (searchValue) {
+    // --- Dynamic Filtering Logic ---
+    const filteredData = useMemo(() => {
+        let result = Array.isArray(list) ? [...list] : [];
+        if (searchValue.trim()) {
             result = result.filter(item => {
-                const val = searchField === 'product_name' 
-                    ? String(item.Product?.product_name || '').toLowerCase()
-                    : String(item[searchField] || '').toLowerCase();
-                return val.includes(searchValue.toLowerCase());
+                let itemValue = "";
+                if (searchField === 'product_name') itemValue = item.Product?.product_name || "";
+                else itemValue = String(item[searchField] || "");
+
+                const term = searchValue.toLowerCase().trim();
+                return searchCondition === 'Equal' 
+                    ? itemValue.toLowerCase() === term 
+                    : itemValue.toLowerCase().includes(term);
             });
         }
         return result.sort((a, b) => b.id - a.id);
-    }, [list, searchValue, searchField]);
+    }, [list, searchValue, searchField, searchCondition]);
 
-    const currentItems = processedData.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
-    const totalPages = Math.ceil(processedData.length / itemsPerPage) || 1;
+    const currentItems = filteredData.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+    const totalPages = Math.ceil(filteredData.length / itemsPerPage) || 1;
 
     return (
-        <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-sans text-slate-900">
+        <div className="min-h-screen bg-slate-50 p-6 font-sans text-slate-900">
             
             {/* HEADER SECTION */}
-            <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+            <div className="flex justify-between items-center mb-6">
                 <div>
-                    <div className="flex items-center gap-3 mb-1">
-                        <div className="p-2 bg-emerald-600 rounded-lg text-white">
-                            <Factory size={24} />
-                        </div>
-                        <h1 className="text-2xl font-black tracking-tight text-slate-800">RG1 Production</h1>
-                    </div>
-                    <p className="text-slate-500 text-sm font-medium">Daily Finished Goods Stock & Mill Balance Registry</p>
+                    <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+                        <Factory className="text-blue-600" /> RG1 Mill Ledger
+                    </h1>
+                    <p className="text-sm text-slate-500">Daily Production, Dispatches and Closing Mill Stock Registry</p>
                 </div>
                 
-                <div className="flex items-center gap-2 w-full md:w-auto">
-                    <button onClick={handleAddNew} className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-xl font-bold transition-all shadow-lg active:scale-95">
-                        <Plus size={18} /> New Entry
+                <div className="flex gap-2">
+                    <button 
+                        onClick={() => { setIsSelectionMode(!isSelectionMode); setSelectedIds([]); }}
+                        className={`px-5 py-2 border rounded-lg font-semibold transition-all ${isSelectionMode ? 'bg-amber-100 border-amber-300 text-amber-700' : 'bg-white border-slate-200 text-blue-600 hover:bg-slate-50'}`}
+                    >
+                        {isSelectionMode ? 'Cancel' : 'Select'}
                     </button>
-                    <button onClick={fetchRecords} className="p-2.5 border border-slate-200 bg-white rounded-xl text-slate-600 hover:bg-slate-50 transition-all">
+
+                    {isSelectionMode ? (
+                        <button 
+                            disabled={selectedIds.length === 0}
+                            className={`px-5 py-2 border rounded-lg flex items-center gap-2 transition-all ${selectedIds.length > 0 ? 'bg-white border-red-200 text-red-600' : 'bg-white border-slate-100 text-slate-300 cursor-not-allowed'}`}
+                        >
+                            <Trash2 size={18}/> Delete {selectedIds.length > 0 && `(${selectedIds.length})`}
+                        </button>
+                    ) : (
+                        <button onClick={handleAddNew} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg font-semibold shadow-sm transition-all active:scale-95">
+                            <Plus size={18} /> New Log
+                        </button>
+                    )}
+                    
+                    <button onClick={fetchRecords} className="p-2 border border-slate-200 rounded-lg bg-white text-slate-400 hover:text-blue-600 transition-colors">
                         <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
                     </button>
                 </div>
             </div>
 
-            {/* MAIN TABLE CARD */}
-            <div className="max-w-7xl mx-auto bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-                {/* TABLE CONTROLS */}
-                <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex flex-col md:flex-row gap-4">
-                    <div className="relative flex-1">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                        <input 
-                            type="text" 
-                            placeholder="Search by SKU or date..." 
-                            className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
-                            value={searchValue}
-                            onChange={(e) => setSearchValue(e.target.value)}
-                        />
+            {/* DYNAMIC FILTER BAR */}
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-6">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block ml-1">Search Field</label>
+                        <select value={searchField} onChange={(e) => setSearchField(e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-sm outline-none focus:ring-1 focus:ring-blue-500">
+                            <option value="product_name">SKU / Product</option>
+                            <option value="date">Log Date (YYYY-MM-DD)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block ml-1">Condition</label>
+                        <select value={searchCondition} onChange={(e) => setSearchCondition(e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-sm outline-none focus:ring-1 focus:ring-blue-500">
+                            <option value="Like">Like</option>
+                            <option value="Equal">Equal</option>
+                        </select>
+                    </div>
+                    <div className="md:col-span-1">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block ml-1">Value</label>
+                        <div className="relative">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                            <input type="text" placeholder="Start typing..." value={searchValue} onChange={(e) => setSearchValue(e.target.value)} className="w-full border border-slate-200 pl-10 pr-4 py-2 rounded-lg text-sm outline-none focus:ring-1 focus:ring-blue-500 bg-white" />
+                        </div>
                     </div>
                     <div className="flex gap-2">
-                        <button 
-                            onClick={() => { setIsSelectionMode(!isSelectionMode); setSelectedIds([]); }}
-                            className={`px-4 py-2 rounded-xl font-bold text-sm transition-all ${isSelectionMode ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-white border border-slate-200 text-slate-600'}`}
-                        >
-                            {isSelectionMode ? 'Cancel Selection' : 'Bulk Action'}
-                        </button>
+                        <button onClick={() => setSearchValue('')} className="flex-1 border border-slate-200 py-2 rounded-lg text-sm font-bold hover:bg-slate-50 transition-all">Clear Filters</button>
+                        <div className="flex-1 bg-blue-50 text-blue-600 border border-blue-100 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-2">
+                            <Filter size={14}/> {filteredData.length} Logs
+                        </div>
                     </div>
                 </div>
+            </div>
 
+            {/* DATA TABLE */}
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                 <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
+                    <table className="w-full text-left">
                         <thead>
-                            <tr className="bg-slate-50 text-slate-500">
-                                {isSelectionMode && <th className="p-4 w-10"></th>}
-                                <th className="p-4 text-[11px] font-black uppercase tracking-wider">Log Date</th>
-                                <th className="p-4 text-[11px] font-black uppercase tracking-wider">Product Description</th>
-                                <th className="p-4 text-[11px] font-black uppercase tracking-wider text-right">Opening</th>
-                                <th className="p-4 text-[11px] font-black uppercase tracking-wider text-right text-emerald-600">Produced</th>
-                                <th className="p-4 text-[11px] font-black uppercase tracking-wider text-right text-orange-600">Invoiced</th>
-                                <th className="p-4 text-[11px] font-black uppercase tracking-wider text-right">Closing Stock</th>
-                                <th className="p-4 w-10"></th>
+                            <tr className="bg-blue-600 text-white">
+                                {isSelectionMode && (
+                                    <th className="p-4 w-12 text-center">
+                                        <button onClick={() => setSelectedIds(selectedIds.length === currentItems.length ? [] : currentItems.map(i => i.id))}>
+                                            {selectedIds.length === currentItems.length && currentItems.length > 0 ? <CheckSquare size={18} /> : <Square size={18} />}
+                                        </button>
+                                    </th>
+                                )}
+                                <th className="p-4 text-sm font-semibold uppercase tracking-wider">Date</th>
+                                <th className="p-4 text-sm font-semibold uppercase tracking-wider">Finished SKU</th>
+                                <th className="p-4 text-sm font-semibold uppercase tracking-wider text-right">Opening</th>
+                                <th className="p-4 text-sm font-semibold uppercase tracking-wider text-right text-blue-200">Produced (+)</th>
+                                <th className="p-4 text-sm font-semibold uppercase tracking-wider text-right text-orange-200">Invoiced (-)</th>
+                                <th className="p-4 text-sm font-semibold uppercase tracking-wider text-right">Final Stock</th>
+                                {!isSelectionMode && <th className="p-4 w-10"></th>}
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {currentItems.map(item => (
-                                <tr key={item.id} onClick={() => handleRowClick(item)} className="group hover:bg-slate-50/80 cursor-pointer transition-colors">
+                                <tr key={item.id} onClick={() => handleRowClick(item)} className="group hover:bg-blue-50/50 cursor-pointer transition-colors">
                                     {isSelectionMode && (
-                                        <td className="p-4">
-                                            {selectedIds.includes(item.id) ? <CheckSquare className="text-emerald-600" size={18}/> : <Square className="text-slate-300" size={18}/>}
+                                        <td className="p-4 text-center" onClick={(e) => {e.stopPropagation(); handleRowClick(item);}}>
+                                            {selectedIds.includes(item.id) ? <CheckSquare size={18} className="text-blue-600 mx-auto"/> : <Square size={18} className="text-slate-300 mx-auto"/>}
                                         </td>
                                     )}
-                                    <td className="p-4 text-sm font-semibold text-slate-600">{item.date}</td>
+                                    <td className="p-4 text-sm font-mono text-slate-600">{item.date}</td>
                                     <td className="p-4">
-                                        <div className="font-bold text-slate-800">{item.Product?.product_name}</div>
-                                        <div className="text-[10px] text-slate-400 uppercase font-bold tracking-tight">ID: {item.product_id}</div>
+                                        <div className="font-bold text-slate-800 uppercase">{item.Product?.product_name}</div>
+                                        <div className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">System ID: {item.id}</div>
                                     </td>
-                                    <td className="p-4 text-sm text-right font-medium text-slate-500">{item.prev_closing_kgs}</td>
-                                    <td className="p-4 text-sm text-right font-bold text-emerald-600">+{item.production_kgs}</td>
-                                    <td className="p-4 text-sm text-right font-bold text-orange-600">-{item.invoice_kgs}</td>
+                                    <td className="p-4 text-sm text-right font-medium text-slate-500 font-mono">{item.prev_closing_kgs}</td>
+                                    <td className="p-4 text-sm text-right font-bold text-blue-600 font-mono">+{item.production_kgs}</td>
+                                    <td className="p-4 text-sm text-right font-bold text-orange-600 font-mono">-{item.invoice_kgs}</td>
                                     <td className="p-4 text-sm text-right">
-                                        <span className="bg-slate-100 px-2 py-1 rounded-md font-bold text-slate-700">{item.stock_kgs} KG</span>
+                                        <span className="bg-slate-100 px-2 py-1 rounded-md font-black text-slate-800 font-mono">{item.stock_kgs} KG</span>
                                     </td>
-                                    <td className="p-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <Edit size={16} className="text-slate-400" />
-                                    </td>
+                                    {!isSelectionMode && (
+                                        <td className="p-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <Edit size={16} className="text-blue-600" />
+                                        </td>
+                                    )}
                                 </tr>
                             ))}
                         </tbody>
                     </table>
                 </div>
+
+                {/* PAGINATION FOOTER */}
+                <div className="p-4 bg-slate-50 border-t flex items-center justify-between">
+                    <span className="text-xs text-slate-500 font-semibold uppercase tracking-wider">
+                        Page {currentPage} of {totalPages} ({filteredData.length} records)
+                    </span>
+                    <div className="flex gap-2">
+                        <button disabled={currentPage === 1} onClick={() => setCurrentPage(prev => prev - 1)} className="p-2 border rounded bg-white disabled:opacity-30 hover:bg-blue-50 transition-all shadow-sm">
+                            <ChevronLeft size={16}/>
+                        </button>
+                        <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(prev => prev + 1)} className="p-2 border rounded bg-white disabled:opacity-30 hover:bg-blue-50 transition-all shadow-sm">
+                            <ChevronRight size={16}/>
+                        </button>
+                    </div>
+                </div>
             </div>
 
-            {/* --- REFINED PROFESSIONAL MODAL --- */}
+            {/* --- REFINED ERP STOCK MODAL --- */}
             {isModalOpen && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-                    {/* Backdrop */}
-                    <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-md transition-opacity" onClick={() => setIsModalOpen(false)} />
+                    <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsModalOpen(false)} />
                     
-                    {/* Modal Content */}
-                    <div className="relative bg-white w-full max-w-5xl rounded-[2rem] shadow-2xl overflow-hidden flex flex-col max-h-[95vh] animate-in zoom-in duration-200">
+                    <div className="relative bg-white w-full max-w-5xl rounded-[2rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in duration-200">
                         
                         {/* 1. Modal Header */}
-                        <div className="flex items-center justify-between p-6 border-b border-slate-100">
+                        <div className="flex items-center justify-between p-4 bg-blue-600 text-white">
                             <div className="flex items-center gap-4">
-                                <div className={`p-3 rounded-2xl ${formData.id ? 'bg-amber-100 text-amber-600' : 'bg-emerald-100 text-emerald-600'}`}>
-                                    {formData.id ? <Edit size={24} /> : <Plus size={24} />}
+                                <div className="p-2 bg-white/20 rounded-lg">
+                                    <Activity size={24} />
                                 </div>
                                 <div>
-                                    <h2 className="text-xl font-black text-slate-800 tracking-tight">
-                                        {formData.id ? 'Update Production Record' : 'Create Production Log'}
+                                    <h2 className="text-lg font-black uppercase tracking-tight">
+                                        {formData.id ? 'Modify Mill Registry' : 'New Stock Entry Log'}
                                     </h2>
-                                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">RG1 Ledger / Transaction Entry</p>
+                                    <p className="text-[10px] font-bold text-blue-100 uppercase tracking-widest">Transaction Ref: #{formData.id || 'NEW'}</p>
                                 </div>
                             </div>
-                            <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-slate-100 rounded-full text-slate-400 transition-colors">
+                            <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-blue-500 rounded-full transition-colors">
                                 <X size={24} />
                             </button>
                         </div>
@@ -263,11 +315,11 @@ const RG1Production = () => {
                             {/* 2. Left Column: Input Form */}
                             <div className="flex-1 p-8 space-y-8">
                                 
-                                {/* Section A: Identity */}
+                                {/* Section A: Metadata */}
                                 <div>
                                     <div className="flex items-center gap-2 mb-4 text-slate-400">
                                         <Calendar size={14} />
-                                        <span className="text-[10px] font-black uppercase tracking-[0.2em]">Record Identity</span>
+                                        <span className="text-[10px] font-black uppercase tracking-[0.2em]">Log Reference</span>
                                     </div>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <div className="space-y-1.5">
@@ -276,56 +328,56 @@ const RG1Production = () => {
                                                 type="date" 
                                                 value={formData.date}
                                                 onChange={e => setFormData({...formData, date: e.target.value})}
-                                                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
+                                                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold focus:ring-1 focus:ring-blue-500 outline-none transition-all"
                                             />
                                         </div>
                                         <div className="space-y-1.5">
-                                            <label className="text-[10px] font-bold text-slate-500 ml-1 uppercase">Finished Good SKU</label>
+                                            <label className="text-[10px] font-bold text-slate-500 ml-1 uppercase">Finished Product SKU</label>
                                             <select 
                                                 value={formData.product_id}
                                                 onChange={e => onProductChange(e.target.value)}
-                                                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
+                                                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-black focus:ring-1 focus:ring-blue-500 outline-none transition-all"
                                             >
-                                                <option value="">Select Product</option>
+                                                <option value="">-- SELECT SKU --</option>
                                                 {products.map(p => <option key={p.id} value={p.id}>{p.product_name}</option>)}
                                             </select>
                                         </div>
                                     </div>
                                 </div>
 
-                                {/* Section B: Movement Metrics */}
+                                {/* Section B: Flow Metrics */}
                                 <div>
                                     <div className="flex items-center gap-2 mb-4 text-slate-400">
                                         <TrendingUp size={14} />
-                                        <span className="text-[10px] font-black uppercase tracking-[0.2em]">Stock Movement (KG)</span>
+                                        <span className="text-[10px] font-black uppercase tracking-[0.2em]">Registry Quantities (KG)</span>
                                     </div>
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                         <div className="space-y-1.5">
-                                            <label className="text-[10px] font-bold text-slate-500 ml-1 uppercase">Opening Stock</label>
+                                            <label className="text-[10px] font-bold text-slate-500 ml-1 uppercase tracking-tighter">Opening Balance</label>
                                             <input 
                                                 type="number" 
                                                 value={formData.prev_closing_kgs}
                                                 onChange={e => setFormData({...formData, prev_closing_kgs: e.target.value})}
-                                                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-500"
+                                                className="w-full px-4 py-3 bg-slate-100 border border-slate-200 rounded-xl font-bold text-slate-600 font-mono"
                                             />
                                         </div>
                                         <div className="space-y-1.5">
-                                            <label className="text-[10px] font-bold text-emerald-600 ml-1 uppercase">Produced (+)</label>
+                                            <label className="text-[10px] font-bold text-blue-600 ml-1 uppercase tracking-tighter">Produced (+)</label>
                                             <input 
                                                 type="number" 
                                                 value={formData.production_kgs}
                                                 onChange={e => setFormData({...formData, production_kgs: e.target.value})}
-                                                className="w-full px-4 py-3 bg-emerald-50 border border-emerald-100 text-emerald-700 rounded-xl font-black focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
+                                                className="w-full px-4 py-3 bg-blue-50 border border-blue-100 text-blue-700 rounded-xl font-black focus:ring-1 focus:ring-blue-500 outline-none transition-all font-mono"
                                                 placeholder="0.00"
                                             />
                                         </div>
                                         <div className="space-y-1.5">
-                                            <label className="text-[10px] font-bold text-orange-600 ml-1 uppercase">Invoiced (-)</label>
+                                            <label className="text-[10px] font-bold text-orange-600 ml-1 uppercase tracking-tighter">Invoiced (-)</label>
                                             <input 
                                                 type="number" 
                                                 value={formData.invoice_kgs}
                                                 onChange={e => setFormData({...formData, invoice_kgs: e.target.value})}
-                                                className="w-full px-4 py-3 bg-orange-50 border border-orange-100 text-orange-700 rounded-xl font-black focus:ring-2 focus:ring-orange-500 outline-none transition-all"
+                                                className="w-full px-4 py-3 bg-orange-50 border border-orange-100 text-orange-700 rounded-xl font-black focus:ring-1 focus:ring-orange-500 outline-none transition-all font-mono"
                                                 placeholder="0.00"
                                             />
                                         </div>
@@ -336,16 +388,16 @@ const RG1Production = () => {
                                 <div>
                                     <div className="flex items-center gap-2 mb-4 text-slate-400">
                                         <Package size={14} />
-                                        <span className="text-[10px] font-black uppercase tracking-[0.2em]">Physical Packaging</span>
+                                        <span className="text-[10px] font-black uppercase tracking-[0.2em]">Physical Count Details</span>
                                     </div>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-5 border border-dashed border-slate-200 rounded-2xl">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-5 bg-slate-50 border border-slate-200 rounded-2xl">
                                         <div className="space-y-3">
                                             <div className="flex justify-between items-center">
                                                 <label className="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">Packing Type</label>
                                                 <select 
                                                     value={formData.packing_type_id}
                                                     onChange={e => setFormData({...formData, packing_type_id: e.target.value})}
-                                                    className="text-xs font-bold text-slate-800 outline-none bg-transparent underline decoration-slate-200"
+                                                    className="text-xs font-black text-blue-600 outline-none bg-transparent"
                                                 >
                                                     <option value="">Select...</option>
                                                     {packingTypes.map(pt => <option key={pt.id} value={pt.id}>{pt.packing_type}</option>)}
@@ -355,7 +407,7 @@ const RG1Production = () => {
                                                 <label className="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">Wt per Bag (KG)</label>
                                                 <input 
                                                     type="number" 
-                                                    className="w-20 text-right text-xs font-bold p-1 bg-slate-100 rounded" 
+                                                    className="w-20 text-right text-xs font-black p-1 bg-white border rounded" 
                                                     value={formData.weight_per_bag}
                                                     onChange={e => setFormData({...formData, weight_per_bag: e.target.value})}
                                                 />
@@ -363,10 +415,10 @@ const RG1Production = () => {
                                         </div>
                                         <div className="space-y-3">
                                             <div className="flex justify-between items-center">
-                                                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">Total Bags</label>
+                                                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">Bags in Stock</label>
                                                 <input 
                                                     type="number" 
-                                                    className="w-20 text-right text-xs font-bold p-1 bg-slate-100 rounded" 
+                                                    className="w-20 text-right text-xs font-black p-1 bg-white border rounded" 
                                                     value={formData.stock_bags}
                                                     onChange={e => setFormData({...formData, stock_bags: e.target.value})}
                                                 />
@@ -375,7 +427,7 @@ const RG1Production = () => {
                                                 <label className="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">Loose Stock (KG)</label>
                                                 <input 
                                                     type="number" 
-                                                    className="w-20 text-right text-xs font-bold p-1 bg-slate-100 rounded" 
+                                                    className="w-20 text-right text-xs font-black p-1 bg-white border rounded" 
                                                     value={formData.stock_loose_kgs}
                                                     onChange={e => setFormData({...formData, stock_loose_kgs: e.target.value})}
                                                 />
@@ -385,49 +437,51 @@ const RG1Production = () => {
                                 </div>
                             </div>
 
-                            {/* 3. Right Column: Live Calculation Summary */}
-                            <div className="w-full lg:w-80 bg-slate-900 text-white p-8 flex flex-col">
-                                <div className="flex items-center gap-2 mb-8">
-                                    <Calculator size={18} className="text-emerald-400" />
-                                    <h3 className="text-xs font-black uppercase tracking-widest text-slate-400">Ledger Summary</h3>
+                            {/* 3. Right Column: Dark Summary Cockpit */}
+                            <div className="w-full lg:w-80 bg-slate-900 text-white p-8 flex flex-col justify-between">
+                                <div className="space-y-8">
+                                    <div className="text-center">
+                                        <Calculator size={40} className="text-blue-400 mx-auto mb-2" />
+                                        <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Balance Assessment</h3>
+                                    </div>
+
+                                    <div className="space-y-6">
+                                        <div className="group border-b border-white/5 pb-2">
+                                            <p className="text-[9px] font-bold text-slate-500 uppercase mb-1">Opening Stock</p>
+                                            <p className="text-xl font-mono">{formData.prev_closing_kgs} <span className="text-xs text-slate-600">KG</span></p>
+                                        </div>
+
+                                        <div className="flex items-center gap-4 text-blue-400">
+                                            <div className="h-px flex-1 bg-slate-800" />
+                                            <Plus size={14} />
+                                            <div className="h-px flex-1 bg-slate-800" />
+                                        </div>
+
+                                        <div className="border-b border-white/5 pb-2">
+                                            <p className="text-[9px] font-bold text-slate-500 uppercase mb-1">Total Produced</p>
+                                            <p className="text-xl font-mono text-blue-400">+{formData.production_kgs || 0} <span className="text-xs opacity-50">KG</span></p>
+                                        </div>
+
+                                        <div className="flex items-center gap-4 text-orange-400">
+                                            <div className="h-px flex-1 bg-slate-800" />
+                                            <ArrowDownToLine size={14} />
+                                            <div className="h-px flex-1 bg-slate-800" />
+                                        </div>
+
+                                        <div className="border-b border-white/5 pb-2">
+                                            <p className="text-[9px] font-bold text-slate-500 uppercase mb-1">Total Invoiced</p>
+                                            <p className="text-xl font-mono text-orange-400">-{formData.invoice_kgs || 0} <span className="text-xs opacity-50">KG</span></p>
+                                        </div>
+                                    </div>
                                 </div>
 
-                                <div className="space-y-6 flex-1">
-                                    <div className="group">
-                                        <p className="text-[10px] font-bold text-slate-500 uppercase mb-1">Opening Balance</p>
-                                        <p className="text-xl font-bold tracking-tight">{formData.prev_closing_kgs} <span className="text-xs text-slate-500">KG</span></p>
+                                <div className="mt-12 p-6 bg-white/5 rounded-3xl border border-white/10 relative overflow-hidden group text-center">
+                                    <div className="absolute top-0 right-0 p-2 opacity-5">
+                                        <Database size={64} />
                                     </div>
-
-                                    <div className="flex items-center gap-4 text-emerald-400">
-                                        <div className="h-px flex-1 bg-slate-800" />
-                                        <Plus size={14} />
-                                        <div className="h-px flex-1 bg-slate-800" />
-                                    </div>
-
-                                    <div>
-                                        <p className="text-[10px] font-bold text-slate-500 uppercase mb-1">Day Production</p>
-                                        <p className="text-xl font-bold text-emerald-400">+{formData.production_kgs || 0} <span className="text-xs opacity-60">KG</span></p>
-                                    </div>
-
-                                    <div className="flex items-center gap-4 text-orange-400">
-                                        <div className="h-px flex-1 bg-slate-800" />
-                                        <ArrowDownToLine size={14} />
-                                        <div className="h-px flex-1 bg-slate-800" />
-                                    </div>
-
-                                    <div>
-                                        <p className="text-[10px] font-bold text-slate-500 uppercase mb-1">Dispatched/Invoiced</p>
-                                        <p className="text-xl font-bold text-orange-400">-{formData.invoice_kgs || 0} <span className="text-xs opacity-60">KG</span></p>
-                                    </div>
-                                </div>
-
-                                <div className="mt-12 p-6 bg-white/5 rounded-3xl border border-white/10 relative overflow-hidden group">
-                                    <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:scale-110 transition-transform">
-                                        <Database size={48} />
-                                    </div>
-                                    <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-2">Final Mill Stock</p>
-                                    <div className="flex items-baseline gap-2">
-                                        <span className="text-4xl font-black tracking-tighter">{formData.stock_kgs}</span>
+                                    <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-2">Projected Mill Stock</p>
+                                    <div className="flex items-baseline justify-center gap-1">
+                                        <span className="text-4xl font-black font-mono tracking-tighter">{formData.stock_kgs}</span>
                                         <span className="text-sm font-bold text-slate-500">KG</span>
                                     </div>
                                 </div>
@@ -435,27 +489,21 @@ const RG1Production = () => {
                         </div>
 
                         {/* 4. Modal Footer */}
-                        <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-between items-center">
-                            <div className="flex items-center gap-2 text-slate-400 text-xs font-bold italic">
-                                <Info size={14} />
-                                <span>Double check all weights before committing.</span>
-                            </div>
-                            <div className="flex gap-3">
-                                <button 
-                                    onClick={() => setIsModalOpen(false)}
-                                    className="px-6 py-3 text-xs font-black uppercase tracking-widest text-slate-400 hover:text-slate-600 transition-colors"
-                                >
-                                    Discard
-                                </button>
-                                <button 
-                                    onClick={handleSave}
-                                    disabled={loading}
-                                    className="px-8 py-3 bg-slate-900 hover:bg-black text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-slate-200 flex items-center gap-2 active:scale-95 transition-all disabled:opacity-50"
-                                >
-                                    <Save size={16} />
-                                    {loading ? 'Processing...' : 'Commit to Stock'}
-                                </button>
-                            </div>
+                        <div className="p-6 bg-slate-50 border-t flex justify-end items-center gap-4">
+                            <button 
+                                onClick={() => setIsModalOpen(false)}
+                                className="px-6 py-2 text-xs font-black uppercase tracking-widest text-slate-400 hover:text-slate-600 transition-colors"
+                            >
+                                Discard
+                            </button>
+                            <button 
+                                onClick={handleSave}
+                                disabled={loading}
+                                className="px-10 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-xl flex items-center gap-2 active:scale-95 transition-all disabled:opacity-50"
+                            >
+                                <Save size={18} />
+                                {loading ? 'Committing...' : 'Commit to Registry'}
+                            </button>
                         </div>
                     </div>
                 </div>

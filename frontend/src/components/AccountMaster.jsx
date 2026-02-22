@@ -231,7 +231,7 @@ const AccountMaster = () => {
                                                 {selectedIds.includes(item.id) ? <CheckSquare size={20} className="text-blue-600 mx-auto"/> : <Square size={20} className="text-slate-200 mx-auto"/>}
                                             </td>
                                         )}
-                                        <td className="p-4 text-sm font-mono text-slate-500">#{item.account_code}</td>
+                                        <td className="p-4 text-sm font-mono text-slate-500">{item.account_code}</td>
                                         <td className="p-4">
                                             <div className="text-sm font-bold text-slate-700 uppercase">{item.account_name}</div>
                                             <div className="text-[10px] font-bold text-slate-400">{item.account_group}</div>
@@ -292,6 +292,7 @@ const AccountMaster = () => {
                                             <option value="DEBTORS - YARN SALES">DEBTORS - YARN SALES</option>
                                             <option value="CREDITORS - RAW MATERIAL">CREDITORS - RAW MATERIAL</option>
                                             <option value="SUNDRY DEBTORS">SUNDRY DEBTORS</option>
+                                            <option value="DEPOT">DEPOT</option>
                                         </select>
                                     </div>
                                     <div className="space-y-1">
