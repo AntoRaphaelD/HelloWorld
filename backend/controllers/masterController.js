@@ -9,21 +9,73 @@ const {
 const { Op } = require('sequelize');
 
 /**
- * HELPER: Sanitize empty strings to null for ID fields
- * Prevents "Incorrect integer value: ''" errors in MySQL
+ * CORE MATH ENGINE
+ * Evaluates formulas from Invoice Type Master (e.g., "[H]*0.05")
+ * Replaces bracketed keywords with actual numeric context values.
+ */
+const evaluateFormula = (formula, context) => {
+    if (!formula || formula === '-' || formula === '') return 0;
+    try {
+        let processed = formula;
+
+        // 1. Replace defined keywords from context
+        Object.keys(context).forEach(key => {
+            const regex = new RegExp(`\\[${key}\\]`, 'g');
+            const val = context[key] !== undefined ? context[key] : 0;
+            processed = processed.replace(regex, val);
+        });
+
+        // 2. SAFETY: Remove any remaining [KEYWORDS] that weren't in context 
+        // This prevents the "I is not defined" error
+        processed = processed.replace(/\[.*?\]/g, '0');
+
+        // 3. Convert legacy "Round(" to JavaScript "Math.round("
+        processed = processed.replace(/Round\(/gi, 'Math.round(');
+
+        // 4. Execute math
+        // eslint-disable-next-line no-eval
+        const result = eval(processed);
+        return isNaN(result) || !isFinite(result) ? 0 : parseFloat(result.toFixed(2));
+    } catch (err) {
+        console.error(`Math Syntax Error in: ${formula} | Error: ${err.message}`);
+        return 0;
+    }
+};
+/**
+ * HELPER: Clean data for MySQL
+ * Converts empty strings to null for ID/Foreign Key fields
  */
 const sanitizeData = (data) => {
     const sanitized = { ...data };
-    const numericFields = [
-        'broker_id', 'party_id', 'depot_id', 'product_id', 
-        'transport_id', 'packing_type_id', 'tariff_id'
-    ];
     
-    numericFields.forEach(field => {
-        if (sanitized[field] === '' || sanitized[field] === undefined) {
+    // Fields that should be NULL if empty (Foreign Keys/IDs)
+    const idFields = [
+        'broker_id', 'party_id', 'depot_id', 'product_id', 
+        'transport_id', 'packing_type_id', 'tariff_id', 
+        'invoice_type_id', 'load_id'
+    ];
+
+    // Fields that should be 0 if empty (Numeric/Decimal/Kgs)
+    const numericFields = [
+        'packs', 'total_kgs', 'avg_content', 'rate', 'broker_percentage',
+        'qty', 'bag_wt', 'rate_cr', 'rate_imm', 'rate_per_val',
+        'opening_credit', 'opening_debit', 'weight_per_bag', 'freight_charges'
+    ];
+
+    idFields.forEach(field => {
+        if (sanitized[field] === '' || sanitized[field] === undefined || sanitized[field] === null) {
             sanitized[field] = null;
         }
     });
+
+    numericFields.forEach(field => {
+        if (sanitized[field] === '' || sanitized[field] === undefined || sanitized[field] === null) {
+            sanitized[field] = 0;
+        } else {
+            sanitized[field] = parseFloat(sanitized[field]);
+        }
+    });
+
     return sanitized;
 };
 
@@ -33,20 +85,13 @@ const createMasterController = (Model, includeModels = []) => ({
         try {
             const data = await Model.create(sanitizeData(req.body));
             res.status(201).json({ success: true, data });
-        } catch (err) { 
-            console.error(`[Master Create Error] ${Model.name}:`, err.message);
-            res.status(500).json({ success: false, error: err.message }); 
-        }
+        } catch (err) { res.status(500).json({ success: false, error: err.message }); }
     },
     getAll: async (req, res) => {
         try {
-            console.log(`[Database] Fetching Registry: ${Model.name}`);
             const data = await Model.findAll({ include: includeModels });
             res.json({ success: true, data });
-        } catch (err) {
-            console.error(`[Database Error] ${Model.name} getAll:`, err);
-            res.status(500).json({ error: err.message });
-        }
+        } catch (err) { res.status(500).json({ error: err.message }); }
     },
     getOne: async (req, res) => {
         try {
@@ -69,98 +114,13 @@ const createMasterController = (Model, includeModels = []) => ({
     },
     bulkDelete: async (req, res) => {
         try {
-            const { ids } = req.body;
-            if (!ids || !Array.isArray(ids) || ids.length === 0) return res.status(400).json({ success: false, message: "No IDs" });
-            await Model.destroy({ where: { id: { [Op.in]: ids } } });
+            await Model.destroy({ where: { id: { [Op.in]: req.body.ids } } });
             res.status(200).json({ success: true });
         } catch (err) { res.status(500).json({ success: false, error: err.message }); }
     }
 });
 
-// --- 2. MILL ORDER LOGIC ---
-const orderCtrl = createMasterController(OrderHeader, [
-    { model: OrderDetail, as: 'OrderDetails', include: [{ model: Product }] },
-    { model: Account, as: 'Party' },
-    { model: Broker, as: 'Broker' }
-]);
-
-orderCtrl.create = async (req, res) => {
-    const t = await sequelize.transaction();
-    try {
-        const { Details, ...header } = req.body;
-        const order = await OrderHeader.create(sanitizeData(header), { transaction: t });
-        if (Details && Details.length > 0) {
-            await OrderDetail.bulkCreate(Details.map(d => ({ ...d, order_id: order.id })), { transaction: t });
-        }
-        await t.commit();
-        res.status(201).json({ success: true, data: order });
-    } catch (err) { 
-        if (t) await t.rollback(); 
-        console.error("[Order Create Error]:", err.message);
-        res.status(500).json({ error: err.message }); 
-    }
-};
-
-// --- 3. RG1 PRODUCTION LOGIC (Mill Stock) ---
-const productionCtrl = createMasterController(RG1Production, [{ model: Product }, { model: PackingType }]);
-
-productionCtrl.create = async (req, res) => {
-    const t = await sequelize.transaction();
-    try {
-        const { date, product_id, packing_type_id, weight_per_bag, prev_closing_kgs, production_kgs } = req.body;
-
-        if (!product_id || !packing_type_id) {
-            throw new Error("Product and Packing Type are required for production entries.");
-        }
-
-        // 1. Sum Invoiced Qty from standard sales (InvoiceDetail belongsTo InvoiceHeader)
-        const invoiceSum = await InvoiceDetail.sum('total_kgs', {
-            include: [{ model: InvoiceHeader, where: { date }, attributes: [] }],
-            where: { product_id }, 
-            transaction: t
-        }) || 0;
-
-        // 2. Sum Invoiced Qty from direct sales (DirectInvoiceDetail belongsTo DirectInvoiceHeader as 'Header')
-        const directInvoiceSum = await DirectInvoiceDetail.sum('qty', {
-            include: [{ model: DirectInvoiceHeader, as: 'Header', where: { date }, attributes: [] }],
-            where: { product_id }, 
-            transaction: t
-        }) || 0;
-
-        const total_invoiced = parseFloat(invoiceSum) + parseFloat(directInvoiceSum);
-        const closing_stock = parseFloat(prev_closing_kgs || 0) + parseFloat(production_kgs || 0) - total_invoiced;
-        const bag_weight = parseFloat(weight_per_bag || 0);
-
-        // 3. Create RG1 Entry
-        const prod = await RG1Production.create({
-            date,
-            product_id,
-            packing_type_id,
-            weight_per_bag: bag_weight,
-            prev_closing_kgs: parseFloat(prev_closing_kgs || 0),
-            production_kgs: parseFloat(production_kgs || 0),
-            invoice_kgs: total_invoiced,
-            stock_kgs: parseFloat(closing_stock.toFixed(3)),
-            stock_bags: bag_weight > 0 ? Math.floor(closing_stock / bag_weight) : 0,
-            stock_loose_kgs: bag_weight > 0 ? parseFloat((closing_stock % bag_weight).toFixed(3)) : closing_stock
-        }, { transaction: t });
-
-        // 4. Sync Master Product Mill Stock
-        await Product.update(
-            { mill_stock: parseFloat(closing_stock.toFixed(3)) },
-            { where: { id: product_id }, transaction: t }
-        );
-
-        await t.commit();
-        res.status(201).json({ success: true, data: prod });
-    } catch (err) {
-        if (t) await t.rollback();
-        console.error("[Production Error]:", err.message);
-        res.status(500).json({ success: false, error: err.message });
-    }
-};
-
-// --- 4. MILL SALES (STANDARD) ---
+// --- 2. CALCULATED INVOICE LOGIC (Standard Sales) ---
 const invoiceCtrl = createMasterController(InvoiceHeader, [
     { model: Account, as: 'Party' }, { model: Transport },
     { model: InvoiceDetail, include: [{ model: Product }] }
@@ -169,18 +129,115 @@ const invoiceCtrl = createMasterController(InvoiceHeader, [
 invoiceCtrl.create = async (req, res) => {
     const t = await sequelize.transaction();
     try {
-        const { Details, ...header } = req.body;
-        const inv = await InvoiceHeader.create(sanitizeData(header), { transaction: t });
-        for (const item of (Details || [])) {
-            await InvoiceDetail.create({ ...item, invoice_id: inv.id }, { transaction: t });
-            await Product.decrement('mill_stock', { by: item.total_kgs, where: { id: item.product_id }, transaction: t });
+        const { Details, invoice_type_id, freight_charges, ...headerData } = req.body;
+
+        const config = await InvoiceType.findByPk(invoice_type_id);
+        if (!config) throw new Error("Invoice Type configuration not found.");
+
+        let hTotals = { assess: 0, charity: 0, igst: 0, sgst: 0, cgst: 0, vat: 0, duty: 0, cess: 0, hcess: 0, tcs: 0, sub: 0, net: 0 };
+        const processedRows = [];
+
+        for (const item of Details) {
+            const product = await Product.findByPk(item.product_id);
+            
+            // Step 1: Initialize Context with Base Values
+            let ctx = {
+                "Rate / Kg": parseFloat(item.rate) || 0,
+                "Total Kgs": parseFloat(item.total_kgs) || 0,
+                "H": (parseFloat(item.rate) || 0) * (parseFloat(item.total_kgs) || 0),
+                "CharityRs": product ? parseFloat(product.charity_rs || 0) : 0,
+                "Lorryfright": parseFloat(freight_charges || 0),
+                "igstper": parseFloat(config.igst_percentage || 0),
+                "sgstper": parseFloat(config.sgst_percentage || 0),
+                "cgstper": parseFloat(config.cgst_percentage || 0),
+                "vatper": parseFloat(config.vat_percentage || 0),
+                "dutyper": parseFloat(config.duty_percentage || 0),
+                "cessper": parseFloat(config.cess_percentage || 0),
+                "hcessper": parseFloat(config.hr_sec_cess_percentage || 0),
+                "tcsper": parseFloat(config.tcs_percentage || 0),
+                // Initialize calculated placeholders as 0 to prevent "undefined" errors
+                "A": 0, "I": 0, "igstamt": 0, "sgstamt": 0, "cgstamt": 0, "Charity": 0,
+                "vatamt": 0, "dutyamt": 0, "cessamt": 0, "hcessamt": 0, "tcsamt": 0
+            };
+
+            // Step 2: Calculate Taxes first
+            ctx["Charity"] = config.charity_checked ? evaluateFormula(config.charity_formula, ctx) : 0;
+            ctx["igstamt"] = config.igst_checked ? evaluateFormula(config.igst_formula, ctx) : 0;
+            ctx["sgstamt"] = config.gst_checked ? evaluateFormula(config.sgst_formula, ctx) : 0;
+            ctx["cgstamt"] = config.gst_checked ? evaluateFormula(config.cgst_formula, ctx) : 0;
+            ctx["vatamt"] = config.vat_checked ? evaluateFormula(config.vat_formula, ctx) : 0;
+            ctx["dutyamt"] = config.duty_checked ? evaluateFormula(config.duty_formula, ctx) : 0;
+            ctx["cessamt"] = config.cess_checked ? evaluateFormula(config.cess_formula, ctx) : 0;
+            ctx["hcessamt"] = config.hr_sec_cess_checked ? evaluateFormula(config.hr_sec_cess_formula, ctx) : 0;
+            ctx["tcsamt"] = config.tcs_checked ? evaluateFormula(config.tcs_formula, ctx) : 0;
+
+            // Step 3: Calculate Assessable [A] using the taxes above
+            ctx["A"] = evaluateFormula(config.assess_formula, ctx);
+
+            // Step 4: Calculate Sub Total [I] using [A] and taxes
+            ctx["I"] = evaluateFormula(config.sub_total_formula, ctx);
+
+            // Step 5: Calculate Final Row Value
+            const finalRowVal = evaluateFormula(config.total_value_formula, ctx);
+
+            // Accumulate Header Totals
+            hTotals.assess += ctx["A"]; 
+            hTotals.charity += ctx["Charity"];
+            hTotals.igst += ctx["igstamt"];
+            hTotals.sgst += ctx["sgstamt"];
+            hTotals.cgst += ctx["cgstamt"];
+            hTotals.sub += ctx["I"];
+            hTotals.net += finalRowVal;
+
+            processedRows.push({
+                ...item,
+                assessable_value: ctx["A"],
+                charity_amt: ctx["Charity"],
+                igst_amt: ctx["igstamt"],
+                sgst_amt: ctx["sgstamt"],
+                cgst_amt: ctx["cgstamt"],
+                sub_total: ctx["I"],
+                final_value: finalRowVal
+            });
         }
+
+        // Create Header (Including all aggregate fields)
+        const header = await InvoiceHeader.create({
+            ...sanitizeData(headerData),
+            invoice_type_id,
+            total_assessable: hTotals.assess,
+            total_charity: hTotals.charity,
+            total_igst: hTotals.igst,
+            total_sgst: hTotals.sgst,
+            total_cgst: hTotals.cgst,
+            sub_total: hTotals.sub,
+            net_amount: hTotals.net
+        }, { transaction: t });
+
+        // Save Details and Update Product Stock
+        // Save Details and Update Product Stock
+for (const row of processedRows) {
+    // 🔥 SANITIZE THE ROW DATA BEFORE SAVING
+    const sanitizedRow = sanitizeData(row);
+    
+    await InvoiceDetail.create({ 
+        ...sanitizedRow, 
+        invoice_id: header.id 
+    }, { transaction: t });
+
+    await Product.decrement('mill_stock', { 
+        by: sanitizedRow.total_kgs, 
+        where: { id: sanitizedRow.product_id }, 
+        transaction: t 
+    });
+}
+
         await t.commit();
-        res.status(201).json({ success: true, data: inv });
-    } catch (err) { 
-        if (t) await t.rollback(); 
-        console.error("[Invoice Create Error]:", err.message);
-        res.status(500).json({ error: err.message }); 
+        res.status(201).json({ success: true, data: header });
+    } catch (err) {
+        if (t) await t.rollback();
+        console.error("CREATE INVOICE ERROR:", err);
+        res.status(500).json({ success: false, error: err.message });
     }
 };
 
@@ -204,174 +261,234 @@ invoiceCtrl.reject = async (req, res) => {
     } catch (err) { if (t) await t.rollback(); res.status(500).json({ error: err.message }); }
 };
 
-// --- 5. MILL SALES (DIRECT - WITHOUT ORDER) ---
-const directInvoiceCtrl = createMasterController(DirectInvoiceHeader, [
-    { model: Account, as: 'Party' }, { model: Broker, as: 'Broker' },
-    { model: DirectInvoiceDetail, as: 'OrderDetails', include: [{ model: Product, as: 'Product' }] }
-]);
+// --- 3. RG1 PRODUCTION LOGIC ---
+const productionCtrl = createMasterController(RG1Production, [{ model: Product }, { model: PackingType }]);
 
-directInvoiceCtrl.create = async (req, res) => {
+productionCtrl.create = async (req, res) => {
     const t = await sequelize.transaction();
     try {
-        const { Details, ...headerData } = req.body;
-        const header = await DirectInvoiceHeader.create(sanitizeData(headerData), { transaction: t });
-        if (Details && Details.length > 0) {
-            await DirectInvoiceDetail.bulkCreate(Details.map(d => ({ ...d, direct_invoice_id: header.id })), { transaction: t });
-            for (const item of Details) {
-                await Product.decrement('mill_stock', { by: parseFloat(item.qty || 0), where: { id: item.product_id }, transaction: t });
-            }
-        }
-        await t.commit();
-        res.status(201).json({ success: true, data: header });
-    } catch (err) { 
-        if (t) await t.rollback(); 
-        console.error("[Direct Invoice Error]:", err.message);
-        res.status(500).json({ success: false, error: err.message }); 
-    }
-};
+        const { date, product_id, packing_type_id, weight_per_bag, prev_closing_kgs, production_kgs } = req.body;
 
-directInvoiceCtrl.update = async (req, res) => {
-    const t = await sequelize.transaction();
-    try {
-        const { Details, ...headerData } = req.body;
-        await DirectInvoiceHeader.update(sanitizeData(headerData), { where: { id: req.params.id }, transaction: t });
-        if (Details) {
-            await DirectInvoiceDetail.destroy({ where: { direct_invoice_id: req.params.id }, transaction: t });
-            await DirectInvoiceDetail.bulkCreate(Details.map(d => ({ ...d, direct_invoice_id: req.params.id })), { transaction: t });
-        }
+        const invSum = await InvoiceDetail.sum('total_kgs', {
+            include: [{ model: InvoiceHeader, where: { date }, attributes: [] }],
+            where: { product_id }, transaction: t
+        }) || 0;
+
+        const directSum = await DirectInvoiceDetail.sum('qty', {
+            include: [{ model: DirectInvoiceHeader, as: 'Header', where: { date }, attributes: [] }],
+            where: { product_id }, transaction: t
+        }) || 0;
+
+        const total_invoiced = parseFloat(invSum) + parseFloat(directSum);
+        const closing_stock = parseFloat(prev_closing_kgs || 0) + parseFloat(production_kgs || 0) - total_invoiced;
+        const bag_weight = parseFloat(weight_per_bag || 0);
+
+        const prod = await RG1Production.create({
+            date, product_id, packing_type_id, weight_per_bag: bag_weight,
+            prev_closing_kgs: parseFloat(prev_closing_kgs || 0),
+            production_kgs: parseFloat(production_kgs || 0),
+            invoice_kgs: total_invoiced,
+            stock_kgs: parseFloat(closing_stock.toFixed(3)),
+            stock_bags: bag_weight > 0 ? Math.floor(closing_stock / bag_weight) : 0,
+            stock_loose_kgs: bag_weight > 0 ? parseFloat((closing_stock % bag_weight).toFixed(3)) : closing_stock
+        }, { transaction: t });
+
+        await Product.update({ mill_stock: parseFloat(closing_stock.toFixed(3)) }, { where: { id: product_id }, transaction: t });
+
         await t.commit();
-        res.status(200).json({ success: true });
+        res.status(201).json({ success: true, data: prod });
     } catch (err) { if (t) await t.rollback(); res.status(500).json({ error: err.message }); }
 };
 
-// --- 6. DEPOT INVENTORY CORE LOGIC ---
-
+// --- 4. DEPOT STORAGE LOGIC ---
 const getDepotInventory = async (req, res) => {
     try {
         const { depotId } = req.params;
         const products = await Product.findAll({ include: [{ model: TariffSubHead }] });
 
-        const inventoryReport = await Promise.all(products.map(async (product) => {
-            
-            const openingBalance = await DepotReceived.sum('total_kgs', {
-                where: { product_id: product.id, depot_id: depotId, type: 'OPENING' }
+        const data = await Promise.all(products.map(async (p) => {
+            const opening = await DepotReceived.sum('total_kgs', { where: { product_id: p.id, depot_id: depotId, type: 'OPENING' } }) || 0;
+            const inward = await InvoiceDetail.sum('total_kgs', {
+                include: [{ model: InvoiceHeader, where: { depot_id: depotId, is_depot_inwarded: true }, attributes: [] }],
+                where: { product_id: p.id }
+            }) || 0;
+            const outward = await DepotSalesDetail.sum('total_kgs', {
+                include: [{ model: DepotSalesHeader, where: { depot_id: depotId }, attributes: [] }],
+                where: { product_id: p.id }
             }) || 0;
 
-            const standardInward = await InvoiceDetail.sum('total_kgs', {
-                where: { product_id: product.id },
-                include: [{ model: InvoiceHeader, where: { depot_id: depotId, is_depot_inwarded: true }, attributes: [] }]
-            }) || 0;
-
-            const directInward = await DirectInvoiceDetail.sum('qty', {
-                where: { product_id: product.id },
-                include: [{ model: DirectInvoiceHeader, as: 'Header', where: { depot_id: depotId, is_depot_inwarded: true }, attributes: [] }]
-            }) || 0;
-
-            const transfersIn = await DepotSalesDetail.sum('total_kgs', {
-                where: { product_id: product.id },
-                include: [{ model: DepotSalesHeader, where: { party_id: depotId, sales_type: 'DEPOT TRANSFER' }, attributes: [] }]
-            }) || 0;
-
-            const totalOutward = await DepotSalesDetail.sum('total_kgs', {
-                where: { product_id: product.id },
-                include: [{ model: DepotSalesHeader, where: { depot_id: depotId }, attributes: [] }]
-            }) || 0;
-
-            const currentStock = (parseFloat(openingBalance) + parseFloat(standardInward) + parseFloat(directInward) + parseFloat(transfersIn)) - parseFloat(totalOutward);
-
-            return {
-                ...product.toJSON(),
-                depot_stock: currentStock > 0 ? currentStock : 0 
-            };
+            const stock = (parseFloat(opening) + parseFloat(inward)) - parseFloat(outward);
+            return { ...p.toJSON(), depot_stock: stock > 0 ? stock : 0 };
         }));
-        res.json({ success: true, data: inventoryReport });
-    } catch (err) { 
-        console.error("[Inventory Query Error]:", err.message);
-        res.status(500).json({ error: err.message }); 
-    }
+        res.json({ success: true, data });
+    } catch (err) { res.status(500).json({ error: err.message }); }
 };
+// --- masterController.js ---
 
-// --- 7. DEPOT INWARD & SALES/TRANSFER LOGIC ---
-
-const depotInwardCtrl = {
-    create: async (req, res) => {
-        const t = await sequelize.transaction();
-        try {
-            const { invoice_no, depot_id, date } = req.body;
-            let header = await InvoiceHeader.findOne({ where: { invoice_no } });
-            let ModelRef = InvoiceHeader;
-            if (!header) {
-                header = await DirectInvoiceHeader.findOne({ where: { order_no: invoice_no } });
-                ModelRef = DirectInvoiceHeader;
-            }
-            if (!header) throw new Error("Invoice not found in Mill records");
-            
-            await ModelRef.update({ is_depot_inwarded: true, depot_id: parseInt(depot_id) }, { where: { id: header.id }, transaction: t });
-            await DepotReceived.create({ date: date || new Date(), depot_id: parseInt(depot_id), invoice_no, remarks: 'Mill Sync' }, { transaction: t });
-            await t.commit();
-            res.json({ success: true });
-        } catch (err) { if (t) await t.rollback(); res.status(500).json({ error: err.message }); }
-    }
-};
-
-const depotSalesCtrl = createMasterController(DepotSalesHeader, [
-    { model: Account, as: 'Party' }, { model: Account, as: 'Depot' },
-    { model: Transport }, { model: DepotSalesDetail, include: [{ model: Product }] }
+// Define the Order Controller specifically to handle nested details
+const orderCtrl = createMasterController(OrderHeader, [
+    { model: OrderDetail, as: 'OrderDetails', include: [{ model: Product }] },
+    { model: Account, as: 'Party' }, 
+    { model: Broker, as: 'Broker' }
 ]);
 
-depotSalesCtrl.create = async (req, res) => {
+// OVERRIDE CREATE
+orderCtrl.create = async (req, res) => {
     const t = await sequelize.transaction();
     try {
-        const { items, ...headerData } = req.body;
-        const header = await DepotSalesHeader.create(sanitizeData(headerData), { transaction: t });
-        if (items && items.length > 0) {
-            const detailRows = items.map(item => ({
-                depot_sales_id: header.id,
-                product_id: item.product_id,
-                total_kgs: parseFloat(item.qty || item.total_kgs || 0),
-                packs: item.packs || 0
+        console.log("ORDER BODY:", req.body);
+
+        const { OrderDetails, ...headerData } = req.body;
+
+        // 1️⃣ Create header FIRST
+        const header = await OrderHeader.create(
+            sanitizeData(headerData),
+            { transaction: t }
+        );
+
+        console.log("HEADER CREATED ID:", header.id);
+
+        // 2️⃣ Manually insert details
+        if (OrderDetails && OrderDetails.length > 0) {
+            const detailRows = OrderDetails.map(item => ({
+                ...sanitizeData(item),
+                order_id: header.id   // 🔥 FORCE FK
             }));
-            await DepotSalesDetail.bulkCreate(detailRows, { transaction: t });
+
+            console.log("DETAIL ROWS:", detailRows);
+
+            await OrderDetail.bulkCreate(detailRows, { transaction: t });
         }
+
         await t.commit();
         res.status(201).json({ success: true, data: header });
-    } catch (err) { 
-        if (t) await t.rollback(); 
-        console.error("[Depot Sales Error]:", err.message);
-        res.status(500).json({ error: err.message }); 
+
+    } catch (err) {
+        await t.rollback();
+        console.error("ORDER CREATE ERROR:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+};
+// OVERRIDE UPDATE
+orderCtrl.update = async (req, res) => {
+    const t = await sequelize.transaction();
+    try {
+        const { id } = req.params;
+        const { OrderDetails, ...headerData } = req.body;
+
+        await OrderHeader.update(
+            sanitizeData(headerData),
+            { where: { id }, transaction: t }
+        );
+
+        await OrderDetail.destroy({
+            where: { order_id: id },
+            transaction: t
+        });
+
+        if (OrderDetails && OrderDetails.length > 0) {
+            const detailRows = OrderDetails.map(item => ({
+                ...sanitizeData(item),
+                order_id: id
+            }));
+
+            await OrderDetail.bulkCreate(detailRows, { transaction: t });
+        }
+
+        await t.commit();
+        res.json({ success: true });
+
+    } catch (err) {
+        await t.rollback();
+        console.error("ORDER UPDATE ERROR:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+};
+const directInvoiceCtrl = createMasterController(DirectInvoiceHeader, [
+    { model: Account, as: 'Party' },
+    { 
+        model: DirectInvoiceDetail, 
+        as: 'DirectInvoiceDetails',
+        include: [{ model: Product, as: 'Product' }]
+    }
+]);
+
+// CREATE
+directInvoiceCtrl.create = async (req, res) => {
+    const t = await sequelize.transaction();
+    try {
+        console.log("DIRECT BODY:", req.body);
+
+        const { Details, ...headerData } = req.body;
+
+        // 1️⃣ Create Header
+        const header = await DirectInvoiceHeader.create(
+            sanitizeData(headerData),
+            { transaction: t }
+        );
+
+        console.log("DIRECT HEADER ID:", header.id);
+
+        // 2️⃣ Insert Details
+        if (Details && Details.length > 0) {
+            const detailRows = Details.map(item => ({
+                ...sanitizeData(item),
+                direct_invoice_id: header.id  // 🔥 VERY IMPORTANT
+            }));
+
+            console.log("DIRECT DETAILS:", detailRows);
+
+            await DirectInvoiceDetail.bulkCreate(detailRows, { transaction: t });
+        }
+
+        await t.commit();
+        res.status(201).json({ success: true, data: header });
+
+    } catch (err) {
+        await t.rollback();
+        console.error("DIRECT CREATE ERROR:", err);
+        res.status(500).json({ success: false, error: err.message });
     }
 };
 
-// --- 8. REPORTING & PRINT ---
-const reportCtrl = {
-    getReportData: async (req, res) => {
-        const { reportId } = req.params;
-        const { start, end } = req.query;
-        let where = {};
-        if (start && end) where.date = { [Op.between]: [start, end] };
-        try {
-            let data = [];
-            if (reportId === 'sales-with-order') {
-                data = await InvoiceHeader.findAll({ where, include: [{ model: Account, as: 'Party' }, { model: InvoiceDetail, include: [Product] }] });
-            } else if (reportId === 'sales-direct') {
-                data = await DirectInvoiceHeader.findAll({ where, include: [{ model: Account, as: 'Party' }, { model: DirectInvoiceDetail, include: [Product] }] });
-            }
-            res.json({ success: true, data });
-        } catch (err) { res.status(500).json({ error: err.message }); }
-    },
-    getInvoicePrintData: async (req, res) => {
-        try {
-            const data = await InvoiceHeader.findOne({
-                where: { invoice_no: req.params.invoiceNo },
-                include: [{ model: Account, as: 'Party' }, { model: Transport }, { model: InvoiceDetail, include: [{ model: Product, include: [TariffSubHead] }] }]
-            });
-            if (!data) return res.status(404).json({ success: false, message: "Not found" });
-            res.json({ success: true, data });
-        } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-    },
-};
+// UPDATE
+directInvoiceCtrl.update = async (req, res) => {
+    const t = await sequelize.transaction();
+    try {
+        const { id } = req.params;
+        const { Details, ...headerData } = req.body;
 
-// --- 9. EXPORTS ---
+        await DirectInvoiceHeader.update(
+            sanitizeData(headerData),
+            { where: { id }, transaction: t }
+        );
+
+        // delete old rows
+        await DirectInvoiceDetail.destroy({
+            where: { direct_invoice_id: id },
+            transaction: t
+        });
+
+        // recreate
+        if (Details && Details.length > 0) {
+            const detailRows = Details.map(item => ({
+                ...sanitizeData(item),
+                direct_invoice_id: id
+            }));
+
+            await DirectInvoiceDetail.bulkCreate(detailRows, { transaction: t });
+        }
+
+        await t.commit();
+        res.json({ success: true });
+
+    } catch (err) {
+        await t.rollback();
+        console.error("DIRECT UPDATE ERROR:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+};
+// --- 5. EXPORTS ---
 module.exports = {
     account: createMasterController(Account),
     broker: createMasterController(Broker),
@@ -380,14 +497,52 @@ module.exports = {
     packing: createMasterController(PackingType),
     product: createMasterController(Product, [{ model: TariffSubHead }]),
     invoiceType: createMasterController(InvoiceType),
-    order: orderCtrl,
+    
+    // order: createMasterController(OrderHeader, [
+    //     { model: OrderDetail, as: 'OrderDetails', include: [{ model: Product }] },
+    //     { model: Account, as: 'Party' }, { model: Broker, as: 'Broker' }
+    // ]),
+     order: orderCtrl,
     production: productionCtrl,
     invoice: invoiceCtrl,
+    
     directInvoice: directInvoiceCtrl,
-    depotInward: depotInwardCtrl,
+
+    depotInward: {
+        create: async (req, res) => {
+            const t = await sequelize.transaction();
+            try {
+                const { invoice_no, depot_id } = req.body;
+                await InvoiceHeader.update({ is_depot_inwarded: true, depot_id }, { where: { invoice_no }, transaction: t });
+                await DepotReceived.create({ date: new Date(), depot_id, invoice_no, type: 'INWARD' }, { transaction: t });
+                await t.commit(); res.json({ success: true });
+            } catch (err) { if (t) await t.rollback(); res.status(500).json({ error: err.message }); }
+        }
+    },
+
     getDepotInventory,
     depotReceived: createMasterController(DepotReceived, [{ model: Account, as: 'Depot' }, { model: Product, as: 'Product' }]),
-    depotSales: depotSalesCtrl,
+    
+    depotSales: createMasterController(DepotSalesHeader, [
+        { model: Account, as: 'Party' }, { model: DepotSalesDetail, include: [{ model: Product }] }
+    ]),
+
     despatch: createMasterController(DespatchEntry, [{ model: Transport }]),
-    reports: reportCtrl,
+    
+    reports: {
+        getReportData: async (req, res) => {
+            const { start, end } = req.query;
+            let where = {};
+            if (start && end) where.date = { [Op.between]: [start, end] };
+            const data = await InvoiceHeader.findAll({ where, include: [{ model: Account, as: 'Party' }, { model: InvoiceDetail, include: [Product] }] });
+            res.json({ success: true, data });
+        },
+        getInvoicePrintData: async (req, res) => {
+            const data = await InvoiceHeader.findOne({
+                where: { invoice_no: req.params.invoiceNo },
+                include: [{ model: Account, as: 'Party' }, { model: Transport }, { model: InvoiceDetail, include: [{ model: Product, include: [TariffSubHead] }] }]
+            });
+            res.json({ success: true, data });
+        }
+    }
 };

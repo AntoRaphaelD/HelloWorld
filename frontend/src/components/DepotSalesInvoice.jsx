@@ -68,7 +68,7 @@ const DepotSalesInvoice = () => {
     const [products, setProducts] = useState([]);
     const [transports, setTransports] = useState([]);
     const [brokers, setBrokers] = useState([]);
-    const [packingTypes, setPackingTypes] = useState([]); // New state for packing types
+    const [packingTypes, setPackingTypes] = useState([]);
 
     // Search & Selection
     const [searchField, setSearchField] = useState('invoice_no');
@@ -81,10 +81,8 @@ const DepotSalesInvoice = () => {
 
     // --- EFFECT: Automatic Financial Calculation Engine ---
     useEffect(() => {
-        // 1. Calculate Assessable Value from Grid
         const totalAssessable = gridRows.reduce((sum, row) => sum + (parseFloat(row.amount) || 0), 0);
 
-        // 2. Sum up all taxes and charges
         const charity = parseFloat(formData.charity) || 0;
         const vat = parseFloat(formData.vat_tax) || 0;
         const cenvat = parseFloat(formData.cenvat) || 0;
@@ -130,7 +128,7 @@ const DepotSalesInvoice = () => {
                 mastersAPI.products.getAll(),
                 mastersAPI.transports.getAll(),
                 mastersAPI.brokers.getAll(),
-                mastersAPI.packingTypes.getAll() // Fetch from tbl_PackingTypes
+                mastersAPI.packingTypes.getAll()
             ]);
             setDepots(dep.data.data || []);
             setParties(par.data.data || []);
@@ -164,7 +162,6 @@ const DepotSalesInvoice = () => {
         const updated = [...gridRows];
         updated[index][field] = value;
         
-        // Auto Calculate Row Math
         const kgs = parseFloat(updated[index].total_kgs) || 0;
         const rate = parseFloat(updated[index].rate) || 0;
         const packs = parseFloat(updated[index].packs) || 0;
@@ -205,6 +202,34 @@ const DepotSalesInvoice = () => {
             fetchRecords();
         } catch (err) { alert("Save failed"); }
         finally { setSubmitLoading(false); }
+    };
+
+    // NEW: Row click handler (edit OR selection toggle)
+    const handleRowClick = (item) => {
+        if (isSelectionMode) {
+            setSelectedIds(prev =>
+                prev.includes(item.id)
+                    ? prev.filter(id => id !== item.id)
+                    : [...prev, item.id]
+            );
+            return;
+        }
+
+        // Edit mode
+        setFormData({
+            ...emptyInvoice,
+            ...item,
+            date: item.date ? item.date.split('T')[0] : new Date().toISOString().split('T')[0],
+            lr_date: item.lr_date ? item.lr_date.split('T')[0] : new Date().toISOString().split('T')[0],
+            removal_time: item.removal_time || new Date().toISOString().slice(0, 16),
+        });
+        setGridRows(
+            item.Details && item.Details.length > 0
+                ? item.Details.map(d => ({ ...d }))
+                : [{ order_no: '', product_id: '', packs: 0, packing_type_id: '', total_kgs: 0, rate: 0, amount: 0, avg_content: 0 }]
+        );
+        setActiveTab('head');
+        setIsModalOpen(true);
     };
 
     // --- Dynamic Filtering Logic ---
@@ -283,7 +308,7 @@ const DepotSalesInvoice = () => {
                 </div>
             </div>
 
-            {/* 3. DATA TABLE */}
+            {/* 3. DATA TABLE - with meaningful empty state */}
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                 <div className="overflow-x-auto">
                     <table className="w-full text-left border-collapse">
@@ -299,27 +324,83 @@ const DepotSalesInvoice = () => {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 font-mono">
-                            {currentItems.map((item) => (
-                                <tr key={item.id} onClick={() => handleRowClick(item)} className={`transition-all cursor-pointer hover:bg-blue-50/50 ${selectedIds.includes(item.id) ? 'bg-blue-50' : ''}`}>
-                                    {isSelectionMode && (
-                                        <td className="p-4 text-center" onClick={(e) => {e.stopPropagation(); handleRowClick(item);}}>
-                                            {selectedIds.includes(item.id) ? <CheckSquare size={18} className="text-blue-600 mx-auto"/> : <Square size={18} className="text-slate-200 mx-auto"/>}
-                                        </td>
-                                    )}
-                                    <td className="p-4 text-sm font-black text-blue-600">DEP-{item.invoice_no}</td>
-                                    <td className="p-4 text-sm text-slate-500 font-sans">{item.date}</td>
-                                    <td className="p-4 text-sm font-bold text-slate-700 uppercase font-sans">{item.Depot?.account_name}</td>
-                                    <td className="p-4 text-sm font-bold text-slate-500 uppercase font-sans">{item.Party?.account_name}</td>
-                                    <td className="p-4 text-sm font-black text-right text-emerald-600 font-mono">₹{parseFloat(item.final_invoice_value).toLocaleString()}</td>
-                                    {!isSelectionMode && <td className="p-4"><Edit size={16} className="text-slate-300" /></td>}
+                            {loading ? (
+                                <tr>
+                                    <td colSpan={6} className="py-24">
+                                        <div className="flex flex-col items-center justify-center">
+                                            <RefreshCw size={48} className="animate-spin text-blue-500 mb-4" />
+                                            <p className="text-slate-500 font-medium">Loading depot sales records...</p>
+                                        </div>
+                                    </td>
                                 </tr>
-                            ))}
+                            ) : currentItems.length > 0 ? (
+                                currentItems.map((item) => (
+                                    <tr 
+                                        key={item.id} 
+                                        onClick={() => handleRowClick(item)} 
+                                        className={`transition-all cursor-pointer hover:bg-blue-50/50 ${selectedIds.includes(item.id) ? 'bg-blue-50' : ''}`}
+                                    >
+                                        {isSelectionMode && (
+                                            <td className="p-4 text-center" onClick={(e) => {e.stopPropagation(); handleRowClick(item);}}>
+                                                {selectedIds.includes(item.id) ? <CheckSquare size={18} className="text-blue-600 mx-auto"/> : <Square size={18} className="text-slate-200 mx-auto"/>}
+                                            </td>
+                                        )}
+                                        <td className="p-4 text-sm font-black text-blue-600">DEP-{item.invoice_no}</td>
+                                        <td className="p-4 text-sm text-slate-500 font-sans">{item.date}</td>
+                                        <td className="p-4 text-sm font-bold text-slate-700 uppercase font-sans">{item.Depot?.account_name}</td>
+                                        <td className="p-4 text-sm font-bold text-slate-500 uppercase font-sans">{item.Party?.account_name}</td>
+                                        <td className="p-4 text-sm font-black text-right text-emerald-600 font-mono">₹{parseFloat(item.final_invoice_value).toLocaleString()}</td>
+                                        {!isSelectionMode && <td className="p-4"><Edit size={16} className="text-slate-300" /></td>}
+                                    </tr>
+                                ))
+                            ) : (
+                                <tr>
+                                    <td colSpan={6} className="py-28">
+                                        <div className="flex flex-col items-center justify-center text-center">
+                                            <div className="w-24 h-24 bg-slate-100 rounded-3xl flex items-center justify-center mb-8 shadow-inner">
+                                                {searchValue.trim() ? (
+                                                    <Search size={56} className="text-amber-400" />
+                                                ) : (
+                                                    <Package size={56} className="text-slate-300" />
+                                                )}
+                                            </div>
+                                            
+                                            <h3 className="text-2xl font-semibold text-slate-800 mb-3 tracking-tight">
+                                                {searchValue.trim() ? "No matching records found" : "No depot sales yet"}
+                                            </h3>
+                                            
+                                            <p className="text-slate-500 max-w-md text-[15px]">
+                                                {searchValue.trim() 
+                                                    ? `We couldn't find any invoices matching "${searchValue}".`
+                                                    : "Your depot sales invoices will appear here. Ready to start secondary distribution?"
+                                                }
+                                            </p>
+
+                                            {searchValue.trim() ? (
+                                                <button 
+                                                    onClick={() => setSearchValue('')}
+                                                    className="mt-8 px-6 py-3 bg-white border border-slate-300 hover:border-slate-400 rounded-2xl text-sm font-medium text-slate-700 transition-colors flex items-center gap-2"
+                                                >
+                                                    <RefreshCw size={18} /> Clear search
+                                                </button>
+                                            ) : (
+                                                <button 
+                                                    onClick={handleAddNew}
+                                                    className="mt-8 flex items-center gap-3 bg-blue-600 hover:bg-blue-700 text-white px-8 py-3.5 rounded-2xl font-semibold shadow-sm active:scale-[0.97] transition-all"
+                                                >
+                                                    <Plus size={20} /> Create First Depot Sale
+                                                </button>
+                                            )}
+                                        </div>
+                                    </td>
+                                </tr>
+                            )}
                         </tbody>
                     </table>
                 </div>
             </div>
 
-            {/* 4. MODAL COCKPIT */}
+            {/* 4. MODAL COCKPIT (unchanged) */}
             {isModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
                     <div className="bg-white rounded-2xl shadow-2xl w-full max-w-7xl overflow-hidden flex flex-col max-h-[95vh] animate-in zoom-in duration-200">

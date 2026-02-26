@@ -262,11 +262,11 @@ const TariffMaster = () => {
                                         </button>
                                     </th>
                                 )}
-                                <th className="p-4 text-sm font-semibold">Code</th>
-                                <th className="p-4 text-sm font-semibold">Description</th>
-                                <th className="p-4 text-sm font-semibold">HSN No.</th>
-                                <th className="p-4 text-sm font-semibold">Commodity</th>
-                                <th className="p-4 text-sm font-semibold">Type</th>
+                                <th className="p-4 text-sm font-semibold">Tariff Code</th>
+                                <th className="p-4 text-sm font-semibold">Tariff Name</th>
+                                <th className="p-4 text-sm font-semibold">Tariff No.</th>
+                                <th className="p-4 text-sm font-semibold">Yarn Type</th>
+                                <th className="p-4 text-sm font-semibold">Product Type</th>
                                 {!isSelectionMode && <th className="p-4 w-10"></th>}
                             </tr>
                         </thead>

@@ -247,8 +247,8 @@ const PackingTypeMaster = () => {
                                         </button>
                                     </th>
                                 )}
-                                <th className="p-4 text-sm font-semibold">System ID</th>
-                                <th className="p-4 text-sm font-semibold">Packing Description</th>
+                                <th className="p-4 text-sm font-semibold">Packing Code</th>
+                                <th className="p-4 text-sm font-semibold">Packing Type</th>
                                 <th className="p-4 text-sm font-semibold text-center w-32">Status</th>
                                 {!isSelectionMode && <th className="p-4 w-10"></th>}
                             </tr>
@@ -268,7 +268,7 @@ const PackingTypeMaster = () => {
                                                 {selectedIds.includes(item.id) ? <CheckSquare size={18} className="text-blue-600 mx-auto"/> : <Square size={18} className="text-slate-200 mx-auto"/>}
                                             </td>
                                         )}
-                                        <td className="p-4 text-sm font-mono text-slate-500">#{item.id}</td>
+                                        <td className="p-4 text-sm font-mono text-slate-500">  {item.id}</td>
                                         <td className="p-4 text-sm font-bold text-slate-700 uppercase tracking-tight">{item.packing_type}</td>
                                         <td className="p-4 text-center">
                                             <span className="bg-emerald-50 text-emerald-600 text-[10px] px-2 py-1 rounded font-bold uppercase tracking-wider">Active</span>
