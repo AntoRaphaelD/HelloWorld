@@ -107,7 +107,7 @@ const SidebarLink = ({ to, label, icon: Icon, colorClass }) => {
         ${active ? 'text-white' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'}`}
       >
         <Icon size={18} className={`${active ? 'text-white' : colorClass} transition-transform group-hover:scale-110`} />
-        <span className="text-[11px] font-bold uppercase tracking-tight">{label}</span>
+        <span className="text-sm font-bold uppercase tracking-tight">{label}</span>
         {active && (
           <motion.div 
             layoutId="sidebar-active"
@@ -175,7 +175,7 @@ export default function App() {
                 <SidebarLink to="/production" label="RG1 Production" icon={Factory} colorClass="text-rose-500" />
                 <SidebarLink to="/despatch" label="Despatch Entry" icon={Truck} colorClass="text-rose-500" />
                 <SidebarLink to="/invoice-prep" label="Invoice Gen" icon={FileText} colorClass="text-rose-500" />
-                <SidebarLink to="/invoice-approval" label="Approvals" icon={CheckSquare} colorClass="text-rose-500" />
+                {/* <SidebarLink to="/invoice-approval" label="Approvals" icon={CheckSquare} colorClass="text-rose-500" /> */}
               </SidebarSection>
 
               <SidebarSection title="Depot Management">

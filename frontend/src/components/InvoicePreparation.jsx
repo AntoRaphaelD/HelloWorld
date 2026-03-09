@@ -114,7 +114,7 @@ const ModernPrintView = ({ data, listData, getHSN }) => {
                 <div className="grid grid-cols-2 gap-6 text-xs">
                     <div>
                         <div className="font-black text-slate-500">Invoice No</div>
-                        <div className="font-mono text-2xl font-black">#{data.invoice_no}</div>
+                        <div className="font-mono text-2xl font-black">{data.invoice_no}</div>
                     </div>
                     <div>
                         <div className="font-black text-slate-500">Invoice Date</div>
@@ -363,7 +363,7 @@ drawCheckbox("EXTRA COPY");
         doc.text(addr, margin, 107);
 
         doc.text("Invoice No :", pageWidth / 2, 95);
-        doc.text(`#${data.invoice_no}`, pageWidth / 2 + 25, 95);
+        doc.text(`${data.invoice_no}`, pageWidth / 2 + 25, 95);
         doc.text("Date :", pageWidth / 2, 102);
         doc.text(data.date, pageWidth / 2 + 25, 102);
         doc.text("E-Way Bill :", pageWidth / 2, 109);
@@ -526,7 +526,9 @@ const tableRows = rows.map(r => [
 
         const sgst = config.gst_checked ? num(item.sgst_per) * taxable / 100 : 0;
         const cgst = config.gst_checked ? num(item.cgst_per) * taxable / 100 : 0;
-        const igst = config.igst_checked ? num(item.igst_per) * taxable / 100 : 0;
+        const igst = config.igst_checked
+    ? (num(item.igst_per) / 100) * taxable
+    : 0;
 
         // ======================
         // BASIS VALUE
@@ -692,38 +694,48 @@ const tableRows = rows.map(r => [
     // ==========================================
 const handleLoadSync = (loadId) => {
 
-    const load = listData.loads.find(l => l.id === parseInt(loadId));
+    const load = listData.loads.find(
+        l => l.id === parseInt(loadId)
+    );
 
     if (!load) return;
 
     const bags = num(load.no_of_bags);
 
-    // ✅ Update header values including freight
     const updatedForm = {
         ...formData,
-        load_id: loadId,
-        vehicle_no: load.vehicle_no || '',
-        delivery: load.delivery || '',
-        freight_charges: load.freight || 0,
-        lr_no: load.lr_no || '',
-        lr_date: load.lr_date || formData.lr_date,
-        ebill_no: load.insurance_no || '',
-        transport_id: load.transport_id || formData.transport_id
+
+        load_id: load.id,
+
+        transport_id: load.transport_id,
+        vehicle_no: load.vehicle_no,
+        delivery: load.delivery,
+
+        lr_no: load.lr_no,
+        lr_date: load.lr_date,
+
+        ebill_no: load.insurance_no,
+        freight_charges: load.freight,
+
+        // FETCH TIME EXACTLY AS STORED
+        removal_time: load.out_time || '',
+        prepare_time: load.in_time || ''
     };
 
     setFormData(updatedForm);
 
-    // 🔥 Update packs in grid rows
     setGridRows(prev => {
 
         const updatedRows = prev.map(r => ({
-    ...r,
-    packs: bags,
-    freight_amt: load.freight || 0   // sync detail freight
-}));
+            ...r,
+            packs: bags
+        }));
 
-        // ✅ Recalculate totals with new freight
-        return runCalculations(updatedRows, updatedForm.invoice_type_id, load.freight);
+        return runCalculations(
+            updatedRows,
+            updatedForm.invoice_type_id,
+            load.freight
+        );
     });
 };
     const handleAccountSync = (accId) => {
@@ -772,13 +784,13 @@ const handleLoadSync = (loadId) => {
         });
     };
     const handleSave = async () => {
+
     setSubmitLoading(true);
 
     try {
 
         const cleanForm = { ...formData };
 
-        // ❗ remove nested sequelize relations
         delete cleanForm.InvoiceDetails;
         delete cleanForm.Details;
         delete cleanForm.Party;
@@ -787,24 +799,43 @@ const handleLoadSync = (loadId) => {
 
         const payload = {
             ...cleanForm,
+            is_approved: true,   // AUTO APPROVAL
             Details: gridRows
         };
 
+        let invoiceId;
+
         if (formData.id) {
+
             await transactionsAPI.invoices.update(formData.id, payload);
+            invoiceId = formData.id;
+
         } else {
-            await transactionsAPI.invoices.create(payload);
+
+            const res = await transactionsAPI.invoices.create(payload);
+            invoiceId = res.data.data?.id;
+
         }
 
+        // 🔥 AUTO APPROVE AFTER SAVE
+        if (invoiceId) {
+            await transactionsAPI.invoices.approve(invoiceId);
+        }
+
+        // Refresh screen
         setIsModalOpen(false);
         await init();
         setGridRows([]);
 
     } catch (e) {
+
         console.error("Save error:", e);
         alert("Error saving invoice");
+
     } finally {
+
         setSubmitLoading(false);
+
     }
 };
 
@@ -890,8 +921,8 @@ const handleLoadSync = (loadId) => {
 </div>
             <div className="bg-white rounded-2xl border border-slate-300 shadow-sm overflow-hidden">
                 <table className="w-full text-left">
-                    <thead className="bg-slate-900 text-white text-[10px] uppercase font-black tracking-widest">
-                        <tr><th className="p-6">Invoice #</th><th className="p-6">Date</th><th className="p-6">Party</th><th className="p-6 text-right">Value</th><th className="p-6 text-center">Status</th></tr>
+                    <thead className="bg-blue-700 text-white text-[10px] uppercase font-black tracking-widest">
+                        <tr><th className="p-6">InvoiceNo</th><th className="p-6">Date</th><th className="p-6">Party</th></tr>
                     </thead>
                     <tbody className="divide-y text-sm font-mono">
                         {filteredInvoices.map(item => (
@@ -912,7 +943,13 @@ const handleLoadSync = (loadId) => {
             invoice.details ||
             [];
 
-        setGridRows(details);
+        setGridRows(
+    runCalculations(
+        details,
+        invoice.invoice_type_id,
+        invoice.freight_charges
+    )
+);
 
         setIsModalOpen(true);
 
@@ -922,7 +959,7 @@ const handleLoadSync = (loadId) => {
 }}
                                 >
                                     <td className="p-6 font-bold text-blue-600">
-                                        #{item.invoice_no}
+                                        {item.invoice_no}
                                     </td>
 
                                     <td className="p-6">{item.date}</td>
@@ -931,22 +968,9 @@ const handleLoadSync = (loadId) => {
                                         {item.Party?.account_name}
                                     </td>
 
-                                    <td className="p-6 text-right font-black">
-                                        ₹{parseFloat(item.net_amount).toLocaleString()}
-                                    </td>
+                                  
 
-                                    {/* STATUS ONLY (print icon removed) */}
-                                    <td className="p-6 text-center">
-                                        <span
-                                            className={`px-4 py-1 rounded-full text-[9px] font-black ${
-                                                item.is_approved
-                                                    ? 'bg-emerald-100 text-emerald-700'
-                                                    : 'bg-amber-100 text-amber-700'
-                                            }`}
-                                        >
-                                            {item.is_approved ? 'APPROVED' : 'PENDING'}
-                                        </span>
-                                    </td>
+                                    
                                 </tr>
                             ))}
                     </tbody>
@@ -956,12 +980,12 @@ const handleLoadSync = (loadId) => {
             {/* PREPARATION MODAL */}
             {isModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4">
-                    <div className="bg-[#D9E5F7] rounded-lg shadow-2xl w-full max-w-[1150px] flex flex-col overflow-hidden border border-slate-400 h-[96vh]">
+                    <div className="bg-white rounded-lg shadow-2xl w-full max-w-[1150px] flex flex-col overflow-hidden border border-slate-300 h-[96vh]">
                         
-                        <div className="bg-[#FCD166] p-2 border-b border-slate-400 flex justify-between items-center shadow-sm">
+                        {/* <div className="bg-white p-2 border-b border-slate-300 flex justify-between items-center shadow-sm">
                             <span className="text-sm font-bold text-slate-700 flex items-center gap-2"><Layers size={16}/> Invoice Preparation</span>
                             <button onClick={() => setIsModalOpen(false)} className="text-white bg-red-500 hover:bg-red-600 px-2 rounded font-bold">×</button>
-                        </div>
+                        </div> */}
 
                         <div className="bg-[#5A8DEE] p-3 text-white">
                             <h2 className="text-base font-bold">Invoice</h2>
@@ -998,24 +1022,23 @@ const handleLoadSync = (loadId) => {
                                             <div className="flex items-center gap-2"><span className="text-[11px] font-bold text-slate-700">Interest %</span><input type="number" className="border border-slate-300 w-16 p-1 text-xs font-black" value={formData.interest_percentage} onChange={e => setFormData({...formData, interest_percentage: e.target.value})} /></div>
                                         </div>
                                         <RowSelect
-    label="Broker"
-    value={formData.broker_id}
-    options={listData.brokers.map(b => ({
-        value: b.id,
-        label: b.broker_name
-    }))}
-    onChange={e => setFormData({
-        ...formData,
-        broker_id: e.target.value
-    })}
-/>
-                                        <RowSelect label="Transport" value={formData.transport_id} options={listData.transports.map(t => ({value:t.id, label:t.transport_name}))} onChange={e => setFormData({...formData, transport_id: e.target.value})} />
+                                            label="Broker"
+                                            value={formData.broker_id}
+                                            options={listData.brokers.map(b => ({
+                                                value: b.id,
+                                                label: b.broker_name
+                                            }))}
+                                            onChange={e => setFormData({
+                                                ...formData,
+                                                broker_id: e.target.value
+                                            })}
+                                        />
+                                        <RowSelect label="Transport" value={formData.transport_id} options={listData.transports.map(t => ({value:t.id,label:t.transport_name}))} disabled/>
                                         <div className="grid grid-cols-2 gap-4">
-                                            <RowInput label="LR No." value={formData.lr_no} onChange={e => setFormData({...formData, lr_no: e.target.value})} />
-                                            <RowInput label="Delivery" value={formData.delivery} readOnly />
+                                            <RowInput label="LR No."value={formData.lr_no}readOnly/>                                            <RowInput label="Delivery" value={formData.delivery} readOnly />
                                         </div>
                                         <div className="grid grid-cols-2 gap-4">
-                                            <RowInput label="LR Date" type="date" value={formData.lr_date} onChange={e => setFormData({...formData, lr_date: e.target.value})} />
+                                            <RowInput label="LR Date" type="date" value={formData.lr_date} readOnly />
                                             <RowInput label="E-Bill" value={formData.ebill_no} onChange={e => setFormData({...formData, ebill_no: e.target.value})} />
                                         </div>
                                         <div className="grid grid-cols-2 gap-4">
@@ -1023,11 +1046,11 @@ const handleLoadSync = (loadId) => {
                                             <RowInput label="Remarks" value={formData.remarks} onChange={e => setFormData({...formData, remarks: e.target.value})} />
                                         </div>
                                         <div className="grid grid-cols-2 gap-4">
-                                            <RowInput label="Removal Time" type="time" value={formData.removal_time} onChange={e => setFormData({...formData, removal_time: e.target.value})} />
+                                            <RowInput label="Removal Time" type="text" value={formData.removal_time} onChange={e => setFormData({...formData, removal_time: e.target.value})} />
                                             <RowSelect label="PayMode" value={formData.pay_mode} options={[{value:'CREDIT', label:'CREDIT'}, {value:'CASH', label:'CASH'}]} onChange={e => setFormData({...formData, pay_mode: e.target.value})} />
                                         </div>
                                         <div className="grid grid-cols-2 gap-4">
-                                            <RowInput label="Prepare Time" type="time" value={formData.prepare_time} onChange={e => setFormData({...formData, prepare_time: e.target.value})} />
+                                            <RowInput label="Prepare Time" type="text" value={formData.prepare_time} onChange={e => setFormData({...formData, prepare_time: e.target.value})} />
                                             <RowInput label="Form JJ" value={formData.form_j} onChange={e => setFormData({...formData, form_j: e.target.value})} width="w-24" />
                                         </div>
                                         <RowInput label="Sales Against" value={formData.sales_against} onChange={e => setFormData({...formData, sales_against: e.target.value})} color="bg-rose-50" />

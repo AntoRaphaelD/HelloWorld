@@ -1,19 +1,18 @@
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { mastersAPI, transactionsAPI } from '../service/api';
-import { 
-    Save, FileText, Calculator, Plus, MinusCircle, 
-    Layers, Activity, Search, Hash, Printer, 
+import {
+    Save, FileText, Calculator, Plus, MinusCircle,
+    Layers, Activity, Search, Hash, Printer,
     Warehouse, X, Database, CheckCircle
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-
 // ==========================================
 // HELPERS & FORMATTING
 // ==========================================
 const num = (v) => isNaN(parseFloat(v)) ? 0 : parseFloat(v);
 const money = (v) => num(v).toFixed(2);
-
 const numberToWords = (amount) => {
     if (!amount || amount === 0) return "Zero Rupees Only";
     const ones = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
@@ -35,7 +34,6 @@ const numberToWords = (amount) => {
     if (hundred) str += convert(hundred);
     return str.trim() + " Rupees Only";
 };
-
 const DepotSalesInvoice = () => {
     // ==========================================
     // 1. INITIAL STATES
@@ -45,27 +43,24 @@ const DepotSalesInvoice = () => {
         sales_type: 'DEPOT SALES', invoice_type_id: '', depot_id: '', party_id: '', address: '',
         credit_days: 0, interest_pct: 0, transport_id: '', lr_no: '', lr_date: new Date().toISOString().split('T')[0],
         vehicle_no: '', remarks: '', pay_mode: 'CREDIT', broker_id: '',
-        total_assessable: 0, total_charity: 0, total_vat: 0, total_sgst: 0, total_cgst: 0, 
-        total_igst: 0, total_discount: 0, total_other: 0, pf_amount: 0, freight: 0, 
+        total_assessable: 0, total_charity: 0, total_vat: 0, total_sgst: 0, total_cgst: 0,
+        total_igst: 0, total_discount: 0, total_other: 0, pf_amount: 0, freight: 0,
         sub_total: 0, round_off: 0, final_invoice_value: 0
     };
-
     const [listData, setListData] = useState({
-        types: [], parties: [], depots: [], transports: [], 
+        types: [], parties: [], depots: [], transports: [],
         products: [], orders: [], history: [], brokers: []
     });
-
     const [formData, setFormData] = useState(emptyInvoice);
     const [gridRows, setGridRows] = useState([]);
     const [loading, setLoading] = useState(false);
     const [submitLoading, setSubmitLoading] = useState(false);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [activeTab, setActiveTab] = useState('head');
-    
+   
     const [searchField, setSearchField] = useState('invoice_no');
     const [searchCondition, setSearchCondition] = useState('Like');
     const [searchValue, setSearchValue] = useState('');
-
     // ==========================================
     // 2. MATH ENGINE - FREIGHT NOW SYNCED FROM DETAILS
     // ==========================================
@@ -73,67 +68,56 @@ const DepotSalesInvoice = () => {
         if (!typeId) return rows;
         const config = listData.types.find(t => t.id === parseInt(typeId));
         if (!config) return rows;
-
-        let hTotals = { 
-            assess: 0, charity: 0, vat: 0, sgst: 0, cgst: 0, igst: 0, 
-            disc: 0, other: 0, net: 0 
+        let hTotals = {
+            assess: 0, charity: 0, vat: 0, sgst: 0, cgst: 0, igst: 0,
+            disc: 0, other: 0, net: 0
         };
-
         const updatedRows = rows.map((item) => {
             const product = listData.products.find(p => p.id === parseInt(item.product_id));
             const H = num(item.rate) * num(item.total_kgs);
             const avgContent = num(item.packs) > 0 ? num(item.total_kgs) / num(item.packs) : 0;
             const A = H - num(item.resale) + num(item.convert_to_hank) - num(item.convert_to_cone);
-
             const charity = config.charity_checked ? num(product?.charity_rs) * num(item.total_kgs) : 0;
-            const vat     = num(item.vat_per)    * A / 100;
-            const sgst    = num(item.sgst_per)   * A / 100;
-            const cgst    = num(item.cgst_per)   * A / 100;
-            const igst    = num(item.igst_per)   * A / 100;
-
+            const vat = num(item.vat_per) * A / 100;
+            const sgst = num(item.sgst_per) * A / 100;
+            const cgst = num(item.cgst_per) * A / 100;
+            const igst = num(item.igst_per) * A / 100;
             const basis = A + sgst + cgst + igst + vat + charity + num(item.other_amt) + num(item.freight_amt);
             const discAmt = num(item.discount_percentage) * basis / 100;
             const rowTotal = basis - discAmt;
-
             hTotals.assess += A; hTotals.charity += charity; hTotals.vat += vat;
-            hTotals.sgst += sgst; hTotals.cgst += cgst; hTotals.igst += igst; 
+            hTotals.sgst += sgst; hTotals.cgst += cgst; hTotals.igst += igst;
             hTotals.disc += discAmt; hTotals.other += num(item.other_amt); hTotals.net += rowTotal;
-
             return {
-                ...item, 
-                avg_content: avgContent.toFixed(3), 
+                ...item,
+                avg_content: avgContent.toFixed(3),
                 base_h: H, assessable_value: A, charity_amt: charity,
-                vat_amt: vat, sgst_amt: sgst, cgst_amt: cgst, igst_amt: igst, 
+                vat_amt: vat, sgst_amt: sgst, cgst_amt: cgst, igst_amt: igst,
                 discount_amt: discAmt, sub_total: basis, final_value: rowTotal
             };
         });
-
         // ====================== FREIGHT SYNC FROM DETAIL ROWS ======================
         const totalFreightFromRows = updatedRows.reduce((sum, r) => sum + num(r.freight_amt), 0);
-
         // Freight from details is ALREADY inside hTotals.net → we do NOT add it again
         const finalRawTotal = hTotals.net + num(formData.pf_amount);
         const finalNetTotal = Math.round(finalRawTotal);
-
         setFormData(prev => ({
             ...prev,
-            freight: money(totalFreightFromRows),           // ← THIS IS THE FIX
-            total_assessable: money(hTotals.assess), 
+            freight: money(totalFreightFromRows), // ← THIS IS THE FIX
+            total_assessable: money(hTotals.assess),
             total_charity: money(hTotals.charity),
-            total_vat: money(hTotals.vat), 
-            total_sgst: money(hTotals.sgst), 
-            total_cgst: money(hTotals.cgst), 
+            total_vat: money(hTotals.vat),
+            total_sgst: money(hTotals.sgst),
+            total_cgst: money(hTotals.cgst),
             total_igst: money(hTotals.igst),
-            total_discount: money(hTotals.disc), 
+            total_discount: money(hTotals.disc),
             total_other: money(hTotals.other),
-            sub_total: money(finalRawTotal), 
+            sub_total: money(finalRawTotal),
             round_off: (finalNetTotal - finalRawTotal).toFixed(2),
             final_invoice_value: finalNetTotal
         }));
-
         return updatedRows;
     }, [listData.types, listData.products, formData.pf_amount]);
-
     // ==========================================
     // 3. EXPORT TO PDF (now uses synced freight)
     // ==========================================
@@ -143,27 +127,22 @@ const DepotSalesInvoice = () => {
         const rows = gridRows;
         const pageWidth = doc.internal.pageSize.getWidth();
         const margin = 15;
-
         doc.setFont("helvetica", "bold");
         doc.setFontSize(22);
         doc.text("DEPOT SALES INVOICE", pageWidth / 2, 20, { align: "center" });
-
         doc.setFontSize(10);
         doc.text("KAYAAR EXPORTS PRIVATE LIMITED", margin, 35);
         doc.setFont("helvetica", "normal");
         doc.text("D.No: 43/5, Railway Feeder Road, Kovilpatti - 628503", margin, 40);
         doc.text("GSTIN: 33AAACK4468M1ZA", margin, 45);
-
         doc.setFont("helvetica", "bold");
         doc.text("Bill To:", margin, 60);
         doc.setFont("helvetica", "normal");
         doc.text(data.Party?.account_name || "N/A", margin, 65);
         doc.text(data.address || "", margin, 70, { maxWidth: 80 });
-
         doc.text(`Invoice No: #${data.invoice_no}`, pageWidth - margin - 50, 60);
         doc.text(`Date: ${data.date}`, pageWidth - margin - 50, 65);
         doc.text(`Depot: ${data.Depot?.account_name || "N/A"}`, pageWidth - margin - 50, 70);
-
         const tableRows = rows.map(r => [
             r.product_description,
             r.packs,
@@ -172,7 +151,6 @@ const DepotSalesInvoice = () => {
             num(r.assessable_value).toLocaleString(),
             num(r.final_value).toLocaleString()
         ]);
-
         autoTable(doc, {
             startY: 85,
             head: [['Description of Goods', 'Packs', 'Weight', 'Rate', 'Assessable', 'Total']],
@@ -181,31 +159,24 @@ const DepotSalesInvoice = () => {
             headStyles: { fillColor: [40, 40, 40] },
             columnStyles: { 4: { halign: 'right' }, 5: { halign: 'right' } }
         });
-
         const finalY = doc.lastAutoTable.finalY + 10;
-
         doc.setFont("helvetica", "bold");
         doc.text("Assessable Total:", pageWidth - 90, finalY);
         doc.text(`Rs. ${num(data.total_assessable).toLocaleString()}`, pageWidth - margin, finalY, { align: "right" });
-        
+       
         doc.text("Tax Total (GST):", pageWidth - 90, finalY + 7);
         const gst = num(data.total_sgst) + num(data.total_cgst) + num(data.total_igst);
         doc.text(`Rs. ${gst.toLocaleString()}`, pageWidth - margin, finalY + 7, { align: "right" });
-
         doc.text("Freight (from details):", pageWidth - 90, finalY + 14);
         doc.text(`Rs. ${num(data.freight).toLocaleString()}`, pageWidth - margin, finalY + 14, { align: "right" });
-
         doc.setFontSize(14);
         doc.rect(pageWidth - 95, finalY + 22, 80, 12);
         doc.text("NET AMOUNT:", pageWidth - 90, finalY + 30);
         doc.text(`Rs. ${num(data.final_invoice_value).toLocaleString()}`, pageWidth - margin - 5, finalY + 30, { align: "right" });
-
         doc.setFontSize(9);
         doc.text(`In Words: ${numberToWords(num(data.final_invoice_value))}`, margin, finalY + 42);
-
         doc.save(`Depot_Invoice_${data.invoice_no}.pdf`);
     };
-
     // ==========================================
     // 4. DATA LOAD
     // ==========================================
@@ -214,24 +185,22 @@ const DepotSalesInvoice = () => {
         try {
             const [types, accounts, transports, products, orders, history, brokers] = await Promise.all([
                 mastersAPI.invoiceTypes.getAll(), mastersAPI.accounts.getAll(), mastersAPI.transports.getAll(),
-                mastersAPI.products.getAll(), transactionsAPI.orders.getAll(), 
+                mastersAPI.products.getAll(), transactionsAPI.orders.getAll(),
                 transactionsAPI.depotSales.getAll(), mastersAPI.brokers.getAll()
             ]);
             const accs = accounts.data?.data || [];
             setListData({
-                types: types.data?.data || [], 
+                types: types.data?.data || [],
                 parties: accs.filter(a => !a.account_group?.toUpperCase().includes('DEPOT')),
                 depots: accs.filter(a => a.account_group?.toUpperCase().includes('DEPOT')),
-                transports: transports.data?.data || [], 
+                transports: transports.data?.data || [],
                 products: products.data?.data || [],
                 orders: orders.data?.data || [],
                 history: history.data?.data || [], brokers: brokers.data?.data || []
             });
         } catch (e) { console.error(e); } finally { setLoading(false); }
     };
-
     useEffect(() => { init(); }, []);
-
     // ==========================================
     // 5. HANDLERS
     // ==========================================
@@ -240,15 +209,14 @@ const DepotSalesInvoice = () => {
         const [source, orderNo] = val.split('|');
         const config = listData.types.find(t => t.id === parseInt(formData.invoice_type_id));
         if (!config) return alert("Select Invoice Type first.");
-
         const order = listData.orders.find(o => o.order_no === orderNo);
         const details = order?.OrderDetails || [];
         const newRows = details.map(d => ({
             order_no: orderNo, order_type: 'WITH_ORDER',
             product_id: d.product_id, product_description: d.Product?.product_name || '',
-            packs: d.packs || 0, total_kgs: d.qty || 0, rate: d.rate_cr || 0, 
-            rate_per: 'KG', broker_code: order.Broker?.broker_code || '', 
-            packing_type: d.packing_type || 'BAGS', identification_mark: '', 
+            packs: d.packs || 0, total_kgs: d.qty || 0, rate: d.rate_cr || 0,
+            rate_per: 'KG', broker_code: order.Broker?.broker_code || '',
+            packing_type: d.packing_type || 'BAGS', identification_mark: '',
             vat_per: config.vat_percentage || 0, sgst_per: config.sgst_percentage || 0,
             cgst_per: config.cgst_percentage || 0, igst_per: config.igst_percentage || 0,
             resale: 0, convert_to_hank: 0, convert_to_cone: 0, other_amt: 0, freight_amt: 0, discount_percentage: 0
@@ -256,7 +224,6 @@ const DepotSalesInvoice = () => {
         setGridRows(runCalculations([...gridRows, ...newRows], formData.invoice_type_id));
         e.target.value = "";
     };
-
     const updateGrid = (idx, field, val) => {
         setGridRows(prev => {
             const updated = [...prev];
@@ -264,7 +231,6 @@ const DepotSalesInvoice = () => {
             return runCalculations(updated, formData.invoice_type_id);
         });
     };
-
     const handleSave = async () => {
         setSubmitLoading(true);
         try {
@@ -274,7 +240,6 @@ const DepotSalesInvoice = () => {
             setIsModalOpen(false); init();
         } catch (e) { alert("Save Error"); } finally { setSubmitLoading(false); }
     };
-
     const filteredHistory = useMemo(() => {
         const history = Array.isArray(listData.history) ? listData.history : [];
         const term = searchValue.toLowerCase().trim();
@@ -289,24 +254,22 @@ const DepotSalesInvoice = () => {
                 return searchCondition === 'Equal' ? value === term : value.includes(term);
             });
     }, [listData.history, searchValue, searchField, searchCondition]);
-
     return (
         <div className="min-h-screen bg-slate-100 p-6 font-sans">
             <div className="flex justify-between items-center mb-4">
                 <h1 className="text-2xl font-black uppercase tracking-tighter flex items-center gap-3">
                     <Warehouse className="text-blue-600"/> Depot Sales Registry
                 </h1>
-                <button 
-                    onClick={() => { 
-                        setFormData({...emptyInvoice, invoice_no: (listData.history.length + 1).toString()}); 
-                        setGridRows([]); setIsModalOpen(true); 
-                    }} 
+                <button
+                    onClick={() => {
+                        setFormData({...emptyInvoice, invoice_no: (listData.history.length + 1).toString()});
+                        setGridRows([]); setIsModalOpen(true);
+                    }}
                     className="bg-blue-600 text-white px-8 py-2 rounded-xl font-bold uppercase text-xs flex items-center gap-2 shadow-lg hover:bg-blue-700"
                 >
                     <Plus size={18}/> New Depot Invoice
                 </button>
             </div>
-
             <div className="bg-white p-4 rounded-xl border border-slate-300 shadow-sm mb-6 flex gap-4 items-end">
                 <div className="flex-1">
                     <label className="text-[9px] font-black text-slate-500 uppercase block mb-1">Search Field</label>
@@ -322,7 +285,6 @@ const DepotSalesInvoice = () => {
                 </div>
                 <div className="bg-blue-50 text-blue-700 border border-blue-200 px-6 py-2 rounded text-xs font-bold">{filteredHistory.length} Matches</div>
             </div>
-
             <div className="bg-white rounded-2xl border border-slate-300 shadow-sm overflow-hidden">
                 <table className="w-full text-left">
                     <thead className="bg-slate-900 text-white text-[10px] uppercase font-black tracking-widest">
@@ -341,7 +303,6 @@ const DepotSalesInvoice = () => {
                     </tbody>
                 </table>
             </div>
-
             {isModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4">
                     <div className="bg-[#D9E5F7] rounded-lg shadow-2xl w-full max-w-[1250px] flex flex-col overflow-hidden border border-slate-400 h-[98vh]">
@@ -349,13 +310,11 @@ const DepotSalesInvoice = () => {
                             <span className="text-[13px] font-bold text-slate-700 ml-2 flex items-center gap-2"><Layers size={14}/> Depot Sales Engine</span>
                             <button onClick={() => setIsModalOpen(false)} className="bg-red-500 text-white px-2 rounded font-bold">×</button>
                         </div>
-
                         <div className="flex bg-[#D9E5F7] pt-2 px-4 gap-1">
                             {['head', 'detail'].map(t => (
                                 <button key={t} onClick={() => setActiveTab(t)} className={`px-6 py-1 text-[11px] font-bold border border-b-0 rounded-t-md ${activeTab === t ? 'bg-white text-blue-700 border-slate-400' : 'bg-[#EBF2FA] text-slate-500 border-slate-300'}`}>{t.toUpperCase()}</button>
                             ))}
                         </div>
-
                         <div className="flex-1 bg-white mx-4 mb-4 border border-slate-400 p-5 overflow-hidden flex flex-col">
                             {activeTab === 'head' ? (
                                 <div className="grid grid-cols-12 gap-6 h-full overflow-y-auto">
@@ -368,7 +327,7 @@ const DepotSalesInvoice = () => {
                                         <RowSelect label="Depot (Source)" value={formData.depot_id} options={listData.depots.map(d => ({value:d.id, label:d.account_name}))} onChange={e => setFormData({...formData, depot_id: e.target.value})} />
                                         <RowSelect label="Party (Customer)" value={formData.party_id} options={listData.parties.map(p => ({value:p.id, label:p.account_name}))} onChange={e => { const acc = listData.parties.find(a => a.id == e.target.value); setFormData({...formData, party_id: e.target.value, address: acc?.address || ''})}} />
                                         <RowInput label="Address" value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} />
-                                        
+                                       
                                         <div className="grid grid-cols-3 gap-2">
                                             <RowInput label="Credit Days" type="number" value={formData.credit_days} onChange={e => setFormData({...formData, credit_days: e.target.value})} />
                                             <RowInput label="Interest %" type="number" value={formData.interest_pct} onChange={e => setFormData({...formData, interest_pct: e.target.value})} />
@@ -380,7 +339,6 @@ const DepotSalesInvoice = () => {
                                             <RowInput label="Vehicle No" value={formData.vehicle_no} onChange={e => setFormData({...formData, vehicle_no: e.target.value})} />
                                         </div>
                                     </div>
-
                                     <div className="col-span-4 bg-slate-50 border border-slate-300 p-4 rounded flex flex-col gap-1 shadow-inner font-black">
                                         <h3 className="text-xs text-blue-800 mb-2 border-b pb-1 uppercase tracking-tighter">Aggregate Value</h3>
                                         <TotalRow label="Assessable" value={formData.total_assessable} />
@@ -390,7 +348,7 @@ const DepotSalesInvoice = () => {
                                         <TotalRow label="CGST Total" value={formData.total_cgst} />
                                         <TotalRow label="IGST Total" value={formData.total_igst} />
                                         <TotalRow label="Discount" value={formData.total_discount} color="text-red-600" />
-                                        <TotalRow label="Freight" value={formData.freight} isEditable={false} />   {/* ← NOW READ-ONLY, SHOWS SUM FROM DETAILS */}
+                                        <TotalRow label="Freight" value={formData.freight} isEditable={false} /> {/* ← NOW READ-ONLY, SHOWS SUM FROM DETAILS */}
                                         <div className="mt-auto pt-4 border-t-2 border-slate-400">
                                             <div className="flex justify-between items-center py-2 px-2 bg-white border border-slate-400 rounded shadow-sm">
                                                 <span className="text-[11px] uppercase">Invoice Net Value</span>
@@ -410,7 +368,6 @@ const DepotSalesInvoice = () => {
                                             </select>
                                         </div>
                                     </div>
-
                                     <div className="flex-1 border border-slate-300 overflow-x-auto bg-slate-50 shadow-inner rounded">
                                         {/* ... inside the Detail tab section ... */}
 <div className="flex-1 border border-slate-300 overflow-x-auto bg-slate-50 shadow-inner rounded">
@@ -478,7 +435,6 @@ const DepotSalesInvoice = () => {
                                 </div>
                             )}
                         </div>
-
                         <div className="bg-[#D9E5F7] p-3 border-t border-slate-400 flex justify-between gap-3 px-6 shadow-inner">
                             <div className="flex gap-2">
                                 <button onClick={exportToPDF} disabled={gridRows.length === 0} className="bg-emerald-600 text-white px-6 py-2 text-[11px] font-black rounded flex items-center gap-2 shadow hover:bg-emerald-700">
@@ -498,7 +454,6 @@ const DepotSalesInvoice = () => {
         </div>
     );
 };
-
 // --- ERP HELPERS ---
 const RowInput = ({ label, width = "w-full", color = "bg-white", ...props }) => (
     <div className="flex items-center"><label className="w-[140px] text-[10px] font-black text-slate-700 uppercase tracking-tighter">{label}</label><input {...props} className={`border border-slate-300 p-1 px-2 text-[11px] font-bold outline-none rounded-sm shadow-sm ${width} ${color}`} /></div>
@@ -515,5 +470,4 @@ const renderPairCell = (row, idx, perKey, amtKey, isEditable, updateGrid, color 
         <td className={`p-2 border-r text-center font-black bg-slate-50 ${color}`}>{num(row[amtKey]).toFixed(2)}</td>
     </>
 );
-
 export default DepotSalesInvoice;

@@ -1,16 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { mastersAPI } from '../service/api';
 import { 
-    Plus, Search, Edit, Trash2, X, ChevronLeft, 
-    ChevronRight, Package, Settings, Box, 
-    CheckSquare, Square, RefreshCw, Info, Save, Zap,
-    Activity, Layers, Database, Warehouse, BarChart3,
-    Filter, LayoutGrid, Scale, FileText, Beaker, Truck,
-    AlertCircle, Tag
+    Plus, Edit, Trash2, X, ChevronLeft, 
+    ChevronRight, RefreshCw, Save, 
+    Package, Filter, Search, CheckSquare, Square
 } from 'lucide-react';
 
 const ProductMaster = () => {
-    // --- Initial States (Zero deletions - all original fields preserved) ---
     const emptyState = { 
         id: null,
         product_code: '', 
@@ -27,6 +23,7 @@ const ProductMaster = () => {
         pack_nett_wt: 0, 
         tariff_sub_head: '', 
         printing_tariff_sub_head_no: '', 
+        printing_tariff_desc: '',        
         product_type: '', 
         spinning_count_name: '', 
         converted_factor_40s: 0, 
@@ -35,7 +32,6 @@ const ProductMaster = () => {
         mill_stock: 0
     };
 
-    // --- Main States ---
     const [list, setList] = useState([]);
     const [tariffs, setTariffs] = useState([]); 
     const [packingTypes, setPackingTypes] = useState([]); 
@@ -43,33 +39,23 @@ const ProductMaster = () => {
     const [loading, setLoading] = useState(false);
     const [submitLoading, setSubmitLoading] = useState(false);
     const [isModalOpen, setIsModalOpen] = useState(false);
-    const [activeTab, setActiveTab] = useState('identity');
 
-    // Search & Selection
+    const [isSelectionMode, setIsSelectionMode] = useState(false);
+    const [selectedIds, setSelectedIds] = useState([]);
     const [searchField, setSearchField] = useState('product_name');
     const [searchCondition, setSearchCondition] = useState('Like');
     const [searchValue, setSearchValue] = useState('');
-    const [isSelectionMode, setIsSelectionMode] = useState(false);
-    const [selectedIds, setSelectedIds] = useState([]);
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 10;
-    // Auto calculate Pack Nett Weight
-useEffect(() => {
-    const wt = parseFloat(formData.wt_per_cone) || 0;
-    const cones = parseFloat(formData.no_of_cones_per_pack) || 0;
 
-    const total = wt * cones;
+    // Auto-calculate pack nett weight
+    useEffect(() => {
+        const wt = parseFloat(formData.wt_per_cone) || 0;
+        const cones = parseFloat(formData.no_of_cones_per_pack) || 0;
+        setFormData(prev => ({ ...prev, pack_nett_wt: (wt * cones).toFixed(3) }));
+    }, [formData.wt_per_cone, formData.no_of_cones_per_pack]);
 
-    setFormData(prev => ({
-        ...prev,
-        pack_nett_wt: total
-    }));
-}, [formData.wt_per_cone, formData.no_of_cones_per_pack]);
-    // --- Initialization ---
-    useEffect(() => { 
-        fetchRecords(); 
-        fetchLookups();
-    }, []);
+    useEffect(() => { fetchRecords(); fetchLookups(); }, []);
 
     const fetchRecords = async () => {
         setLoading(true);
@@ -92,60 +78,6 @@ useEffect(() => {
         } catch (err) { console.error(err); }
     };
 
-    // --- Logic Handlers ---
-    const handleTariffChange = (tariffCode) => {
-        const selected = tariffs.find(t => t.tariff_code === tariffCode);
-        if (selected) {
-            setFormData(prev => ({
-                ...prev,
-                tariff_sub_head: selected.tariff_code,
-                printing_tariff_sub_head_no: selected.tariff_no, 
-                product_type: selected.product_type,
-                fibre: selected.fibre,
-                commodity: selected.commodity || prev.commodity
-            }));
-        } else {
-            setFormData(prev => ({ ...prev, tariff_sub_head: tariffName }));
-        }
-    };
-
-    const handleAddNew = () => {
-        const maxCode = list.reduce((max, item) => {
-            const num = parseInt(item.product_code, 10);
-            return !isNaN(num) ? Math.max(max, num) : max;
-        }, 0);
-        setFormData({ ...emptyState, product_code: (maxCode + 1).toString() });
-        setActiveTab('identity');
-        setIsModalOpen(true);
-    };
-
-    const handleSave = async () => {
-        if (!formData.product_name) return alert("Product Name is required");
-        setSubmitLoading(true);
-        try {
-            if (formData.id) await mastersAPI.products.update(formData.id, formData);
-            else await mastersAPI.products.create(formData);
-            setIsModalOpen(false);
-            fetchRecords();
-        } catch (err) { alert("Error saving."); }
-        finally { setSubmitLoading(false); }
-    };
-
-    const handleRowClick = (item) => {
-        if (isSelectionMode) {
-            setSelectedIds(prev =>
-                prev.includes(item.id)
-                    ? prev.filter(id => id !== item.id)
-                    : [...prev, item.id]
-            );
-            return;
-        }
-        setFormData({ ...item });
-        setActiveTab('identity');
-        setIsModalOpen(true);
-    };
-
-    // --- Dynamic Filtering ---
     const filteredData = useMemo(() => {
         let result = Array.isArray(list) ? [...list] : [];
         if (searchValue.trim()) {
@@ -161,310 +93,380 @@ useEffect(() => {
     const currentItems = filteredData.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
     const totalPages = Math.ceil(filteredData.length / itemsPerPage) || 1;
 
+    const handleTariffChange = (tariffCode) => {
+        const selected = tariffs.find(t => t.tariff_code === tariffCode);
+        if (selected) {
+            setFormData(prev => ({
+                ...prev,
+                tariff_sub_head: selected.tariff_code,
+                product_type: selected.product_type,
+                fibre: selected.fibre,
+                commodity: selected.commodity || prev.commodity,
+                printing_tariff_desc: selected.tariff_no
+            }));
+        } else {
+            setFormData(prev => ({ ...prev, tariff_sub_head: tariffCode }));
+        }
+    };
+
+    const handleAddNew = () => {
+        const maxCode = list.reduce((max, item) => {
+            const num = parseInt(item.product_code, 10);
+            return !isNaN(num) ? Math.max(max, num) : max;
+        }, 0);
+        setFormData({ ...emptyState, product_code: (maxCode + 1).toString() });
+        setIsModalOpen(true);
+    };
+
+    const handleRowClick = (item) => {
+        if (isSelectionMode) {
+            setSelectedIds(prev =>
+                prev.includes(item.id) ? prev.filter(id => id !== item.id) : [...prev, item.id]
+            );
+        } else {
+            setFormData({ ...item });
+            setIsModalOpen(true);
+        }
+    };
+
+    const handleBulkDelete = async () => {
+        if (selectedIds.length === 0) return;
+        if (window.confirm(`Permanently delete ${selectedIds.length} products?`)) {
+            try {
+                await Promise.all(selectedIds.map(id => mastersAPI.products.delete(id)));
+                setSelectedIds([]);
+                setIsSelectionMode(false);
+                fetchRecords();
+            } catch (err) { alert("Delete failed"); }
+        }
+    };
+
+    const handleSave = async (e) => {
+        e.preventDefault();
+        if (!formData.product_name?.trim()) return alert("Product Name is required");
+        setSubmitLoading(true);
+        try {
+            if (formData.id) await mastersAPI.products.update(formData.id, formData);
+            else await mastersAPI.products.create(formData);
+            setIsModalOpen(false);
+            fetchRecords();
+        } catch (err) { alert("Error saving."); }
+        finally { setSubmitLoading(false); }
+    };
+
+    const FormLabel = ({ children }) => (
+        <label className="text-right text-base text-slate-700 pr-3 font-semibold self-center whitespace-nowrap">
+            {children}
+        </label>
+    );
+
     return (
-        <div className="min-h-screen bg-slate-50 p-6 font-sans text-slate-900">
+        <div className="min-h-screen bg-slate-100 p-6 font-sans">
             
-            {/* 1. HEADER SECTION */}
+            {/* Header */}
             <div className="flex justify-between items-center mb-6">
-                <div>
-                    <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-                        <Package className="text-blue-600" /> Product Master
-                    </h1>
-                    <p className="text-sm text-slate-500">Technical SKU registry and yarn specifications</p>
-                </div>
+                <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+                    <Package className="text-blue-700" /> Product Master
+                </h1>
                 <div className="flex gap-2">
-                    <button onClick={() => { setIsSelectionMode(!isSelectionMode); setSelectedIds([]); }}
-                        className={`px-5 py-2 border rounded-lg font-semibold transition-all ${isSelectionMode ? 'bg-amber-100 border-amber-300 text-amber-700' : 'bg-white border-slate-200 text-blue-600 hover:bg-slate-50'}`}>
-                        {isSelectionMode ? 'Cancel' : 'Select'}
+                    <button onClick={handleAddNew} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg font-bold text-xs uppercase shadow-md transition-all flex items-center gap-1">
+                        <Plus size={16} /> New Product
                     </button>
-                    <button onClick={handleAddNew} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg font-semibold shadow-sm transition-all active:scale-95">
-                        <Plus size={18} /> New Product
-                    </button>
-                    <button onClick={fetchRecords} className="p-2 border border-slate-200 rounded-lg bg-white text-slate-400 hover:text-blue-600 transition-colors">
+                    <button onClick={fetchRecords} className="p-2 border border-slate-200 rounded-lg bg-white">
                         <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
                     </button>
                 </div>
             </div>
 
-            {/* 2. FILTER BAR */}
-            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-6">
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-                    <div>
-                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block ml-1">Search Field</label>
-                        <select value={searchField} onChange={(e) => setSearchField(e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-sm outline-none focus:ring-1 focus:ring-blue-500">
-                            <option value="product_name">Product Description</option>
-                            <option value="product_code">Product Code</option>
-                            <option value="commodity">Commodity</option>
-                        </select>
+            {/* Search Bar */}
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-6 flex flex-wrap items-end gap-4">
+                <div className="flex-1 min-w-[180px]">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Search Field</label>
+                    <select value={searchField} onChange={e => setSearchField(e.target.value)} className="w-full border border-slate-200 p-2 rounded-xl text-[13px] outline-none focus:ring-1 focus:ring-blue-500">
+                        <option value="product_name">Product Description</option>
+                        <option value="product_code">Product Code</option>
+                        <option value="commodity">Commodity</option>
+                    </select>
+                </div>
+                <div className="flex-1 min-w-[150px]">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Condition</label>
+                    <select value={searchCondition} onChange={e => setSearchCondition(e.target.value)} className="w-full border p-2 rounded-xl text-[13px] outline-none">
+                        <option value="Like">Like</option>
+                        <option value="Equal">Equal</option>
+                    </select>
+                </div>
+                <div className="flex-[2] min-w-[280px]">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Value</label>
+                    <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
+                        <input 
+                            type="text" 
+                            value={searchValue} 
+                            onChange={e => setSearchValue(e.target.value)} 
+                            className="w-full border pl-9 pr-4 py-2 rounded-xl text-[13px] outline-none focus:ring-1 focus:ring-blue-500 font-semibold" 
+                            placeholder="Live search..." 
+                        />
                     </div>
-                    <div>
-                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block ml-1">Condition</label>
-                        <select value={searchCondition} onChange={(e) => setSearchCondition(e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-sm outline-none focus:ring-1 focus:ring-blue-500">
-                            <option value="Like">Contains</option>
-                            <option value="Equal">Exact</option>
-                        </select>
-                    </div>
-                    <div className="md:col-span-1">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block ml-1">Value</label>
-                        <div className="relative">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                            <input type="text" placeholder="Search..." value={searchValue} onChange={(e) => setSearchValue(e.target.value)} className="w-full border border-slate-200 pl-10 pr-4 py-2 rounded-lg text-sm outline-none focus:ring-1 focus:ring-blue-500 bg-white" />
-                        </div>
-                    </div>
+                </div>
+
+                {!isSelectionMode ? (
+                    <button 
+                        onClick={() => setIsSelectionMode(true)} 
+                        className="border border-blue-200 bg-blue-50 text-blue-600 px-8 py-2 rounded-xl text-base font-bold hover:bg-blue-100 shadow-sm transition-all"
+                    >
+                        Select
+                    </button>
+                ) : (
                     <div className="flex gap-2">
-                        <button onClick={() => setSearchValue('')} className="flex-1 border border-slate-200 py-2 rounded-lg text-sm font-bold hover:bg-slate-50 transition-all">Clear</button>
-                        <div className="flex-1 bg-blue-50 text-blue-600 border border-blue-100 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-2">
-                            <Filter size={14}/> {filteredData.length} Matches
-                        </div>
+                        <button 
+                            onClick={() => { setIsSelectionMode(false); setSelectedIds([]); }} 
+                            className="border border-slate-200 px-6 py-2 rounded-xl text-base font-bold text-slate-600 hover:bg-slate-50"
+                        >
+                            Clear
+                        </button>
+                        <button 
+                            onClick={handleBulkDelete}
+                            disabled={selectedIds.length === 0}
+                            className="bg-red-500 text-white px-6 py-2 rounded-xl text-base font-bold shadow-md disabled:opacity-50 flex items-center gap-1"
+                        >
+                            <Trash2 size={16} /> Delete ({selectedIds.length})
+                        </button>
                     </div>
-                </div>
+                )}
             </div>
 
-            {/* 3. DATA TABLE - Displaying specific columns requested */}
+            {/* Table */}
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
-                        <thead>
-                            <tr className="bg-blue-600 text-white">
-                                {isSelectionMode && <th className="p-4 w-12 text-center"><Square size={18} className="mx-auto" /></th>}
-                                <th className="p-4 text-sm font-semibold uppercase tracking-wider">Code</th>
-                                <th className="p-4 text-sm font-semibold uppercase tracking-wider">Product Description</th>
-                                <th className="p-4 text-sm font-semibold uppercase tracking-wider">Short Description</th>
-                                <th className="p-4 text-sm font-semibold uppercase tracking-wider">Spinning Count</th>
-                                <th className="p-4 text-sm font-semibold uppercase tracking-wider">Commodity</th>
-                                <th className="p-4 text-sm font-semibold uppercase tracking-wider">Packing Type</th>
-                                {!isSelectionMode && <th className="p-4 w-10"></th>}
+                <table className="w-full text-left">
+                    <thead className="bg-blue-700 border-b text-white text-sm font-bold uppercase tracking-wider">
+                        <tr>
+                            {isSelectionMode && <th className="p-4 w-12 text-center">#</th>}
+                            <th className="p-4">Code</th>
+                            <th className="p-4">Product Description</th>
+                            <th className="p-4">Short Description</th>
+                            <th className="p-4">Spinning Count</th>
+                            <th className="p-4">Commodity</th>
+                            <th className="p-4">Packing Type</th>
+                            {!isSelectionMode && <th className="p-4 w-10"></th>}
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                        {loading ? (
+                            <tr><td colSpan={7} className="p-12 text-center text-slate-400">Loading products...</td></tr>
+                        ) : currentItems.length > 0 ? currentItems.map(item => (
+                            <tr 
+                                key={item.id} 
+                                className={`hover:bg-blue-50 cursor-pointer ${selectedIds.includes(item.id) ? 'bg-blue-100/50' : ''}`} 
+                                onClick={() => handleRowClick(item)}
+                            >
+                                {isSelectionMode && (
+                                    <td className="p-4 text-center">
+                                        {selectedIds.includes(item.id) ? <CheckSquare size={18} className="text-blue-600 mx-auto"/> : <Square size={18} className="text-slate-200 mx-auto"/>}
+                                    </td>
+                                )}
+                                <td className="p-4 text-base font-bold text-blue-600 font-mono">{item.product_code}</td>
+                                <td className="p-4 text-base font-semibold text-slate-700">{item.product_name}</td>
+                                <td className="p-4 text-base text-slate-600 uppercase">{item.short_description || '—'}</td>
+                                <td className="p-4 text-base font-bold text-amber-700">{item.spinning_count_name || '—'}</td>
+                                <td className="p-4 text-base text-slate-600">{item.commodity || '—'}</td>
+                                <td className="p-4 text-base font-semibold text-slate-500">{item.packing_type || '—'}</td>
+                                {!isSelectionMode && <td className="p-4 text-slate-300"><Edit size={16} /></td>}
                             </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 font-mono">
-                            {loading ? (
-                                <tr>
-                                    <td colSpan={8} className="py-24">
-                                        <div className="flex flex-col items-center justify-center">
-                                            <RefreshCw size={48} className="animate-spin text-blue-500 mb-4" />
-                                            <p className="text-slate-500 font-medium">Accessing SKU Registry...</p>
-                                        </div>
-                                    </td>
-                                </tr>
-                            ) : currentItems.length > 0 ? (
-                                currentItems.map((item) => (
-                                    <tr 
-                                        key={item.id} 
-                                        onClick={() => handleRowClick(item)} 
-                                        className={`transition-all cursor-pointer hover:bg-blue-50/50 ${selectedIds.includes(item.id) ? 'bg-blue-50' : ''}`}
-                                    >
-                                        {isSelectionMode && (
-                                            <td className="p-4 text-center" onClick={(e) => {e.stopPropagation(); handleRowClick(item);}}>
-                                                {selectedIds.includes(item.id) ? <CheckSquare size={18} className="text-blue-600 mx-auto"/> : <Square size={18} className="text-slate-200 mx-auto"/>}
-                                            </td>
-                                        )}
-                                        <td className="p-4 text-sm font-black text-blue-600">{item.product_code}</td>
-                                        <td className="p-4 text-sm font-bold text-slate-700 uppercase font-sans">{item.product_name}</td>
-                                        <td className="p-4 text-xs text-slate-400 font-sans">{item.short_description || '---'}</td>
-                                        <td className="p-4 text-xs font-bold text-amber-600 uppercase font-sans">{item.spinning_count_name}</td>
-                                        <td className="p-4 text-xs font-bold text-slate-500 uppercase font-sans">{item.commodity}</td>
-                                        <td className="p-4">
-                                            <span className="bg-slate-100 px-3 py-1 rounded-lg text-[10px] font-black uppercase text-slate-500 border">
-                                                {item.packing_type || 'N/A'}
-                                            </span>
-                                        </td>
-                                        {!isSelectionMode && <td className="p-4"><Edit size={16} className="text-slate-300" /></td>}
-                                    </tr>
-                                ))
-                            ) : (
-                                <tr>
-                                    <td colSpan={8} className="py-28 text-center">
-                                        <div className="flex flex-col items-center justify-center">
-                                            <Package size={56} className="text-slate-200 mb-4" />
-                                            <h3 className="text-xl font-bold text-slate-400 uppercase">No Products Found</h3>
-                                        </div>
-                                    </td>
-                                </tr>
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-                {/* Pagination */}
-                <div className="p-4 bg-slate-50 border-t flex items-center justify-between">
-                    <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Page {currentPage} of {totalPages}</span>
+                        )) : (
+                            <tr><td colSpan={7} className="p-12 text-center text-slate-400">No products found</td></tr>
+                        )}
+                    </tbody>
+                </table>
+
+                <div className="p-3 bg-slate-50 border-t flex items-center justify-between text-sm">
+                    <span className="text-slate-500 font-medium">Page {currentPage} of {totalPages}</span>
                     <div className="flex gap-1">
-                        <button disabled={currentPage === 1} onClick={() => setCurrentPage(prev => prev - 1)} className="p-2 border rounded-lg bg-white disabled:opacity-30"><ChevronLeft size={16}/></button>
-                        <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(prev => prev + 1)} className="p-2 border rounded-lg bg-white disabled:opacity-30"><ChevronRight size={16}/></button>
+                        <button disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)} className="p-1.5 border rounded bg-white disabled:opacity-40"><ChevronLeft size={16}/></button>
+                        <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)} className="p-1.5 border rounded bg-white disabled:opacity-40"><ChevronRight size={16}/></button>
                     </div>
                 </div>
             </div>
 
-            {/* 4. MODAL COCKPIT */}
+            {/* Modal */}
             {isModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-7xl overflow-hidden flex flex-col max-h-[95vh] animate-in zoom-in duration-200">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
+                    <div className="bg-[#cfe2ff] w-full max-w-[1000px] rounded shadow-2xl overflow-hidden border border-white animate-in zoom-in duration-200">
                         
-                        {/* Modal Header */}
-                        <div className="bg-blue-600 p-4 flex justify-between items-center text-white shadow-lg">
-                            <div className="flex items-center gap-4">
-                                <div className="p-2 bg-white/20 rounded-lg"><Zap size={20} /></div>
-                                <div>
-                                    <h2 className="font-bold uppercase tracking-tight">Technical SKU Registry</h2>
-                                    <p className="text-[10px] font-bold text-blue-100 uppercase">Registry Code: {formData.product_code}</p>
+                        <div className="bg-[#6495ed] p-5 flex justify-between items-center text-white border-b border-white/20">
+                            <div>
+                                <h2 className="text-xl font-medium tracking-wide">Product Master</h2>
+                                <p className="text-blue-50 text-base mt-1">Add / Modify Product details</p>
+                            </div>
+                            <button onClick={() => setIsModalOpen(false)} className="hover:bg-white/10 p-1 rounded-full"><X size={24}/></button>
+                        </div>
+
+                        <div className="p-8">
+                            <form onSubmit={handleSave} className="space-y-2">
+                                <div className="grid grid-cols-12 gap-x-6 gap-y-2">
+
+                                    {/* Row 1 */}
+                                    <div className="col-span-3 flex justify-end items-center"><FormLabel>Product Code</FormLabel></div>
+                                    <div className="col-span-3">
+                                        <input type="text" readOnly className="w-32 p-1 border border-gray-400 bg-black text-white font-bold outline-none cursor-default font-mono text-base" value={formData.product_code} />
+                                    </div>
+                                    <div className="col-span-6 flex items-center gap-3 pl-4">
+                                        <input type="checkbox" id="rnd" checked={formData.roundoff} onChange={e => setFormData({...formData, roundoff: e.target.checked})} className="w-5 h-5 accent-blue-600" />
+                                        <label htmlFor="rnd" className="text-base font-medium text-slate-700">Roundoff</label>
+                                    </div>
+
+                                    {/* Row 2 */}
+                                    <div className="col-span-3 flex justify-end"><FormLabel>Product Name</FormLabel></div>
+                                    <div className="col-span-5">
+                                        <input type="text" required className="w-full p-1 border border-gray-400 bg-white uppercase text-base font-semibold outline-none focus:border-blue-500" value={formData.product_name} onChange={e => setFormData({...formData, product_name: e.target.value.toUpperCase()})} />
+                                    </div>
+                                    <div className="col-span-1 flex justify-end"><FormLabel>Commodity</FormLabel></div>
+                                    <div className="col-span-3">
+                                        <select className="w-full p-1 border border-gray-400 bg-white text-base outline-none focus:border-blue-500" value={formData.commodity} onChange={e => setFormData({...formData, commodity: e.target.value})}>
+                                            <option value="">-- Choose --</option>
+                                            <option value="CONE YARN">CONE YARN</option>
+                                            <option value="BEAM">BEAM</option>
+                                        </select>
+                                    </div>
+
+                                    {/* Row 3 */}
+                                    <div className="col-span-3 flex justify-end"><FormLabel>Short Description</FormLabel></div>
+                                    <div className="col-span-5">
+                                        <input type="text" className="w-full p-1 border border-gray-400 bg-white uppercase text-base outline-none focus:border-blue-500" value={formData.short_description} onChange={e => setFormData({...formData, short_description: e.target.value.toUpperCase()})} />
+                                    </div>
+                                    <div className="col-span-1 flex justify-end"><FormLabel>Commodity Code</FormLabel></div>
+                                    <div className="col-span-3">
+                                        <input type="text" className="w-full p-1 border border-gray-400 bg-white text-base outline-none focus:border-blue-500" value={formData.commodity_code} onChange={e => setFormData({...formData, commodity_code: e.target.value})} />
+                                    </div>
+
+                                    {/* Row 4 */}
+                                    <div className="col-span-3 flex justify-end"><FormLabel>Packing Type</FormLabel></div>
+                                    <div className="col-span-5">
+                                        <select className="w-full p-1 border border-gray-400 bg-white text-base outline-none focus:border-blue-500" value={formData.packing_type} onChange={e => setFormData({...formData, packing_type: e.target.value})}>
+                                            <option value="">-- Select --</option>
+                                            {packingTypes.map(p => <option key={p.id} value={p.packing_type}>{p.packing_type}</option>)}
+                                        </select>
+                                    </div>
+                                    <div className="col-span-1 flex justify-end"><FormLabel>Fibre</FormLabel></div>
+                                    <div className="col-span-3">
+                                        <select className="w-full p-1 border border-gray-400 bg-white text-base outline-none focus:border-blue-500" value={formData.fibre} onChange={e => setFormData({...formData, fibre: e.target.value})}>
+                                            <option value="">-- Choose --</option>
+                                            <option value="COTTON">COTTON</option>
+                                            <option value="POLYESTER">POLYESTER</option>
+                                        </select>
+                                    </div>
+
+                                    {/* Row 5 */}
+                                    <div className="col-span-3 flex justify-end"><FormLabel>Wt. per Cone / Bundle</FormLabel></div>
+                                    <div className="col-span-5">
+                                        <input type="number" step="0.001" className="w-32 p-1 border border-gray-400 bg-white text-base text-right outline-none focus:border-blue-500" value={formData.wt_per_cone} onChange={e => setFormData({...formData, wt_per_cone: e.target.value})} />
+                                    </div>
+                                    <div className="col-span-1 flex justify-end"><FormLabel>Charity Rs.</FormLabel></div>
+                                    <div className="col-span-3">
+                                        <input type="number" className="w-full p-1 border border-gray-400 bg-white text-base text-right outline-none focus:border-blue-500" value={formData.charity_rs} onChange={e => setFormData({...formData, charity_rs: e.target.value})} />
+                                    </div>
+
+                                    {/* Row 6 */}
+                                    <div className="col-span-3 flex justify-end"><FormLabel>No. of Cones / Pack</FormLabel></div>
+                                    <div className="col-span-5">
+                                        <input type="number" className="w-32 p-1 border border-gray-400 bg-white text-base text-right outline-none focus:border-blue-500" value={formData.no_of_cones_per_pack} onChange={e => setFormData({...formData, no_of_cones_per_pack: e.target.value})} />
+                                    </div>
+                                    <div className="col-span-1 flex justify-end"><FormLabel>Other Receipt</FormLabel></div>
+                                    <div className="col-span-3">
+                                        <input type="number" className="w-full p-1 border border-gray-400 bg-white text-base text-right outline-none focus:border-blue-500" value={formData.other_receipt} onChange={e => setFormData({...formData, other_receipt: e.target.value})} />
+                                    </div>
+
+                                    {/* Row 7 */}
+                                    <div className="col-span-3 flex justify-end"><FormLabel>Pack Nett Wt.</FormLabel></div>
+                                    <div className="col-span-9">
+                                        <input type="text" readOnly className="w-32 p-1 border border-gray-400 bg-gray-100 text-base font-mono outline-none cursor-default" value={formData.pack_nett_wt} />
+                                    </div>
+
+                                    {/* Row 8 - Tariff */}
+                                    <div className="col-span-3 flex justify-end"><FormLabel>Tariff Sub Head</FormLabel></div>
+                                    <div className="col-span-9 flex gap-2">
+                                        <input type="text" className="w-32 p-1 border border-gray-400 bg-white text-base outline-none focus:border-blue-500 font-mono" value={formData.tariff_sub_head} onChange={e => handleTariffChange(e.target.value)} />
+                                        <select className="flex-1 p-1 border border-gray-400 bg-white text-base outline-none focus:border-blue-500" value={formData.tariff_sub_head} onChange={e => handleTariffChange(e.target.value)}>
+                                            <option value="">-- Choose from master --</option>
+                                            {tariffs.map(t => <option key={t.id} value={t.tariff_code}>{t.tariff_name}</option>)}
+                                        </select>
+                                    </div>
+
+                                    {/* Row 9 - Printing Tariff */}
+                                    <div className="col-span-3 flex justify-end"><FormLabel>Printing Tariff No.</FormLabel></div>
+                                    <div className="col-span-9 flex gap-2">
+                                        <input type="text" className="w-32 p-1 border border-gray-400 bg-white text-base outline-none focus:border-blue-500" value={formData.printing_tariff_sub_head_no} onChange={e => setFormData({...formData, printing_tariff_sub_head_no: e.target.value})} />
+                                        <input type="text" className="flex-1 p-1 border border-gray-400 bg-white text-base outline-none focus:border-blue-500" value={formData.printing_tariff_desc} onChange={e => setFormData({...formData, printing_tariff_desc: e.target.value})} />
+                                    </div>
+
+                                    {/* Row 10 */}
+                                    <div className="col-span-3 flex justify-end"><FormLabel>Product Type</FormLabel></div>
+                                    <div className="col-span-9">
+                                        <input type="text" className="w-48 p-1 border border-gray-400 bg-white uppercase text-base outline-none focus:border-blue-500" value={formData.product_type} onChange={e => setFormData({...formData, product_type: e.target.value.toUpperCase()})} />
+                                    </div>
+
+                                    {/* Row 11 */}
+                                    <div className="col-span-3 flex justify-end"><FormLabel>Spinning Count Name</FormLabel></div>
+                                    <div className="col-span-9">
+                                        <input type="text" className="w-full p-1 border border-gray-400 bg-white uppercase text-base outline-none focus:border-blue-500" value={formData.spinning_count_name} onChange={e => setFormData({...formData, spinning_count_name: e.target.value.toUpperCase()})} />
+                                    </div>
+
+                                    {/* Row 12 */}
+                                    <div className="col-span-3 flex justify-end"><FormLabel>40's Converted Factor</FormLabel></div>
+                                    <div className="col-span-9">
+                                        <input type="number" step="0.001" className="w-32 p-1 border border-gray-400 bg-white text-base text-right outline-none focus:border-blue-500" value={formData.converted_factor_40s} onChange={e => setFormData({...formData, converted_factor_40s: e.target.value})} />
+                                    </div>
+
+                                    {/* Row 13 */}
+                                    <div className="col-span-3 flex justify-end"><FormLabel>Actual Count</FormLabel></div>
+                                    <div className="col-span-9">
+                                        <input type="text" className="w-32 p-1 border border-gray-400 bg-white text-base outline-none focus:border-blue-500 font-mono" value={formData.actual_count} onChange={e => setFormData({...formData, actual_count: e.target.value})} />
+                                    </div>
                                 </div>
-                            </div>
-                            <button onClick={() => setIsModalOpen(false)} className="hover:bg-blue-500 p-1 rounded-full"><X size={24}/></button>
-                        </div>
 
-                        {/* Navigation Tabs */}
-                        <div className="flex bg-slate-50 border-b px-6">
-                            <button onClick={() => setActiveTab('identity')} className={`py-4 px-6 text-[10px] font-bold uppercase tracking-widest relative ${activeTab === 'identity' ? 'text-blue-600' : 'text-slate-400'}`}>
-                                01. Core Identity & Class {activeTab === 'identity' && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-blue-600"/>}
-                            </button>
-                            <button onClick={() => setActiveTab('technical')} className={`py-4 px-6 text-[10px] font-bold uppercase tracking-widest relative ${activeTab === 'technical' ? 'text-blue-600' : 'text-slate-400'}`}>
-                                02. Spinning & Technicals {activeTab === 'technical' && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-blue-600"/>}
-                            </button>
-                        </div>
-
-                        {/* Modal Body */}
-                        <div className="flex-1 overflow-y-auto p-6 flex flex-col lg:flex-row gap-6">
-                            
-                            {/* LEFT SIDE: Entry Form (All original fields preserved) */}
-                            <div className="flex-1 space-y-6">
-                                {activeTab === 'identity' ? (
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                        <div className="bg-slate-50 p-5 rounded-xl space-y-4 border">
-                                            <div className="flex items-center gap-2 mb-2 text-slate-400"><Database size={14}/><span className="text-[9px] font-black uppercase">Core Metadata</span></div>
-                                            <InputField label="Product Code" value={formData.product_code} readOnly className="font-mono text-blue-600" />
-                                            <InputField label="Product Description *" value={formData.product_name} onChange={e => setFormData({...formData, product_name: e.target.value.toUpperCase()})} />
-                                            <InputField label="Short Description" value={formData.short_description} onChange={e => setFormData({...formData, short_description: e.target.value.toUpperCase()})} />
-                                        </div>
-
-                                        <div className="bg-slate-50 p-5 rounded-xl space-y-4 border">
-                                            <div className="flex items-center gap-2 mb-2 text-slate-400"><Tag size={14}/><span className="text-[9px] font-black uppercase">Commodity Logic</span></div>
-                                            <InputField label="Commodity Name" value={formData.commodity} onChange={e => setFormData({...formData, commodity: e.target.value.toUpperCase()})} />
-                                            <InputField label="Commodity Code" value={formData.commodity_code} onChange={e => setFormData({...formData, commodity_code: e.target.value})} />
-                                            <div className="space-y-1">
-                                                <label className="text-[10px] font-bold text-slate-400 uppercase">Tariff Sub Head (Master)</label>
-                                                <select value={formData.tariff_sub_head} onChange={e => handleTariffChange(e.target.value)} className="w-full bg-white border border-slate-200 p-2 rounded-lg text-sm font-bold">
-                                                    <option value="">-- Choose Tariff --</option>
-                                                    {tariffs.map(t => <option key={t.id} value={t.tariff_code}>{t.tariff_name}</option>)}
-                                                </select>
-                                            </div>
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                        <div className="bg-slate-50 p-5 rounded-xl space-y-4 border">
-                                            <div className="flex items-center gap-2 mb-2 text-slate-400"><Settings size={14}/><span className="text-[9px] font-black uppercase">Spinning Params</span></div>
-                                            <InputField label="Spinning Count Name" value={formData.spinning_count_name} onChange={e => setFormData({...formData, spinning_count_name: e.target.value.toUpperCase()})} />
-                                            <InputField label="Actual Count" value={formData.actual_count} onChange={e => setFormData({...formData, actual_count: e.target.value})} />
-                                            <InputField label="Converted Factor 40s" type="number" step="0.001" value={formData.converted_factor_40s} onChange={e => setFormData({...formData, converted_factor_40s: e.target.value})} />
-                                        </div>
-
-                                        <div className="bg-slate-50 p-5 rounded-xl space-y-4 border">
-                                            <div className="flex items-center gap-2 mb-2 text-slate-400"><Info size={14}/><span className="text-[9px] font-black uppercase">Compliance Info</span></div>
-                                            <InputField label="HSN / Tariff No" value={formData.printing_tariff_sub_head_no} readOnly className="bg-white/50" />
-                                            <InputField label="Product Type" value={formData.product_type} readOnly className="bg-white/50" />
-                                            <InputField label="Fibre" value={formData.fibre} readOnly className="bg-white/50 uppercase" />
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* RIGHT SIDE: Logistics Cockpit (Financial-style Dashboard) */}
-                            <div className="w-full lg:w-96 bg-slate-900 rounded-2xl p-6 text-white flex flex-col justify-between shadow-2xl">
-                                <div className="space-y-4">
-                                    <div className="text-center mb-6">
-                                        <Activity size={32} className="text-blue-400 mx-auto mb-1" />
-                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Inventory & Packaging Logic</p>
-                                    </div>
-
-                                    <div className="space-y-4">
-                                        <div className="space-y-1">
-                                            <label className="text-[10px] font-bold text-slate-500 uppercase">Packing Configuration</label>
-                                            <select value={formData.packing_type} onChange={e => setFormData({...formData, packing_type: e.target.value})} className="w-full bg-slate-800 border-none p-2 rounded-lg text-sm font-bold text-blue-300 outline-none">
-                                                <option value="">-- SELECT PACKING --</option>
-                                                {packingTypes.map(p => <option key={p.id} value={p.packing_type}>{p.packing_type}</option>)}
-                                            </select>
-                                        </div>
-                                        
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <LedgerInput label="Wt Per Cone" value={formData.wt_per_cone} onChange={val => setFormData({...formData, wt_per_cone: val})} />
-                                            <LedgerInput label="Cones / Pack" value={formData.no_of_cones_per_pack} onChange={val => setFormData({...formData, no_of_cones_per_pack: val})} />
-                                        </div>
-
-                                        <LedgerInput label="Pack Nett Wt (KG)" color="text-amber-400" value={formData.pack_nett_wt} readOnly/>
-                                        <LedgerInput label="Charity Amount (₹)" value={formData.charity_rs} onChange={val => setFormData({...formData, charity_rs: val})} />
-                                        <LedgerInput label="Other Receipt (₹)" value={formData.other_receipt} onChange={val => setFormData({...formData, other_receipt: val})} />
-
-                                        <div className="flex items-center gap-3 pt-2">
-                                            <button type="button" onClick={() => setFormData({...formData, roundoff: !formData.roundoff})}>
-                                                {formData.roundoff ? <CheckSquare className="text-blue-400" size={20}/> : <Square className="text-slate-600" size={20}/>}
+                                {/* Footer Buttons */}
+                                <div className="flex justify-between items-center pt-8">
+                                    <div>
+                                        {formData.id && (
+                                            <button 
+                                                type="button"
+                                                onClick={() => {
+                                                    if (window.confirm("Purge this product record permanently?")) {
+                                                        mastersAPI.products.delete(formData.id)
+                                                            .then(fetchRecords)
+                                                            .then(() => setIsModalOpen(false));
+                                                    }
+                                                }}
+                                                className="text-rose-600 hover:text-rose-700 text-base font-semibold underline hover:no-underline"
+                                            >
+                                                Purge Record
                                             </button>
-                                            <span className="text-[10px] font-bold text-slate-500 uppercase">Apply Round-Off Logic</span>
-                                        </div>
+                                        )}
+                                    </div>
+                                    <div className="flex gap-4">
+                                        <button 
+                                            type="submit" 
+                                            disabled={submitLoading}
+                                            className="flex items-center gap-2 bg-slate-50 border border-slate-400 px-10 py-2 text-base font-bold shadow-sm hover:bg-white active:scale-95 transition-all"
+                                        >
+                                            <span className="text-blue-700 p-1 border border-blue-100 bg-white rounded"><Save size={16}/></span>
+                                            {formData.id ? 'Update' : 'Save'}
+                                        </button>
+                                        <button 
+                                            type="button" 
+                                            onClick={() => setIsModalOpen(false)}
+                                            className="flex items-center gap-2 bg-slate-50 border border-slate-400 px-10 py-2 text-base font-bold shadow-sm hover:bg-white active:scale-95 transition-all"
+                                        >
+                                            <span className="text-red-600 font-black p-1 border border-red-100 bg-white rounded">X</span> Cancel
+                                        </button>
                                     </div>
                                 </div>
-
-                                <div className="mt-8 p-6 bg-blue-600/10 rounded-3xl border border-blue-500/20 text-center relative overflow-hidden group">
-                                    <Warehouse className="absolute -right-2 -bottom-2 text-white/5 group-hover:scale-110 transition-transform" size={80} />
-                                    <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-1 relative z-10">Current Mill Stock</p>
-                                    <div className="flex items-baseline justify-center gap-2 relative z-10">
-                                        <input 
-                                            type="number" 
-                                            className="bg-transparent text-3xl font-black text-white font-mono text-center w-24 outline-none"
-                                            value={formData.mill_stock}
-                                            onChange={e => setFormData({...formData, mill_stock: e.target.value})}
-                                        />
-                                        <span className="text-xs font-bold text-slate-500 uppercase">KG</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Modal Footer */}
-                        <div className="p-6 bg-slate-50 border-t flex justify-end items-center gap-4">
-                            {formData.id && (
-                                <button onClick={() => {if(window.confirm("Purge SKU?")) mastersAPI.products.delete(formData.id).then(() => {setIsModalOpen(false); fetchRecords();});}} className="mr-auto text-rose-500 text-[10px] font-bold uppercase tracking-widest hover:bg-rose-50 px-4 py-2 rounded-lg transition-all">
-                                    Purge Record
-                                </button>
-                            )}
-                            <button onClick={() => setIsModalOpen(false)} className="px-8 py-3 font-bold text-slate-400 hover:text-slate-600 text-xs tracking-widest uppercase transition-colors">Discard</button>
-                            <button onClick={handleSave} disabled={submitLoading} className="bg-blue-600 hover:bg-blue-700 text-white px-10 py-3 rounded-xl font-black shadow-xl flex items-center gap-2 active:scale-95 transition-all text-xs tracking-widest uppercase">
-                                <Save size={18}/> {submitLoading ? 'COMMITTING...' : 'COMMIT SKU REGISTRY'}
-                            </button>
+                            </form>
                         </div>
                     </div>
                 </div>
             )}
-
-            <style jsx>{`
-                input[type='number']::-webkit-inner-spin-button, 
-                input[type='number']::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
-                ::-webkit-scrollbar { width: 5px; height: 5px; }
-                ::-webkit-scrollbar-track { background: transparent; }
-                ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-            `}</style>
         </div>
     );
 };
-
-// HELPER COMPONENTS
-const InputField = ({ label, className = "", ...props }) => (
-    <div className={`space-y-1 ${className}`}>
-        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">{label}</label>
-        <input {...props} className="w-full bg-white border border-slate-200 p-2 rounded-lg text-xs font-bold outline-none focus:ring-1 focus:ring-blue-500 uppercase" />
-    </div>
-);
-
-const LedgerInput = ({ label, value, color = "text-white", onChange, readOnly=false }) => (
-    <div className="space-y-1">
-        <label className="text-[8px] font-black text-slate-500 uppercase block tracking-tighter">{label}</label>
-        <input
-            type="number"
-            step="0.001"
-            readOnly={readOnly}
-            className={`w-full bg-white/5 border border-white/5 rounded-lg p-2 text-right text-xs font-bold font-mono outline-none focus:border-blue-500 ${color}`}
-            value={value}
-            onChange={readOnly ? undefined : e => onChange(e.target.value)}
-        />
-    </div>
-);
 
 export default ProductMaster;

@@ -15,4 +15,10 @@ const StockBadge = ({ qty, label = "Available" }) => {
     );
 };
 
+
+
+
+
+
+
 export default StockBadge;

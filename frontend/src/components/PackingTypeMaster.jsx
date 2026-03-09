@@ -2,45 +2,34 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { mastersAPI } from '../service/api';
 import { 
     Plus, Edit, Trash2, X, ChevronLeft, 
-    ChevronRight, Loader2, CheckSquare, Square, RefreshCw, 
-    Save, CheckCircle2, Package, Search, Filter, Info, Hash, Database
+    ChevronRight, RefreshCw, Save, Package, Search, Filter, 
+    Square, CheckSquare
 } from 'lucide-react';
 
 const PackingTypeMaster = () => {
-    // --- State Management ---
     const [list, setList] = useState([]);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [loading, setLoading] = useState(false);
     const [submitLoading, setSubmitLoading] = useState(false);
     
-    // Selection & Bulk Actions
     const [isSelectionMode, setIsSelectionMode] = useState(false);
     const [selectedIds, setSelectedIds] = useState([]);
     
-    // Success Animation
-    const [showSuccess, setShowSuccess] = useState(false);
-    const [successMessage, setSuccessMessage] = useState("");
-    
-    // --- DYNAMIC FILTERING STATE ---
     const [searchField, setSearchField] = useState('packing_type');
     const [searchCondition, setSearchCondition] = useState('Like');
     const [searchValue, setSearchValue] = useState('');
 
-    // Pagination
     const [currentPage, setCurrentPage] = useState(1);
-    const [itemsPerPage] = useState(10);
+    const itemsPerPage = 10;
 
-    const initialState = () => ({
+    const initialState = {
         id: null,
         packing_type: ''
-    });
+    };
 
-    const [formData, setFormData] = useState(initialState());
+    const [formData, setFormData] = useState(initialState);
 
-    // --- API Integration ---
-    useEffect(() => {
-        fetchRecords();
-    }, []);
+    useEffect(() => { fetchRecords(); }, []);
 
     const fetchRecords = async () => {
         setLoading(true);
@@ -48,340 +37,275 @@ const PackingTypeMaster = () => {
             const res = await mastersAPI.packingTypes.getAll();
             const rawData = res?.data?.data || res?.data || [];
             setList(Array.isArray(rawData) ? rawData : []);
-        } catch (err) { 
-            console.error("Fetch Error:", err);
-            setList([]); 
-        } finally { setLoading(false); }
+        } catch (err) { setList([]); } finally { setLoading(false); }
     };
 
-    const triggerSuccess = (msg) => {
-        setSuccessMessage(msg);
-        setShowSuccess(true);
-        setTimeout(() => setShowSuccess(false), 2000);
-    };
-
-    // --- DYNAMIC FILTERING LOGIC ---
     const filteredData = useMemo(() => {
         let result = Array.isArray(list) ? [...list] : [];
-
         if (searchValue.trim()) {
             result = result.filter(item => {
                 const itemValue = String(item[searchField] || '').toLowerCase();
-                const filterValue = searchValue.toLowerCase().trim();
-
-                if (searchCondition === 'Equal') {
-                    return itemValue === filterValue;
-                } else {
-                    return itemValue.includes(filterValue);
-                }
+                const term = searchValue.toLowerCase().trim();
+                return searchCondition === 'Equal' ? itemValue === term : itemValue.includes(term);
             });
         }
-        return result;
+        return result.sort((a, b) => b.id - a.id);
     }, [list, searchValue, searchField, searchCondition]);
 
-    // --- Pagination Logic ---
     const totalPages = Math.ceil(filteredData.length / itemsPerPage) || 1;
     const currentItems = filteredData.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
-    // Reset pagination on filter change
-    useEffect(() => {
-        setCurrentPage(1);
-    }, [searchValue, searchField, searchCondition]);
-
-    // --- Actions ---
     const handleAddNew = () => {
-        setFormData(initialState());
+        const safeList = Array.isArray(list) ? list : [];
+        const maxId = safeList.reduce((max, item) => {
+            const num = parseInt(item.id, 10);
+            return !isNaN(num) ? Math.max(max, num) : max;
+        }, 0);
+
+        setFormData({ 
+            ...initialState, 
+            id: (maxId + 1).toString() 
+        });
         setIsModalOpen(true);
     };
 
-    const handleEdit = (item) => {
+    const handleRowClick = (item) => {
         if (isSelectionMode) {
-            setSelectedIds(prev => prev.includes(item.id) ? prev.filter(i => i !== item.id) : [...prev, item.id]);
-            return;
+            setSelectedIds(prev => 
+                prev.includes(item.id) ? prev.filter(id => id !== item.id) : [...prev, item.id]
+            );
+        } else {
+            setFormData({ ...item });
+            setIsModalOpen(true);
         }
-        setFormData({ ...item });
-        setIsModalOpen(true);
+    };
+
+    const handleBulkDelete = async () => {
+        if (selectedIds.length === 0) return;
+        if (window.confirm(`Permanently delete ${selectedIds.length} packing types?`)) {
+            setLoading(true);
+            try {
+                await Promise.all(selectedIds.map(id => mastersAPI.packingTypes.delete(id)));
+                setSelectedIds([]);
+                setIsSelectionMode(false);
+                fetchRecords();
+            } catch (err) { alert("Bulk delete failed."); } finally { setLoading(false); }
+        }
     };
 
     const handleSave = async (e) => {
         e.preventDefault();
+        if (!formData.packing_type?.trim()) return alert("Packing Type name is required");
         setSubmitLoading(true);
         try {
-            if (formData.id) {
+            if (formData.id && list.some(item => item.id === formData.id)) {
                 await mastersAPI.packingTypes.update(formData.id, formData);
             } else {
                 await mastersAPI.packingTypes.create(formData);
             }
             fetchRecords();
             setIsModalOpen(false);
-            triggerSuccess("Registry Updated!");
-        } catch (err) { 
-            alert("Error saving record."); 
-        } finally { 
-            setSubmitLoading(false); 
-        }
+        } catch (err) { alert("Error saving."); } finally { setSubmitLoading(false); }
     };
 
-    const handleBulkDelete = async () => {
-        if (selectedIds.length === 0) return;
-        if (window.confirm(`Delete ${selectedIds.length} packing types?`)) {
-            setLoading(true);
-            try {
-                await Promise.all(selectedIds.map(id => mastersAPI.packingTypes.delete(id)));
-                triggerSuccess("Records Deleted!");
-                setSelectedIds([]);
-                setIsSelectionMode(false);
-                fetchRecords();
-            } catch (err) { alert("Bulk delete failed."); } 
-            finally { setLoading(false); }
-        }
-    };
+    const FormLabel = ({ children }) => (
+        <label className="text-right text-base text-slate-700 pr-3 font-semibold self-center whitespace-nowrap">
+            {children}
+        </label>
+    );
 
     return (
-        <div className="min-h-screen bg-slate-50 p-6 font-sans text-slate-900">
+        <div className="min-h-screen bg-slate-100 p-6 font-sans">
             
-            {/* SUCCESS OVERLAY */}
-            {showSuccess && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/20 backdrop-blur-sm transition-all">
-                    <div className="bg-white p-8 rounded-2xl shadow-2xl flex flex-col items-center gap-3 animate-in zoom-in duration-300">
-                        <CheckCircle2 size={60} className="text-emerald-500" />
-                        <h3 className="text-xl font-bold text-slate-800 uppercase tracking-tight">{successMessage}</h3>
-                    </div>
-                </div>
-            )}
-
-            {/* HEADER SECTION */}
+            {/* Header */}
             <div className="flex justify-between items-center mb-6">
-                <div>
-                    <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-                        <Package className="text-blue-600" /> Packing Machine Master
-                    </h1>
-                    <p className="text-sm text-slate-500">Define container types and material packaging standards</p>
-                </div>
-                
+                <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+                    <Package className="text-blue-700" /> Packing Type Master
+                </h1>
                 <div className="flex gap-2">
                     <button 
-                        onClick={() => {setIsSelectionMode(!isSelectionMode); setSelectedIds([]);}} 
-                        className={`px-5 py-2 border rounded-lg font-semibold transition-all ${isSelectionMode ? 'bg-amber-100 border-amber-300 text-amber-700' : 'bg-white border-slate-200 text-blue-600 hover:bg-slate-50'}`}
+                        onClick={handleAddNew} 
+                        className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg font-bold text-xs uppercase shadow-md transition-all flex items-center gap-1"
                     >
-                        {isSelectionMode ? 'Cancel' : 'Select'}
+                        <Plus size={16} /> New Packing
                     </button>
-
-                    {isSelectionMode ? (
-                        <button 
-                            onClick={handleBulkDelete}
-                            disabled={selectedIds.length === 0}
-                            className={`px-5 py-2 border rounded-lg flex items-center gap-2 transition-all ${selectedIds.length > 0 ? 'bg-white border-red-200 text-red-600' : 'bg-white border-slate-100 text-slate-300 cursor-not-allowed'}`}
-                        >
-                            <Trash2 size={18}/> Delete {selectedIds.length > 0 && `(${selectedIds.length})`}
-                        </button>
-                    ) : (
-                        <button onClick={handleAddNew} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg font-semibold shadow-sm transition-all">
-                            <Plus size={18} /> New
-                        </button>
-                    )}
-                    
-                    <button onClick={fetchRecords} className="p-2 border border-slate-200 rounded-lg bg-white text-slate-400 hover:text-blue-600 transition-colors">
+                    <button 
+                        onClick={fetchRecords} 
+                        className="p-2 border border-slate-200 rounded-lg bg-white"
+                    >
                         <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
                     </button>
                 </div>
             </div>
 
-            {/* DYNAMIC FILTER BAR */}
-            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-6">
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-                    <div>
-                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Search Field</label>
-                        <select 
-                            value={searchField} 
-                            onChange={(e) => setSearchField(e.target.value)} 
-                            className="w-full border border-slate-200 p-2 rounded-lg text-sm outline-none focus:ring-1 focus:ring-blue-500"
-                        >
-                            <option value="packing_type">Description</option>
-                            <option value="id">System ID</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Condition</label>
-                        <select 
-                            value={searchCondition} 
-                            onChange={(e) => setSearchCondition(e.target.value)} 
-                            className="w-full border border-slate-200 p-2 rounded-lg text-sm outline-none focus:ring-1 focus:ring-blue-500"
-                        >
-                            <option value="Like">Like</option>
-                            <option value="Equal">Equal</option>
-                        </select>
-                    </div>
+            {/* Search Bar */}
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-6 flex flex-wrap items-end gap-4">
+                <div className="flex-1 min-w-[180px]">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Search Field</label>
+                    <select 
+                        value={searchField} 
+                        onChange={e => setSearchField(e.target.value)} 
+                        className="w-full border border-slate-200 p-2 rounded-xl text-[13px] outline-none focus:ring-1 focus:ring-blue-500"
+                    >
+                        <option value="packing_type">Packing Type</option>
+                        <option value="id">Code</option>
+                    </select>
+                </div>
+                <div className="flex-1 min-w-[150px]">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Condition</label>
+                    <select 
+                        value={searchCondition} 
+                        onChange={e => setSearchCondition(e.target.value)} 
+                        className="w-full border p-2 rounded-xl text-[13px] outline-none"
+                    >
+                        <option value="Like">Like</option>
+                        <option value="Equal">Equal</option>
+                    </select>
+                </div>
+                <div className="flex-[2] min-w-[280px]">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Value</label>
                     <div className="relative">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Value</label>
-                        <div className="relative">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                            <input 
-                                type="text" 
-                                value={searchValue} 
-                                onChange={(e) => setSearchValue(e.target.value)} 
-                                className="w-full border border-slate-200 pl-10 pr-4 py-2 rounded-lg text-sm outline-none focus:ring-1 focus:ring-blue-500 bg-white" 
-                                placeholder="Enter packing name..." 
-                            />
-                        </div>
-                    </div>
-                    <div className="flex gap-2">
-                        <button onClick={() => setSearchValue('')} className="flex-1 border border-slate-200 py-2 rounded-lg text-sm font-bold hover:bg-slate-50 transition-colors">Show All</button>
-                        <div className="flex-1 bg-blue-50 text-blue-600 border border-blue-100 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-2">
-                            <Filter size={14}/> {filteredData.length} Matches
-                        </div>
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
+                        <input 
+                            type="text" 
+                            value={searchValue} 
+                            onChange={e => setSearchValue(e.target.value)} 
+                            className="w-full border pl-9 pr-4 py-2 rounded-xl text-[13px] outline-none focus:ring-1 focus:ring-blue-500" 
+                            placeholder="Live search..." 
+                        />
                     </div>
                 </div>
+
+                {!isSelectionMode ? (
+                    <button 
+                        onClick={() => setIsSelectionMode(true)} 
+                        className="border border-blue-200 bg-blue-50 text-blue-600 px-8 py-2 rounded-xl text-base font-bold hover:bg-blue-100 shadow-sm transition-all"
+                    >
+                        Select
+                    </button>
+                ) : (
+                    <div className="flex gap-2">
+                        <button 
+                            onClick={() => { setIsSelectionMode(false); setSelectedIds([]); }} 
+                            className="border border-slate-200 px-6 py-2 rounded-xl text-base font-bold text-slate-600 hover:bg-slate-50"
+                        >
+                            Clear
+                        </button>
+                        <button 
+                            onClick={handleBulkDelete}
+                            disabled={selectedIds.length === 0}
+                            className="bg-red-500 text-white px-6 py-2 rounded-xl text-base font-bold shadow-md disabled:opacity-50 flex items-center gap-1"
+                        >
+                            <Trash2 size={16} /> Delete ({selectedIds.length})
+                        </button>
+                    </div>
+                )}
             </div>
 
-            {/* DATA TABLE */}
+            {/* Table */}
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                <div className="overflow-x-auto">
-                    <table className="w-full text-left">
-                        <thead>
-                            <tr className="bg-blue-600 text-white">
-                                {isSelectionMode && (
-                                    <th className="p-4 w-12 text-center">
-                                        <button onClick={() => setSelectedIds(selectedIds.length === currentItems.length ? [] : currentItems.map(i => i.id))}>
-                                            {selectedIds.length === currentItems.length && currentItems.length > 0 ? <CheckSquare size={18} /> : <Square size={18} />}
-                                        </button>
-                                    </th>
-                                )}
-                                <th className="p-4 text-sm font-semibold">Packing Code</th>
-                                <th className="p-4 text-sm font-semibold">Packing Type</th>
-                                <th className="p-4 text-sm font-semibold text-center w-32">Status</th>
-                                {!isSelectionMode && <th className="p-4 w-10"></th>}
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                            {loading ? (
-                                <tr><td colSpan="5" className="p-20 text-center"><Loader2 className="animate-spin mx-auto text-blue-600" size={40} /></td></tr>
-                            ) : currentItems.length > 0 ? (
-                                currentItems.map((item) => (
-                                    <tr 
-                                        key={item.id} 
-                                        onClick={() => handleEdit(item)} 
-                                        className={`transition-all group cursor-pointer ${selectedIds.includes(item.id) ? 'bg-blue-50' : 'hover:bg-blue-50'}`}
-                                    >
-                                        {isSelectionMode && (
-                                            <td className="p-4 text-center" onClick={(e) => {e.stopPropagation(); handleEdit(item);}}>
-                                                {selectedIds.includes(item.id) ? <CheckSquare size={18} className="text-blue-600 mx-auto"/> : <Square size={18} className="text-slate-200 mx-auto"/>}
-                                            </td>
-                                        )}
-                                        <td className="p-4 text-sm font-mono text-slate-500">  {item.id}</td>
-                                        <td className="p-4 text-sm font-bold text-slate-700 uppercase tracking-tight">{item.packing_type}</td>
+                <table className="w-full text-left">
+                    <thead className="bg-blue-700 border-b text-white text-sm font-bold uppercase tracking-wider">
+                        <tr>
+                            {isSelectionMode && <th className="p-4 w-12 text-center">#</th>}
+                            <th className="p-4">Code</th>
+                            <th className="p-4">Packing Type Description</th>
+                            {!isSelectionMode && <th className="p-4 w-10"></th>}
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                        {loading ? (
+                            <tr><td colSpan={3} className="p-12 text-center text-slate-400">Loading...</td></tr>
+                        ) : currentItems.length > 0 ? (
+                            currentItems.map(item => (
+                                <tr 
+                                    key={item.id} 
+                                    className={`hover:bg-blue-50 cursor-pointer ${selectedIds.includes(item.id) ? 'bg-blue-100/50' : ''}`} 
+                                    onClick={() => handleRowClick(item)}
+                                >
+                                    {isSelectionMode && (
                                         <td className="p-4 text-center">
-                                            <span className="bg-emerald-50 text-emerald-600 text-[10px] px-2 py-1 rounded font-bold uppercase tracking-wider">Active</span>
+                                            {selectedIds.includes(item.id) ? <CheckSquare size={18} className="text-blue-600 mx-auto"/> : <Square size={18} className="text-slate-200 mx-auto"/>}
                                         </td>
-                                        {!isSelectionMode && (
-                                            <td className="p-4 text-right">
-                                                <Edit size={16} className="text-slate-200 group-hover:text-blue-600 transition-colors" />
-                                            </td>
-                                        )}
-                                    </tr>
-                                ))
-                            ) : (
-                                <tr><td colSpan="5" className="p-20 text-center text-slate-400 font-bold uppercase tracking-widest opacity-20 text-xl italic">No Records Found</td></tr>
-                            )}
-                        </tbody>
-                    </table>
-                </div>
+                                    )}
+                                    <td className="p-4 text-base font-bold text-blue-600 font-mono">{item.id}</td>
+                                    <td className="p-4 text-base font-semibold text-slate-700 uppercase">{item.packing_type}</td>
+                                    {!isSelectionMode && <td className="p-4 text-slate-300"><Edit size={16} /></td>}
+                                </tr>
+                            ))
+                        ) : (
+                            <tr><td colSpan={3} className="p-12 text-center text-slate-400">No packing types found</td></tr>
+                        )}
+                    </tbody>
+                </table>
 
-                {/* PAGINATION FOOTER */}
-                <div className="p-4 bg-slate-50 border-t flex items-center justify-between">
-                    <span className="text-xs text-slate-500 font-semibold uppercase tracking-wider">
-                        Registry Count: {filteredData.length} entries
-                    </span>
-                    <div className="flex gap-2">
-                        <button disabled={currentPage === 1} onClick={() => setCurrentPage(prev => prev - 1)} className="p-2 border rounded bg-white hover:bg-blue-50 disabled:opacity-30 transition-all shadow-sm">
-                            <ChevronLeft size={16}/>
-                        </button>
-                        <div className="px-3 flex items-center text-xs font-bold text-slate-600">Page {currentPage} of {totalPages}</div>
-                        <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(prev => prev + 1)} className="p-2 border rounded bg-white hover:bg-blue-50 disabled:opacity-30 transition-all shadow-sm">
-                            <ChevronRight size={16}/>
-                        </button>
+                <div className="p-3 bg-slate-50 border-t flex items-center justify-between text-sm">
+                    <span className="text-slate-500 font-medium">Page {currentPage} of {totalPages}</span>
+                    <div className="flex gap-1">
+                        <button disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)} className="p-1.5 border rounded bg-white disabled:opacity-40"><ChevronLeft size={16}/></button>
+                        <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)} className="p-1.5 border rounded bg-white disabled:opacity-40"><ChevronRight size={16}/></button>
                     </div>
                 </div>
             </div>
 
-            {/* MODAL WINDOW (Matched to ProductMaster Sidebar Design) */}
+            {/* Modal */}
             {isModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden animate-in fade-in zoom-in duration-200">
-                        {/* Modal Header */}
-                        <div className="bg-blue-600 p-4 flex justify-between items-center text-white">
-                            <h2 className="font-black uppercase tracking-tight">{formData.id ? 'Modify Packing Entry' : 'Add New Packing Type'}</h2>
-                            <button onClick={() => setIsModalOpen(false)} className="hover:bg-blue-500 p-1 rounded-full transition-colors"><X size={20}/></button>
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
+                    <div className="bg-[#cfe2ff] w-full max-w-[620px] rounded shadow-2xl overflow-hidden border border-white animate-in zoom-in duration-200">
+                        <div className="bg-[#6495ed] p-5 flex justify-between items-center text-white border-b border-white/20">
+                            <div>
+                                <h2 className="text-xl font-medium tracking-wide">Packing Type Master</h2>
+                                <p className="text-blue-50 text-base mt-1">Add / Modify Packing Type details</p>
+                            </div>
+                            <button onClick={() => setIsModalOpen(false)} className="hover:bg-white/10 p-1 rounded-full"><X size={24}/></button>
                         </div>
-                        
-                        <form onSubmit={handleSave} className="p-8">
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                                
-                                {/* LEFT COLUMN: Profile Info */}
-                                <div className="md:col-span-2 space-y-6">
-                                    <div className="space-y-1">
-                                        <label className="text-[10px] font-bold text-slate-400 uppercase">Packing Code (ID)</label>
-                                        <input readOnly value={formData.id || 'AUTO'} className="w-full border border-slate-100 p-3 rounded-xl text-sm font-mono bg-slate-50 text-blue-600 outline-none" />
-                                    </div>
-                                    <div className="space-y-1">
-                                        <label className="text-[10px] font-bold text-slate-400 uppercase">Packing Description *</label>
+
+                        <div className="p-8">
+                            <form onSubmit={handleSave} className="space-y-3 max-w-lg mx-auto">
+                                <div className="grid grid-cols-12 items-center">
+                                    <div className="col-span-4 flex justify-end"><FormLabel>Code</FormLabel></div>
+                                    <div className="col-span-8">
                                         <input 
-                                            required 
-                                            value={formData.packing_type} 
-                                            onChange={e => setFormData({...formData, packing_type: e.target.value.toUpperCase()})} 
-                                            className="w-full border border-slate-200 p-3 rounded-xl text-lg font-black uppercase focus:ring-1 focus:ring-blue-500 outline-none transition-all" 
-                                            placeholder="e.g., CONE, BAG, HANK, CARTON..." 
+                                            type="text" 
+                                            readOnly 
+                                            className="w-32 p-1.5 border border-gray-400 bg-black text-white font-bold font-mono text-base outline-none cursor-default" 
+                                            value={formData.id || 'New'} 
                                         />
                                     </div>
-                                    <div className="flex gap-3 bg-blue-50 p-4 rounded-xl border border-blue-100">
-                                        <Info size={18} className="text-blue-500 shrink-0" />
-                                        <p className="text-[11px] leading-relaxed text-slate-600">
-                                            This description will be used across the Product Master and Production Registry for inventory categorization. Please use standard terminology.
-                                        </p>
+                                </div>
+
+                                <div className="grid grid-cols-12 items-center">
+                                    <div className="col-span-4 flex justify-end"><FormLabel>Packing Type</FormLabel></div>
+                                    <div className="col-span-8">
+                                        <input 
+                                            type="text" 
+                                            required 
+                                            className="w-full p-1.5 border border-gray-400 bg-white uppercase text-base font-semibold outline-none focus:border-blue-500" 
+                                            value={formData.packing_type} 
+                                            onChange={e => setFormData({...formData, packing_type: e.target.value.toUpperCase()})} 
+                                        />
                                     </div>
                                 </div>
 
-                                {/* RIGHT COLUMN: System Sidebar (Matched to ProductMaster) */}
-                                <div className="bg-slate-900 rounded-2xl p-6 text-white flex flex-col justify-center gap-6">
-                                    <div className="text-center">
-                                        <Database size={40} className="text-blue-400 mx-auto mb-2" />
-                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Metadata</p>
-                                    </div>
-
-                                    <div className="space-y-4">
-                                        <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-800">
-                                            <label className="text-[9px] font-bold text-slate-500 uppercase block mb-1">System Reference</label>
-                                            <div className="flex items-center gap-2">
-                                                <Hash size={14} className="text-blue-400" />
-                                                <span className="text-sm font-mono font-bold tracking-widest">{formData.id || '---'}</span>
-                                            </div>
-                                        </div>
-
-                                        <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-800 text-center">
-                                            <label className="text-[9px] font-bold text-slate-500 uppercase block mb-1">Preview</label>
-                                            <div className="text-xs font-black truncate text-blue-300">
-                                                {formData.packing_type || 'NOT SET'}
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* MODAL FOOTER */}
-                            <div className="mt-10 pt-6 border-t flex justify-between items-center">
-                                {formData.id && (
-                                    <button type="button" onClick={() => {if(window.confirm('Delete this record?')) mastersAPI.packingTypes.delete(formData.id).then(fetchRecords); setIsModalOpen(false);}} className="flex items-center gap-2 text-red-500 font-bold hover:bg-red-50 px-4 py-2 rounded-xl transition-all">
-                                        <Trash2 size={18}/> DELETE
+                                <div className="flex justify-end gap-4 pt-8">
+                                    <button 
+                                        type="submit" 
+                                        disabled={submitLoading} 
+                                        className="flex items-center gap-2 bg-slate-50 border border-slate-400 px-10 py-2 text-base font-bold shadow-sm hover:bg-white active:scale-95 transition-all"
+                                    >
+                                        <span className="text-blue-700 p-1 border border-blue-100 bg-white rounded"><Save size={16}/></span> 
+                                        {formData.id && list.some(i => i.id === formData.id) ? 'Update' : 'Save'}
                                     </button>
-                                )}
-                                <div className="flex gap-4 ml-auto">
-                                    <button type="button" onClick={() => setIsModalOpen(false)} className="px-6 py-2 font-bold text-slate-500 hover:text-slate-800 transition-colors uppercase text-xs tracking-widest">Cancel</button>
-                                    <button type="submit" disabled={submitLoading} className="bg-blue-600 hover:bg-blue-700 text-white px-10 py-3 rounded-xl font-black shadow-xl flex items-center gap-2 transition-all active:scale-95 disabled:opacity-50">
-                                        <Save size={18}/> {submitLoading ? 'SAVING...' : 'SAVE TYPE'}
+                                    <button 
+                                        type="button" 
+                                        onClick={() => setIsModalOpen(false)} 
+                                        className="flex items-center gap-2 bg-slate-50 border border-slate-400 px-10 py-2 text-base font-bold shadow-sm hover:bg-white active:scale-95 transition-all"
+                                    >
+                                        <span className="text-red-600 font-black p-1 border border-red-100 bg-white rounded">X</span> Cancel
                                     </button>
                                 </div>
-                            </div>
-                        </form>
+                            </form>
+                        </div>
                     </div>
                 </div>
             )}

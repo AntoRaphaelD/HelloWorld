@@ -1,14 +1,32 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { mastersAPI, transactionsAPI } from '../service/api';
 import { 
-    Save, ShoppingCart, Search, Plus, RefreshCw,
-    ChevronLeft, ChevronRight, X, ArrowRightCircle,
-    CheckCircle2, Database, Activity, Filter, Info,
-    Loader2, MinusCircle
+    Plus, Edit, Trash2, X, ChevronLeft, 
+    ChevronRight, RefreshCw, Save, ShoppingCart, Search, Filter, 
+    Square, CheckSquare, MinusCircle
 } from 'lucide-react';
 
 const SalesWithOrder = () => {
-    // --- Initial States (100% preserved) ---
+    const [list, setList] = useState([]);
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [loading, setLoading] = useState(false);
+    const [submitLoading, setSubmitLoading] = useState(false);
+    
+    const [isSelectionMode, setIsSelectionMode] = useState(false);
+    const [selectedIds, setSelectedIds] = useState([]);
+    
+    const [searchField, setSearchField] = useState('order_no');
+    const [searchCondition, setSearchCondition] = useState('Like');
+    const [searchValue, setSearchValue] = useState('');
+
+    const [currentPage, setCurrentPage] = useState(1);
+    const itemsPerPage = 10;
+    const [activeTab, setActiveTab] = useState('head');
+
+    const [parties, setParties] = useState([]);
+    const [brokers, setBrokers] = useState([]);
+    const [products, setProducts] = useState([]);
+
     const emptyHeader = {
         id: null,
         order_no: '',
@@ -22,38 +40,16 @@ const SalesWithOrder = () => {
 
     const emptyRow = {
         product_id: '',
-        rate_cr: 0,
-        rate_imm: 0,
-        rate_per: '',
+        packing_type: '', 
+        rate_cr: 0,          
+        rate_imm: 0,      
+        rate_per: 0,
         qty: 0,
-        packing_type: '',
-        bag_wt: 0
+        bag_wt: 0         
     };
 
-    // --- Main States (100% preserved) ---
-    const [list, setList] = useState([]);
     const [formData, setFormData] = useState(emptyHeader);
     const [gridRows, setGridRows] = useState([]);
-    const [loading, setLoading] = useState(false);
-    const [submitLoading, setSubmitLoading] = useState(false);
-    const [isModalOpen, setIsModalOpen] = useState(false);
-    const [activeTab, setActiveTab] = useState('head');
-    const [showSuccess, setShowSuccess] = useState(false);
-
-    // Master Data (100% preserved)
-    const [parties, setParties] = useState([]);
-    const [brokers, setBrokers] = useState([]);
-    const [products, setProducts] = useState([]);
-
-    // Filtering & Pagination (100% preserved)
-    const [searchField, setSearchField] = useState('order_no');
-    const [searchValue, setSearchValue] = useState('');
-    const [currentPage, setCurrentPage] = useState(1);
-    const itemsPerPage = 10;
-
-    const totalQty = useMemo(() => 
-        gridRows.reduce((sum, row) => sum + (parseFloat(row.qty) || 0), 0), 
-    [gridRows]);
 
     useEffect(() => {
         fetchMasters();
@@ -67,35 +63,38 @@ const SalesWithOrder = () => {
                 mastersAPI.brokers.getAll(),
                 mastersAPI.products.getAll()
             ]);
-            setParties(p.data.data || []);
-            setBrokers(b.data.data || []);
-            setProducts(pr.data.data || []);
-        } catch (err) { 
-            console.error("Master Load Error", err); 
-        }
+            setParties(p?.data?.data || []);
+            setBrokers(b?.data?.data || []);
+            setProducts(pr?.data?.data || []);
+        } catch (err) { console.error(err); }
     };
 
     const fetchRecords = async () => {
         setLoading(true);
         try {
             const res = await transactionsAPI.orders.getAll();
-            setList(res.data.data || []);
-        } catch (err) { 
-            console.error("Fetch Error", err); 
-        } finally { 
-            setLoading(false); 
-        }
+            setList(res?.data?.data || []);
+        } catch (err) { setList([]); } 
+        finally { setLoading(false); }
     };
 
     const handleAddNew = () => {
-        const nextNo = list.length > 0 
-            ? Math.max(...list.map(o => parseInt(o.order_no) || 0)) + 1 
-            : 1;
-        
-        setFormData({ ...emptyHeader, order_no: String(nextNo) });
+        const nextOrderNo = (list.length + 1).toString();
+        setFormData({ ...emptyHeader, order_no: nextOrderNo });
         setGridRows([{ ...emptyRow }]);
         setActiveTab('head');
         setIsModalOpen(true);
+    };
+
+    const handleRowClick = (item) => {
+        if (isSelectionMode) {
+            setSelectedIds(prev => prev.includes(item.id) ? prev.filter(id => id !== item.id) : [...prev, item.id]);
+        } else {
+            setFormData({ ...item });
+            setGridRows(item.OrderDetails?.length > 0 ? item.OrderDetails.map(d => ({ ...d })) : [{ ...emptyRow }]);
+            setActiveTab('head');
+            setIsModalOpen(true);
+        }
     };
 
     const updateGrid = (index, field, value) => {
@@ -105,8 +104,8 @@ const SalesWithOrder = () => {
             updated[index] = {
                 ...updated[index],
                 product_id: value,
-                packing_type: product ? product.packing_type : '',
-                bag_wt: product ? product.pack_nett_wt : 0,
+                packing_type: product?.packing_type || '',
+                bag_wt: product?.pack_nett_wt || 0,
             };
         } else {
             updated[index][field] = value;
@@ -114,504 +113,416 @@ const SalesWithOrder = () => {
         setGridRows(updated);
     };
 
-    const handleSave = async () => {
-        if (!formData.party_id) return alert("Customer required");
-        const validDetails = gridRows.filter(r => r.product_id !== '');
-        if (validDetails.length === 0) return alert("Add at least one product line");
+    const addNewRow = () => {
+        setGridRows([...gridRows, { ...emptyRow }]);
+    };
 
+    const removeRow = (index) => {
+        if (gridRows.length === 1) return;
+        setGridRows(gridRows.filter((_, i) => i !== index));
+    };
+
+    const handleBulkDelete = async () => {
+        if (selectedIds.length === 0) return;
+        if (window.confirm(`Permanently delete ${selectedIds.length} orders?`)) {
+            try {
+                await Promise.all(selectedIds.map(id => transactionsAPI.orders.delete(id)));
+                setSelectedIds([]);
+                setIsSelectionMode(false);
+                fetchRecords();
+            } catch (err) { alert("Bulk delete failed."); }
+        }
+    };
+
+    const handleSave = async (e) => {
+        e.preventDefault();
+        if (!formData.party_id) return alert("Please select a Party");
+        if (gridRows.every(r => !r.product_id)) return alert("At least one product row is required");
+        
         setSubmitLoading(true);
         try {
-            const payload = { ...formData, OrderDetails: validDetails };
+            const payload = { 
+                ...formData, 
+                OrderDetails: gridRows.filter(r => r.product_id) 
+            };
             if (formData.id) {
                 await transactionsAPI.orders.update(formData.id, payload);
             } else {
                 await transactionsAPI.orders.create(payload);
             }
-            
-            setShowSuccess(true);
-            setTimeout(() => setShowSuccess(false), 2000);
-            setIsModalOpen(false);
             fetchRecords();
+            setIsModalOpen(false);
         } catch (err) { 
-            alert("Save failed"); 
+            alert("Error saving order."); 
+            console.error(err); 
         } finally { 
             setSubmitLoading(false); 
         }
     };
 
-    const handleRowClick = (item) => {
-        setFormData({ ...item });
-        setGridRows(
-            item.OrderDetails?.length > 0 
-                ? item.OrderDetails.map(d => ({ ...d })) 
-                : [{ ...emptyRow }]
-        );
-        setActiveTab('head');
-        setIsModalOpen(true);
-    };
-
-    // --- Dynamic Filtering Logic (100% preserved) ---
     const filteredData = useMemo(() => {
         let result = Array.isArray(list) ? [...list] : [];
         if (searchValue.trim()) {
             result = result.filter(item => {
-                const val = searchField === 'party' 
-                    ? item.Party?.account_name 
-                    : item[searchField];
-                return String(val || '').toLowerCase().includes(searchValue.toLowerCase());
+                let val;
+                if (searchField === 'party') {
+                    val = item.Party?.account_name || '';
+                } else {
+                    val = item[searchField] || '';
+                }
+                const term = searchValue.toLowerCase().trim();
+                return searchCondition === 'Equal' 
+                    ? String(val).toLowerCase() === term 
+                    : String(val).toLowerCase().includes(term);
             });
         }
         return result.sort((a, b) => b.id - a.id);
-    }, [list, searchValue, searchField]);
+    }, [list, searchValue, searchField, searchCondition]);
 
+    const currentItems = filteredData.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
     const totalPages = Math.ceil(filteredData.length / itemsPerPage) || 1;
-    const currentItems = filteredData.slice(
-        (currentPage - 1) * itemsPerPage, 
-        currentPage * itemsPerPage
+
+    const FormLabel = ({ children }) => (
+        <label className="text-right text-base text-black pr-3 font-semibold self-center whitespace-nowrap">
+            {children}
+        </label>
     );
 
     return (
-        <div className="min-h-screen bg-slate-50 p-6 font-sans text-slate-900">
+        <div className="min-h-screen bg-slate-100 p-6 font-sans">
             
-            {/* SUCCESS OVERLAY (preserved) */}
-            {showSuccess && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm">
-                    <div className="bg-white p-10 rounded-3xl shadow-2xl flex flex-col items-center gap-4 animate-in zoom-in">
-                        <CheckCircle2 size={72} className="text-emerald-500" />
-                        <h3 className="text-2xl font-black text-slate-800">Order Committed Successfully</h3>
-                    </div>
-                </div>
-            )}
-
-            {/* HEADER (styled exactly like AccountMaster) */}
+            {/* Header */}
             <div className="flex justify-between items-center mb-6">
-                <div>
-                    <h1 className="text-3xl font-bold text-slate-800 flex items-center gap-3">
-                        <ShoppingCart className="text-blue-600" size={32} /> 
-                        Sales Booking Master
-                    </h1>
-                    <p className="text-sm text-slate-500 mt-1">Capture sales orders and manage itemized SKU bookings</p>
-                </div>
-                <div className="flex gap-3">
-                    <button 
-                        onClick={handleAddNew} 
-                        className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-2xl font-semibold shadow-md transition-all active:scale-95 text-sm"
-                    >
-                        <Plus size={18} /> New Booking
+                <h1 className="text-2xl font-bold text-black flex items-center gap-2">
+                    <ShoppingCart className="text-blue-700" /> Sales Booking Master
+                </h1>
+                <div className="flex gap-2">
+                    <button onClick={handleAddNew} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg font-bold text-xs uppercase shadow-md transition-all flex items-center gap-1">
+                        <Plus size={16} /> New Order
                     </button>
-                    <button 
-                        onClick={fetchRecords} 
-                        className="p-3 border border-slate-200 rounded-2xl bg-white text-slate-400 hover:text-blue-600 transition-colors"
-                    >
+                    <button onClick={fetchRecords} className="p-2 border border-slate-200 rounded-lg bg-white">
                         <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
                     </button>
                 </div>
             </div>
 
-            {/* FILTER BAR (styled exactly like AccountMaster) */}
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm mb-6">
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-5 items-end">
-                    <div>
-                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Search Field</label>
-                        <select 
-                            value={searchField} 
-                            onChange={(e) => setSearchField(e.target.value)}
-                            className="w-full border border-slate-200 p-3 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500"
-                        >
-                            <option value="order_no">Order Number</option>
-                            <option value="party">Party Name</option>
-                            <option value="place">Place</option>
-                        </select>
-                    </div>
-                    <div className="md:col-span-2">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Quick Search</label>
-                        <div className="relative">
-                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                            <input
-                                type="text"
-                                value={searchValue}
-                                onChange={(e) => setSearchValue(e.target.value)}
-                                className="w-full border border-slate-200 pl-12 py-3 rounded-xl text-sm font-medium bg-slate-50 focus:bg-white outline-none focus:ring-2 focus:ring-blue-500"
-                                placeholder="Type to search..."
-                            />
-                        </div>
-                    </div>
-                    <div className="bg-blue-50 text-blue-600 border border-blue-100 py-3 rounded-2xl text-sm font-bold flex items-center justify-center gap-2">
-                        <Filter size={16}/> {filteredData.length} Records Found
+            {/* Search Bar */}
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-6 flex flex-wrap items-end gap-4">
+                <div className="flex-1 min-w-[180px]">
+                    <label className="text-[10px] font-bold text-black uppercase mb-1 block">Search Field</label>
+                    <select value={searchField} onChange={e => setSearchField(e.target.value)} className="w-full border border-slate-200 p-2 rounded-xl text-[13px] outline-none focus:ring-1 focus:ring-blue-500">
+                        <option value="order_no">Order No</option>
+                        <option value="party">Party Name</option>
+                    </select>
+                </div>
+                <div className="flex-1 min-w-[150px]">
+                    <label className="text-[10px] font-bold text-black uppercase mb-1 block">Condition</label>
+                    <select value={searchCondition} onChange={e => setSearchCondition(e.target.value)} className="w-full border p-2 rounded-xl text-[13px] outline-none">
+                        <option value="Like">Like</option>
+                        <option value="Equal">Equal</option>
+                    </select>
+                </div>
+                <div className="flex-[2] min-w-[280px]">
+                    <label className="text-[10px] font-bold text-black uppercase mb-1 block">Value</label>
+                    <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-black" size={16} />
+                        <input type="text" value={searchValue} onChange={e => setSearchValue(e.target.value)} className="w-full border pl-9 pr-4 py-2 rounded-xl text-[13px] outline-none focus:ring-1 focus:ring-blue-500" placeholder="Live search..." />
                     </div>
                 </div>
-            </div>
 
-            {/* REGISTRY TABLE (styled exactly like AccountMaster) */}
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
-                        <thead>
-                            <tr className="bg-blue-600 text-white font-mono">
-                                <th className="p-5 text-sm font-semibold uppercase tracking-wider">Order Ref</th>
-                                <th className="p-5 text-sm font-semibold uppercase tracking-wider">Date</th>
-                                <th className="p-5 text-sm font-semibold uppercase tracking-wider">Party / Customer</th>
-                                <th className="p-5 text-sm font-semibold uppercase tracking-wider">Place</th>
-                                <th className="p-5 text-sm font-semibold uppercase tracking-wider text-center">Status</th>
-                                <th className="p-5 w-12"></th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 font-mono">
-                            {loading ? (
-                                <tr>
-                                    <td colSpan={6} className="py-24">
-                                        <div className="flex flex-col items-center justify-center">
-                                            <Loader2 size={48} className="animate-spin text-blue-500 mb-4" />
-                                            <p className="text-slate-500 font-medium">Loading orders...</p>
-                                        </div>
-                                    </td>
-                                </tr>
-                            ) : currentItems.length > 0 ? (
-                                currentItems.map((item) => (
-                                    <tr 
-                                        key={item.id} 
-                                        onClick={() => handleRowClick(item)}
-                                        className="transition-all cursor-pointer hover:bg-blue-50/70 group"
-                                    >
-                                        <td className="p-5 font-black text-blue-600">#{item.order_no}</td>
-                                        <td className="p-5 text-slate-500 font-medium">{item.date}</td>
-                                        <td className="p-5 font-semibold text-slate-700 uppercase">{item.Party?.account_name}</td>
-                                        <td className="p-5 text-slate-500 uppercase text-sm font-medium">{item.place || '—'}</td>
-                                        <td className="p-5 text-center">
-                                            <span className={`inline-block px-5 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${item.is_cancelled ? 'bg-red-100 text-red-600 border border-red-200' : 'bg-emerald-100 text-emerald-600 border border-emerald-200'}`}>
-                                                {item.is_cancelled ? 'CANCELLED' : 'OPEN'}
-                                            </span>
-                                        </td>
-                                        <td className="p-5">
-                                            <ArrowRightCircle size={20} className="text-slate-300 group-hover:text-blue-600 transition-colors" />
-                                        </td>
-                                    </tr>
-                                ))
-                            ) : (
-                                <tr>
-                                    <td colSpan={6} className="py-28 text-center">
-                                        <div className="flex flex-col items-center justify-center">
-                                            <ShoppingCart size={56} className="text-slate-300 mb-6" />
-                                            <h3 className="text-2xl font-semibold text-slate-800">No orders yet</h3>
-                                            <p className="text-slate-500 mt-2">Click New Booking to create your first order</p>
-                                        </div>
-                                    </td>
-                                </tr>
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-
-                {/* Pagination (styled exactly like AccountMaster) */}
-                <div className="p-5 bg-slate-50 border-t flex items-center justify-between">
-                    <span className="text-xs text-slate-500 font-medium">Page {currentPage} of {totalPages}</span>
+                {!isSelectionMode ? (
+                    <button onClick={() => setIsSelectionMode(true)} className="border border-blue-200 bg-blue-50 text-blue-600 px-8 py-2 rounded-xl text-base font-bold hover:bg-blue-100 shadow-sm transition-all">
+                        Select
+                    </button>
+                ) : (
                     <div className="flex gap-2">
-                        <button 
-                            disabled={currentPage === 1}
-                            onClick={() => setCurrentPage(p => p - 1)}
-                            className="p-3 border rounded-2xl bg-white disabled:opacity-40 hover:bg-slate-100"
-                        >
-                            <ChevronLeft size={18} />
+                        <button onClick={() => { setIsSelectionMode(false); setSelectedIds([]); }} className="border border-slate-200 px-6 py-2 rounded-xl text-base font-bold text-black hover:bg-slate-50">
+                            Clear
                         </button>
-                        <button 
-                            disabled={currentPage === totalPages}
-                            onClick={() => setCurrentPage(p => p + 1)}
-                            className="p-3 border rounded-2xl bg-white disabled:opacity-40 hover:bg-slate-100"
-                        >
-                            <ChevronRight size={18} />
+                        <button onClick={handleBulkDelete} disabled={selectedIds.length === 0} className="bg-red-500 text-white px-6 py-2 rounded-xl text-base font-bold shadow-md disabled:opacity-50 flex items-center gap-1">
+                            <Trash2 size={16} /> Delete ({selectedIds.length})
                         </button>
+                    </div>
+                )}
+            </div>
+
+            {/* Table */}
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <table className="w-full text-left">
+                    <thead className="bg-blue-700 border-b text-white text-sm font-bold uppercase tracking-wider">
+                        <tr>
+                            {isSelectionMode && <th className="p-4 w-12 text-center">#</th>}
+                            <th className="p-4">Order No</th>
+                            <th className="p-4">Order Date</th>
+                            <th className="p-4">Party Name</th>
+                            <th className="p-4">Broker</th>
+                            {!isSelectionMode && <th className="p-4 w-10"></th>}
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                        {loading ? (
+                            <tr><td colSpan={5} className="p-12 text-center text-black">Loading...</td></tr>
+                        ) : currentItems.length > 0 ? currentItems.map(item => (
+                            <tr 
+                                key={item.id} 
+                                className={`hover:bg-blue-50 cursor-pointer ${selectedIds.includes(item.id) ? 'bg-blue-100/50' : ''}`} 
+                                onClick={() => handleRowClick(item)}
+                            >
+                                {isSelectionMode && (
+                                    <td className="p-4 text-center">
+                                        {selectedIds.includes(item.id) ? <CheckSquare size={18} className="text-blue-600 mx-auto"/> : <Square size={18} className="text-black mx-auto"/>}
+                                    </td>
+                                )}
+                                <td className="p-4 text-base font-bold text-blue-600 font-mono">{item.order_no}</td>
+                                <td className="p-4 text-base text-black">{item.date || '—'}</td>
+                                <td className="p-4 text-base font-semibold text-black uppercase">{item.Party?.account_name || '—'}</td>
+                                <td className="p-4 text-base text-black uppercase">{item.Broker?.broker_name || 'DIRECT'}</td>
+                                {!isSelectionMode && <td className="p-4 text-black"><Edit size={16} /></td>}
+                            </tr>
+                        )) : (
+                            <tr><td colSpan={5} className="p-12 text-center text-black">No orders found</td></tr>
+                        )}
+                    </tbody>
+                </table>
+
+                <div className="p-3 bg-slate-50 border-t flex items-center justify-between text-sm">
+                    <span className="text-black font-medium">Page {currentPage} of {totalPages}</span>
+                    <div className="flex gap-1">
+                        <button disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)} className="p-1.5 border rounded bg-white disabled:opacity-40"><ChevronLeft size={16}/></button>
+                        <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)} className="p-1.5 border rounded bg-white disabled:opacity-40"><ChevronRight size={16}/></button>
                     </div>
                 </div>
             </div>
 
-            {/* FULL SCREEN MODAL (styled exactly like AccountMaster) */}
+            {/* Modal */}
             {isModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-6xl overflow-hidden flex flex-col max-h-[94vh]">
-                        
-                        {/* Modal Header */}
-                        <div className="bg-blue-600 px-8 py-6 text-white flex justify-between items-center">
-                            <div className="flex items-center gap-4">
-                                <div className="bg-white/20 p-3 rounded-2xl">
-                                    <ShoppingCart size={26} />
-                                </div>
-                                <div>
-                                    <h2 className="text-2xl font-bold tracking-tight">Order Management</h2>
-                                    <p className="text-blue-100 text-sm">#{formData.order_no || 'NEW'} • {formData.id ? 'Edit Mode' : 'New Entry'}</p>
-                                </div>
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+                    <div className="bg-[#cfe2ff] w-full max-w-[1100px] rounded-xl shadow-2xl overflow-hidden border border-white animate-in zoom-in duration-200">
+                        <div className="bg-[#6495ed] p-5 flex justify-between items-center text-white border-b border-white/20">
+                            <div>
+                                <h2 className="text-xl font-medium tracking-wide">Sales Booking Master</h2>
+                                <p className="text-blue-50 text-base mt-1">Add / Modify Sales Order</p>
                             </div>
-                            <button 
-                                onClick={() => setIsModalOpen(false)} 
-                                className="p-2 hover:bg-white/20 rounded-full transition"
-                            >
+                            <button onClick={() => setIsModalOpen(false)} className="hover:bg-white/20 p-1 rounded-full transition-colors">
                                 <X size={28} />
                             </button>
                         </div>
 
-                        {/* Navigation Tabs */}
-                        <div className="flex border-b bg-slate-50 px-8">
+                        {/* Tabs */}
+                        <div className="flex bg-[#e8f1ff] border-b border-blue-200">
                             <button 
-                                onClick={() => setActiveTab('head')}
-                                className={`px-8 py-5 text-sm font-bold uppercase tracking-widest transition-all relative ${activeTab === 'head' ? 'text-blue-600' : 'text-slate-500'}`}
+                                onClick={() => setActiveTab('head')} 
+                                className={`flex-1 py-3 text-base font-semibold transition-all ${activeTab === 'head' ? 'bg-[#cfe2ff] text-blue-900 border-b-4 border-blue-600' : 'text-black hover:bg-white/60'}`}
                             >
-                                01. HEADER INFO
-                                {activeTab === 'head' && <div className="absolute bottom-0 left-0 h-0.5 w-full bg-blue-600" />}
+                                Order Header
                             </button>
                             <button 
-                                onClick={() => setActiveTab('detail')}
-                                className={`px-8 py-5 text-sm font-bold uppercase tracking-widest transition-all relative ${activeTab === 'detail' ? 'text-blue-600' : 'text-slate-500'}`}
+                                onClick={() => setActiveTab('detail')} 
+                                className={`flex-1 py-3 text-base font-semibold transition-all ${activeTab === 'detail' ? 'bg-[#cfe2ff] text-blue-900 border-b-4 border-blue-600' : 'text-black hover:bg-white/60'}`}
                             >
-                                02. ITEMIZATION
-                                {activeTab === 'detail' && <div className="absolute bottom-0 left-0 h-0.5 w-full bg-blue-600" />}
+                                Order Details
                             </button>
                         </div>
 
-                        {/* Modal Body - Split Layout (exactly like AccountMaster) */}
-                        <div className="flex-1 overflow-auto p-8 bg-slate-50 flex flex-col lg:flex-row gap-8">
-                            
+                        <div className="p-8 bg-[#cfe2ff]">
                             {activeTab === 'head' ? (
-                                <>
-                                    {/* LEFT: Header Form */}
-                                    <div className="flex-1 bg-white rounded-3xl p-8 border border-slate-100 shadow-sm">
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                            <InputField 
-                                                label="Order Reference #" 
-                                                value={formData.order_no} 
+                                <div className="space-y-4 max-w-4xl mx-auto bg-white p-6 rounded-lg shadow-sm">
+                                    <div className="grid grid-cols-12 items-center gap-4">
+                                        <div className="col-span-3 flex justify-end"><FormLabel>Order No.</FormLabel></div>
+                                        <div className="col-span-4">
+                                            <input 
+                                                type="text" 
                                                 readOnly 
-                                                className="bg-blue-50 border-blue-100 text-blue-600" 
+                                                className="w-full p-2 border border-gray-400 bg-black text-white font-bold font-mono text-base outline-none cursor-default" 
+                                                value={formData.order_no} 
                                             />
-                                            <InputField 
-                                                label="Booking Date" 
+                                        </div>
+                                        <div className="col-span-5 flex items-center gap-6">
+                                            <FormLabel>Date</FormLabel>
+                                            <input 
                                                 type="date" 
+                                                className="w-44 p-2 border border-gray-400 bg-white text-base outline-none focus:border-blue-500" 
                                                 value={formData.date} 
                                                 onChange={e => setFormData({...formData, date: e.target.value})} 
                                             />
+                                        </div>
+                                    </div>
 
-                                            <div className="md:col-span-2">
-                                                <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">Customer / Party Name</label>
-                                                <select 
-                                                    value={formData.party_id} 
-                                                    onChange={e => setFormData({...formData, party_id: e.target.value})}
-                                                    className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl text-sm font-semibold outline-none focus:ring-2 focus:ring-blue-500"
-                                                >
-                                                    <option value="">-- SEARCH CLIENT DATABASE --</option>
-                                                    {parties.map(p => (
-                                                        <option key={p.id} value={p.id}>{p.account_name}</option>
-                                                    ))}
-                                                </select>
-                                            </div>
+                                    <div className="grid grid-cols-12 items-center gap-4">
+                                        <div className="col-span-3 flex justify-end"><FormLabel>Party</FormLabel></div>
+                                        <div className="col-span-9">
+                                            <select 
+                                                className="w-full p-2 border border-gray-400 bg-white uppercase text-base outline-none focus:border-blue-500" 
+                                                value={formData.party_id} 
+                                                onChange={e => setFormData({...formData, party_id: e.target.value})}
+                                            >
+                                                <option value="">— Select Customer —</option>
+                                                {parties.map(p => (
+                                                    <option key={p.id} value={p.id}>{p.account_name}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    </div>
 
-                                            <InputField 
-                                                label="Shipping Destination" 
+                                    <div className="grid grid-cols-12 items-center gap-4">
+                                        <div className="col-span-3 flex justify-end"><FormLabel>Broker</FormLabel></div>
+                                        <div className="col-span-5">
+                                            <select 
+                                                className="w-full p-2 border border-gray-400 bg-white uppercase text-base outline-none focus:border-blue-500" 
+                                                value={formData.broker_id} 
+                                                onChange={e => setFormData({...formData, broker_id: e.target.value})}
+                                            >
+                                                <option value="">— Direct / No Broker —</option>
+                                                {brokers.map(b => (
+                                                    <option key={b.id} value={b.id}>{b.broker_name}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div className="col-span-4 flex items-center gap-4 justify-end">
+                                            <input 
+                                                type="checkbox" 
+                                                id="cancelled" 
+                                                checked={formData.is_cancelled} 
+                                                onChange={e => setFormData({...formData, is_cancelled: e.target.checked})} 
+                                                className="w-5 h-5 accent-red-600" 
+                                            />
+                                            <label htmlFor="cancelled" className="text-base font-medium text-red-700">Cancelled</label>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-12 items-center gap-4">
+                                        <div className="col-span-3 flex justify-end"><FormLabel>Place</FormLabel></div>
+                                        <div className="col-span-9">
+                                            <input 
+                                                type="text" 
+                                                className="w-full p-2 border border-gray-400 bg-white uppercase text-base outline-none focus:border-blue-500" 
                                                 value={formData.place} 
                                                 onChange={e => setFormData({...formData, place: e.target.value.toUpperCase()})} 
-                                                placeholder="E.G. CHENNAI, MUMBAI"
                                             />
-
-                                            <div>
-                                                <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">Assigned Broker</label>
-                                                <select 
-                                                    value={formData.broker_id} 
-                                                    onChange={e => setFormData({...formData, broker_id: e.target.value})}
-                                                    className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl text-sm font-semibold outline-none focus:ring-2 focus:ring-blue-500"
-                                                >
-                                                    <option value="">DIRECT (NO BROKER)</option>
-                                                    {brokers.map(b => (
-                                                        <option key={b.id} value={b.id}>{b.broker_name}</option>
-                                                    ))}
-                                                </select>
-                                            </div>
                                         </div>
                                     </div>
-
-                                    {/* RIGHT: Metadata Sidebar (preserved logic) */}
-                                    <div className="w-full lg:w-96 bg-slate-900 rounded-3xl p-8 text-white flex flex-col gap-6 shadow-2xl">
-                                        <div className="text-center pb-6 border-b border-slate-800">
-                                            <Database size={48} className="text-blue-500 mx-auto mb-3" />
-                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">Metadata Control</p>
-                                        </div>
-                                        <div className="space-y-4">
-                                            <div className="bg-slate-800/50 p-5 rounded-2xl border border-slate-800">
-                                                <label className="text-[9px] font-black text-slate-400 uppercase block mb-2 tracking-widest">Order Status</label>
-                                                <div className="flex items-center gap-3">
-                                                    <div className={`w-3 h-3 rounded-full ${formData.is_cancelled ? 'bg-red-500' : 'bg-emerald-500'}`} />
-                                                    <span className="text-sm font-black uppercase tracking-widest">{formData.is_cancelled ? 'Cancelled' : 'Active'}</span>
-                                                </div>
-                                            </div>
-                                            <div className="bg-slate-800/50 p-5 rounded-2xl border border-slate-800">
-                                                <label className="text-[9px] font-black text-slate-400 uppercase block mb-2 tracking-widest">Internal ID</label>
-                                                <div className="font-mono font-bold text-blue-400 tracking-widest flex items-center gap-2">
-                                                    <span>#{formData.id || 'NEW_SEQ'}</span>
-                                                </div>
-                                            </div>
-                                            <button
-                                                onClick={() => setFormData({...formData, is_cancelled: !formData.is_cancelled})}
-                                                className={`w-full py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all ${formData.is_cancelled ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'}`}
-                                            >
-                                                {formData.is_cancelled ? 'RESTORE ORDER' : 'CANCEL ORDER'}
-                                            </button>
-                                        </div>
-                                    </div>
-                                </>
+                                </div>
                             ) : (
-                                /* DETAIL TAB - Split exactly like AccountMaster */
-                                <>
-                                    {/* LEFT: Dynamic Grid Table (preserved logic) */}
-                                    <div className="flex-1 bg-white rounded-3xl border border-slate-200 shadow-xl overflow-hidden">
-                                        <table className="w-full">
-                                            <thead className="bg-slate-900 text-white text-xs font-black uppercase tracking-widest">
+                                <div className="bg-white rounded-lg shadow-sm border border-slate-300 overflow-hidden">
+                                    <div className="overflow-x-auto max-h-[500px]">
+                                        <table className="w-full border-collapse">
+                                            <thead className="bg-blue-700 text-white sticky top-0 z-10">
                                                 <tr>
-                                                    <th className="p-6 text-left">SKU / Product Detail</th>
-                                                    <th className="p-6 text-center w-32">Packing</th>
-                                                    <th className="p-6 text-center w-32">Bag Wt</th>
-                                                    <th className="p-6 text-center w-32">Rate (CR)</th>
-                                                    <th className="p-6 text-center w-32">Rate (IMM)</th>
-                                                    <th className="p-6 text-center w-24">Per</th>
-                                                    <th className="p-6 text-center w-40">Booking Qty</th>
-                                                    <th className="p-6 w-16"></th>
+                                                    <th className="p-3 text-left w-10"></th>
+                                                    <th className="p-3 text-left min-w-[320px]">Product</th>
+                                                    <th className="p-3 text-center w-32">Packing</th>
+                                                    <th className="p-3 text-right w-28">Rate Cr</th>
+                                                    <th className="p-3 text-right w-28">Rate Imm</th>
+                                                    <th className="p-3 text-center w-20">Per</th>
+                                                    <th className="p-3 text-right w-28">Qty</th>
+                                                    <th className="p-3 text-right w-28">Bag Wt</th>
+                                                    <th className="p-3 text-center w-12"></th>
                                                 </tr>
                                             </thead>
-                                            <tbody className="divide-y divide-slate-100 font-mono text-sm">
+                                            <tbody className="divide-y divide-slate-200">
                                                 {gridRows.map((row, idx) => (
-                                                    <tr key={idx} className="hover:bg-blue-50/50 transition-colors">
-                                                        <td className="p-4">
+                                                    <tr key={idx} className="hover:bg-blue-50/50">
+                                                        <td className="p-3 text-center text-blue-500 font-bold">{idx + 1}</td>
+                                                        <td className="p-2">
                                                             <select 
                                                                 value={row.product_id} 
-                                                                onChange={e => updateGrid(idx, 'product_id', e.target.value)}
-                                                                className="w-full bg-transparent border border-slate-200 p-3 rounded-2xl text-blue-600 font-semibold outline-none focus:ring-2 focus:ring-blue-500"
+                                                                onChange={e => updateGrid(idx, 'product_id', e.target.value)} 
+                                                                className="w-full p-2 border border-gray-300 rounded text-base outline-none focus:border-blue-500"
                                                             >
-                                                                <option value="">-- SELECT PRODUCT --</option>
+                                                                <option value="">— Select Product —</option>
                                                                 {products.map(p => (
                                                                     <option key={p.id} value={p.id}>{p.product_name}</option>
                                                                 ))}
                                                             </select>
                                                         </td>
-                                                        <td className="p-4 text-center text-slate-400 font-medium">{row.packing_type || '—'}</td>
-                                                        <td className="p-4 text-center text-slate-400 font-medium">{row.bag_wt ? `${row.bag_wt} KG` : '—'}</td>
-                                                        <td className="p-4">
+                                                        <td className="p-3 text-center text-base font-medium text-black">
+                                                            {row.packing_type || '—'}
+                                                        </td>
+                                                        <td className="p-2">
                                                             <input 
                                                                 type="number" 
+                                                                step="0.01" 
                                                                 value={row.rate_cr} 
-                                                                onChange={e => updateGrid(idx, 'rate_cr', e.target.value)}
-                                                                className="w-full p-3 text-center font-semibold text-blue-700 bg-slate-50 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500" 
+                                                                onChange={e => updateGrid(idx, 'rate_cr', e.target.value)} 
+                                                                className="w-full p-2 text-right border border-gray-300 rounded text-base focus:border-blue-500" 
                                                             />
                                                         </td>
-                                                        <td className="p-4">
+                                                        <td className="p-2">
                                                             <input 
                                                                 type="number" 
+                                                                step="0.01" 
                                                                 value={row.rate_imm} 
-                                                                onChange={e => updateGrid(idx, 'rate_imm', e.target.value)}
-                                                                className="w-full p-3 text-center font-semibold text-indigo-700 bg-slate-50 rounded-2xl outline-none focus:ring-2 focus:ring-indigo-500" 
+                                                                onChange={e => updateGrid(idx, 'rate_imm', e.target.value)} 
+                                                                className="w-full p-2 text-right border border-gray-300 rounded text-base focus:border-blue-500" 
                                                             />
                                                         </td>
-                                                        <td className="p-4">
+                                                        <td className="p-2">
                                                             <input 
                                                                 type="text" 
                                                                 value={row.rate_per} 
-                                                                onChange={e => updateGrid(idx, 'rate_per', e.target.value)}
-                                                                className="w-full p-3 text-center font-semibold uppercase outline-none border border-slate-200 rounded-2xl" 
-                                                                placeholder="0" 
+                                                                onChange={e => updateGrid(idx, 'rate_per', e.target.value)} 
+                                                                className="w-full p-2 text-center border border-gray-300 rounded text-base uppercase focus:border-blue-500" 
                                                             />
                                                         </td>
-                                                        <td className="p-4">
+                                                        <td className="p-2">
                                                             <input 
                                                                 type="number" 
                                                                 value={row.qty} 
-                                                                onChange={e => updateGrid(idx, 'qty', e.target.value)}
-                                                                className="w-full p-3 text-center font-semibold text-emerald-700 bg-emerald-50 rounded-2xl outline-none focus:ring-2 focus:ring-emerald-500" 
+                                                                onChange={e => updateGrid(idx, 'qty', e.target.value)} 
+                                                                className="w-full p-2 text-right border border-gray-300 rounded text-base font-bold text-emerald-700 focus:border-blue-500" 
                                                             />
                                                         </td>
-                                                        <td className="p-4 text-center">
+                                                        <td className="p-3 text-right text-base font-medium text-black">
+                                                            {row.bag_wt || '0.000'}
+                                                        </td>
+                                                        <td className="p-2 text-center">
                                                             <button 
-                                                                onClick={() => setGridRows(gridRows.filter((_, i) => i !== idx))}
-                                                                className="text-red-400 hover:text-red-600 transition-colors"
+                                                                onClick={() => removeRow(idx)} 
+                                                                disabled={gridRows.length === 1}
+                                                                className="text-red-500 hover:text-red-700 disabled:opacity-40 transition-colors"
                                                             >
-                                                                <MinusCircle size={24} />
+                                                                <MinusCircle size={20} />
                                                             </button>
                                                         </td>
                                                     </tr>
                                                 ))}
                                             </tbody>
                                         </table>
-                                        <button 
-                                            onClick={() => setGridRows([...gridRows, { ...emptyRow }])}
-                                            className="w-full p-5 bg-slate-50 text-blue-600 text-xs font-black uppercase tracking-[0.3em] hover:bg-blue-50 flex items-center justify-center gap-2 transition-all"
-                                        >
-                                            <Plus size={18} /> Append SKU Line
-                                        </button>
                                     </div>
 
-                                    {/* RIGHT: Summary Cockpit (preserved totalQty logic) */}
-                                    <div className="w-full lg:w-96 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-3xl p-8 text-white flex flex-col justify-between shadow-2xl">
-                                        <div className="flex items-center gap-4">
-                                            <div className="bg-white/20 p-4 rounded-2xl">
-                                                <Activity size={32} />
-                                            </div>
-                                            <div>
-                                                <p className="text-xs font-black text-blue-200 uppercase tracking-widest">Cumulative Loading Weight</p>
-                                                <h3 className="text-5xl font-black font-mono tracking-tighter mt-1">
-                                                    {totalQty.toLocaleString()} <span className="text-2xl opacity-80">KG</span>
-                                                </h3>
-                                            </div>
-                                        </div>
-                                        <div className="text-right mt-auto">
-                                            <p className="text-xs font-black text-blue-200 uppercase tracking-widest">Active SKU Lines</p>
-                                            <h3 className="text-5xl font-black font-mono tracking-tighter">
-                                                {gridRows.filter(r => r.product_id).length}
-                                            </h3>
-                                        </div>
-                                    </div>
-                                </>
+                                    <button 
+                                        onClick={addNewRow} 
+                                        className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white text-base font-bold transition-colors flex items-center justify-center gap-2"
+                                    >
+                                        <Plus size={18} /> Add New Product Row
+                                    </button>
+                                </div>
                             )}
-                        </div>
 
-                        {/* Modal Footer (styled exactly like AccountMaster) */}
-                        <div className="p-6 bg-white border-t flex justify-between items-center">
-                            <div className="flex items-center gap-3 text-slate-400 text-xs font-medium">
-                                <Info size={18} />
-                                Ensure all product rates are validated against current market CR/IMM
-                            </div>
-                            <div className="flex gap-4">
+                            {/* Footer Actions */}
+                            <div className="flex justify-end gap-4 mt-10">
                                 <button 
-                                    onClick={() => setIsModalOpen(false)} 
-                                    className="px-10 py-4 font-bold text-slate-400 hover:text-slate-600 text-xs tracking-widest uppercase transition-colors"
+                                    type="submit" 
+                                    onClick={handleSave} 
+                                    disabled={submitLoading} 
+                                    className="flex items-center gap-2 bg-slate-50 border border-slate-400 px-10 py-2.5 text-base font-bold shadow-sm hover:bg-white active:scale-95 transition-all"
                                 >
-                                    Discard
+                                    <span className="text-blue-700 p-1 border border-blue-100 bg-white rounded"><Save size={16}/></span>
+                                    {formData.id ? 'Update Order' : 'Create Order'}
                                 </button>
                                 <button 
-                                    onClick={handleSave} 
-                                    disabled={submitLoading}
-                                    className="bg-blue-600 hover:bg-blue-700 text-white px-12 py-4 rounded-2xl font-black shadow-xl flex items-center gap-3 active:scale-95 transition-all text-sm uppercase tracking-widest disabled:opacity-70"
+                                    onClick={() => setIsModalOpen(false)} 
+                                    className="flex items-center gap-2 bg-slate-50 border border-slate-400 px-10 py-2.5 text-base font-bold shadow-sm hover:bg-white active:scale-95 transition-all"
                                 >
-                                    <Save size={18} /> 
-                                    {submitLoading ? 'Processing...' : 'Commit Order to DB'}
+                                    <span className="text-red-600 font-black p-1 border border-red-100 bg-white rounded">X</span> Cancel
                                 </button>
                             </div>
                         </div>
                     </div>
                 </div>
             )}
-
-            <style jsx>{`
-                input[type='number']::-webkit-inner-spin-button,
-                input[type='number']::-webkit-outer-spin-button { 
-                    -webkit-appearance: none; 
-                    margin: 0; 
-                }
-            `}</style>
         </div>
     );
 };
-
-// Reusable InputField (identical to AccountMaster)
-const InputField = ({ label, className = "", ...props }) => (
-    <div className="space-y-1">
-        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1 block">{label}</label>
-        <input 
-            {...props} 
-            className={`w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl text-sm font-semibold outline-none focus:ring-2 focus:ring-blue-500 transition-all ${className}`} 
-        />
-    </div>
-);
 
 export default SalesWithOrder;

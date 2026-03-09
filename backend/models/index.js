@@ -17,19 +17,20 @@ const TariffSubHead = sequelize.define('TariffSubHead', {
 }, { tableName: 'tbl_TariffSubHeads' });
 
 const PackingType = sequelize.define('PackingType', {
-    packing_type: {type: DataTypes.STRING, allowNull: false }
+    packing_type: {type: DataTypes.STRING}
 }, { tableName: 'tbl_PackingTypes' });
 
 const Broker = sequelize.define('Broker', {
   broker_code: { type: DataTypes.STRING, unique: true },
-  broker_name: { type: DataTypes.STRING, allowNull: false },
+  broker_name: { type: DataTypes.STRING},
   address: { type: DataTypes.TEXT },
-  commission_pct: { type: DataTypes.DECIMAL(5, 2), defaultValue: 0 }
+  commission_pct: { type: DataTypes.DECIMAL(5, 2), defaultValue: 0 },
+  is_comm_per_kg: { type: DataTypes.BOOLEAN, defaultValue: false }
 }, { tableName: 'tbl_Brokers' });
 
 const Transport = sequelize.define('Transport', {
   transport_code: { type: DataTypes.STRING, unique: true },
-  transport_name: { type: DataTypes.STRING, allowNull: false },
+  transport_name: { type: DataTypes.STRING},
   place: { type: DataTypes.STRING },
   address: { type: DataTypes.TEXT }   // ✅ Added
 }, { tableName: 'tbl_Transports' });
@@ -40,6 +41,13 @@ const Account = sequelize.define('Account', {
     type: DataTypes.STRING, 
     unique: true 
   },
+   main_group: { 
+    type: DataTypes.STRING 
+  },
+
+  primary_group: { 
+    type: DataTypes.STRING 
+  },
 
   account_group: { 
     type: DataTypes.STRING 
@@ -47,7 +55,6 @@ const Account = sequelize.define('Account', {
 
   account_name: { 
     type: DataTypes.STRING, 
-    allowNull: false 
   },
 
   place: { 
@@ -139,7 +146,6 @@ const Product = sequelize.define('Product', {
 
   product_name: {
     type: DataTypes.STRING,
-    allowNull: false
   },
 
   short_description: {
@@ -197,6 +203,11 @@ const Product = sequelize.define('Product', {
   actual_count: {
     type: DataTypes.STRING
   },
+  // Add this to the Product model definition
+  printing_tariff_desc: {
+    type: DataTypes.STRING,
+    allowNull: true
+  },
 
   charity_rs: {
     type: DataTypes.DECIMAL(10, 2),
@@ -240,6 +251,10 @@ const OrderHeader = sequelize.define('OrderHeader', {
 }, { tableName: 'tbl_OrderHeaders' });
 
 const OrderDetail = sequelize.define('OrderDetail', {
+  order_id: {
+  type: DataTypes.INTEGER,
+  allowNull: true
+},
   product_id: { type: DataTypes.INTEGER },
   qty: { type: DataTypes.DECIMAL(12, 2) },
   bag_wt: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
@@ -328,11 +343,11 @@ const InvoiceHeader = sequelize.define('InvoiceHeader', {
   },
 
   removal_time: {
-    type: DataTypes.TIME
+    type: DataTypes.STRING
   },
 
   prepare_time: {
-    type: DataTypes.TIME
+    type: DataTypes.STRING
   },
 
   pay_mode: {
@@ -458,7 +473,8 @@ const InvoiceDetail = sequelize.define('InvoiceDetail', {
   // RELATION
   // =============================
   invoice_id: { 
-    type: DataTypes.INTEGER 
+    type: DataTypes.INTEGER,
+    allowNull: true
   },
 
   order_no: { 
@@ -566,6 +582,50 @@ discount_amt: { type: DataTypes.DECIMAL(15,2), defaultValue: 0 },
   other_amt: { type: DataTypes.DECIMAL(15,2), defaultValue: 0 },
 
   freight_amt: { type: DataTypes.DECIMAL(15,2), defaultValue: 0 },
+  vat_per: { 
+  type: DataTypes.DECIMAL(10,2),
+  defaultValue: 0
+},
+
+cenvat_per: { 
+  type: DataTypes.DECIMAL(10,2),
+  defaultValue: 0
+},
+
+duty_per: { 
+  type: DataTypes.DECIMAL(10,2),
+  defaultValue: 0
+},
+
+cess_per: { 
+  type: DataTypes.DECIMAL(10,2),
+  defaultValue: 0
+},
+
+hcess_per: { 
+  type: DataTypes.DECIMAL(10,2),
+  defaultValue: 0
+},
+
+sgst_per: { 
+  type: DataTypes.DECIMAL(10,2),
+  defaultValue: 0
+},
+
+cgst_per: { 
+  type: DataTypes.DECIMAL(10,2),
+  defaultValue: 0
+},
+
+igst_per: { 
+  type: DataTypes.DECIMAL(10,2),
+  defaultValue: 0
+},
+
+tcs_per: { 
+  type: DataTypes.DECIMAL(10,2),
+  defaultValue: 0
+},
 
   sub_total: { type: DataTypes.DECIMAL(15,2), defaultValue: 0 },
 
@@ -605,7 +665,7 @@ const DirectInvoiceDetail = sequelize.define('DirectInvoiceDetail', {
   rate_per: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
   direct_invoice_id: {
    type: DataTypes.INTEGER,
-   allowNull: false
+   allowNull: true
 },
 packing_type: {
     type: DataTypes.STRING
@@ -889,7 +949,7 @@ const DepotSalesHeader = sequelize.define('DepotSalesHeader', {
  */
 const DepotSalesDetail = sequelize.define('DepotSalesDetail', {
 
-  depot_sales_id: { type: DataTypes.INTEGER },
+  depot_sales_id: { type: DataTypes.INTEGER, allowNull: true },
 
   order_no: { type: DataTypes.STRING },
 
@@ -1094,7 +1154,7 @@ const DepotSalesDetail = sequelize.define('DepotSalesDetail', {
  * ==========================================
  */
 const RG1Production = sequelize.define('RG1Production', {
-  date: { type: DataTypes.DATEONLY, allowNull: false },
+  date: { type: DataTypes.DATEONLY},
   product_id: { type: DataTypes.INTEGER },
   packing_type_id: { type: DataTypes.INTEGER, allowNull: false },
   weight_per_bag: { type: DataTypes.DECIMAL(10, 3), defaultValue: 0 },
@@ -1119,7 +1179,6 @@ const InvoiceType = sequelize.define("InvoiceType", {
 
   type_name: {
     type: DataTypes.STRING,
-    allowNull: false
   },
 
   sales_type: {
@@ -1391,7 +1450,7 @@ const InvoiceType = sequelize.define("InvoiceType", {
   },
 
   round_off_direction: {
-    type: DataTypes.ENUM("Forward", "Reverse"),
+    type: DataTypes.STRING,
     defaultValue: "Forward"
   },
 
@@ -1447,11 +1506,11 @@ const DespatchEntry = sequelize.define('DespatchEntry', {
   },
 
   in_time: {
-    type: DataTypes.TIME
+    type: DataTypes.STRING
   },
 
   out_time: {
-    type: DataTypes.TIME
+    type: DataTypes.STRING
   },
 
   no_of_bags: {
@@ -1491,7 +1550,7 @@ DepotReceived.belongsTo(Product, { foreignKey: 'product_id', as: 'Product' }); /
 DepotSalesHeader.belongsTo(Account, { foreignKey: 'party_id', as: 'Party' });
 DepotSalesHeader.belongsTo(Account, { foreignKey: 'depot_id', as: 'Depot' });
 DepotSalesHeader.belongsTo(Transport, { foreignKey: 'transport_id' });
-DepotSalesHeader.hasMany(DepotSalesDetail, { foreignKey: 'depot_sales_id',as: 'DepotSalesDetails', onDelete: 'CASCADE' });
+DepotSalesHeader.hasMany(DepotSalesDetail, { foreignKey: 'depot_sales_id',as: 'DepotSalesDetails', onDelete:'SET NULL' });
 DepotSalesDetail.belongsTo(Product, { foreignKey: 'product_id',as: 'Product'});
 // Order Associations
 OrderHeader.belongsTo(Account, { foreignKey: 'party_id', as: 'Party' });
@@ -1501,14 +1560,14 @@ OrderDetail.belongsTo(Product, { foreignKey: 'product_id' });
 OrderHeader.hasMany(OrderDetail, { 
     foreignKey: 'order_id', 
     as: 'OrderDetails',
-    onDelete: 'CASCADE' 
+    onDelete:'SET NULL' 
 });
 OrderDetail.belongsTo(OrderHeader, { foreignKey: 'order_id' });
 
 // Invoice WITH Order Associations
 // InvoiceHeader.belongsTo(Account, { foreignKey: 'party_id', as: 'Party' });
 InvoiceHeader.belongsTo(Transport, { foreignKey: 'transport_id' });
-InvoiceHeader.hasMany(InvoiceDetail, { foreignKey: 'invoice_id', onDelete: 'CASCADE' });
+InvoiceHeader.hasMany(InvoiceDetail, { foreignKey: 'invoice_id', onDelete:'SET NULL' });
 // ADD THIS LINE
 InvoiceDetail.belongsTo(InvoiceHeader, { foreignKey: 'invoice_id' });
 InvoiceDetail.belongsTo(Product, { foreignKey: 'product_id' });
@@ -1516,7 +1575,7 @@ DepotSalesDetail.belongsTo(DepotSalesHeader, { foreignKey: 'depot_sales_id' });
 
 // DIRECT Invoice Associations
 DirectInvoiceHeader.belongsTo(Broker, { foreignKey: 'broker_id', as: 'Broker' });
-DirectInvoiceHeader.hasMany(DirectInvoiceDetail, { foreignKey: 'direct_invoice_id', as: 'DirectInvoiceDetails', onDelete: 'CASCADE' });
+DirectInvoiceHeader.hasMany(DirectInvoiceDetail, { foreignKey: 'direct_invoice_id', as: 'DirectInvoiceDetails', onDelete:'SET NULL' });
 DirectInvoiceDetail.belongsTo(Product, { foreignKey: 'product_id', as: 'Product' });
 DirectInvoiceDetail.belongsTo(DirectInvoiceHeader, { foreignKey: 'direct_invoice_id', as: 'Header' });
 
@@ -1531,7 +1590,7 @@ DespatchEntry.belongsTo(Transport, { foreignKey: 'transport_id' });
 
 
 // InvoiceHeader.belongsTo(InvoiceType, { foreignKey: 'invoice_type_id', as: 'TypeConfig' });
-// InvoiceHeader.hasMany(InvoiceDetail, { foreignKey: 'invoice_id', onDelete: 'CASCADE' });
+// InvoiceHeader.hasMany(InvoiceDetail, { foreignKey: 'invoice_id', onDelete:'SET NULL' });
 // InvoiceDetail.belongsTo(InvoiceHeader, { foreignKey: 'invoice_id' });
 // InvoiceDetail.belongsTo(Product, { foreignKey: 'product_id' });
 
@@ -1558,7 +1617,7 @@ InvoiceHeader.belongsTo(InvoiceType, {
 
 InvoiceHeader.hasMany(InvoiceDetail, { 
   foreignKey: 'invoice_id',
-  onDelete: 'CASCADE'
+  onDelete:'SET NULL'
 });
 InvoiceHeader.belongsTo(Broker, {
   foreignKey: 'broker_id',
