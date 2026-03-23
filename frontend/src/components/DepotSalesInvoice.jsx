@@ -329,6 +329,43 @@ const filteredInvoiceTypes = useMemo(() => {
         doc.text(`In Words: ${numberToWords(num(data.final_invoice_value))}`, margin, finalY + 42);
         doc.save(`Depot_Invoice_${data.invoice_no}.pdf`);
     };
+    const exportToJSON = () => {
+    // 1. Find the Depot Name from the list based on selection
+    const selectedDepot = listData.depots.find(d => d.id === parseInt(formData.depot_id));
+    const depotName = selectedDepot ? selectedDepot.account_name : "INV";
+
+    // 2. Generate Initials (e.g., "Depot Mumbai" -> "DM")
+    const shortName = depotName
+        .split(' ')                  // Split by space ["Depot", "Mumbai"]
+        .filter(word => word.length > 0)
+        .map(word => word[0])        // Take first letter ["D", "M"]
+        .join('')                    // Join them "DM"
+        .toUpperCase();              // Ensure uppercase
+
+    // 3. Construct Filename: [Initials]-[InvoiceNo].json
+    const invNo = formData.invoice_no || '000';
+    const fileName = `${shortName}-${invNo}.json`;
+
+    // 4. Data Preparation
+    const exportData = {
+        ...formData,
+        Details: gridRows 
+    };
+
+    // 5. Blob and Download execution
+    const jsonString = JSON.stringify(exportData, null, 2);
+    const blob = new Blob([jsonString], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    
+    link.href = url;
+    link.download = fileName; // Uses the generated name (e.g., DM-101.json)
+    
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+};
     // ==========================================
     // 4. DATA LOAD
     // ==========================================
@@ -840,6 +877,13 @@ const filteredInvoiceTypes = useMemo(() => {
                                     <FileText size={16} /> DOWNLOAD PDF
                                 </button>
                             </div>
+                            <button 
+                                onClick={exportToJSON} 
+                                disabled={gridRows.length === 0 || !formData.depot_id} 
+                                className="bg-indigo-600 text-white px-6 py-2 text-[11px] font-black rounded flex items-center gap-2 shadow hover:bg-indigo-700 transition-all active:scale-95 disabled:bg-slate-400 disabled:cursor-not-allowed"
+                                >
+                                <Calculator size={16} /> JSON EXPORT
+                                </button>
                             <div className="flex gap-3">
                                 <button onClick={() => setIsModalOpen(false)} className="bg-white border border-slate-400 px-10 py-2 text-[11px] font-black rounded uppercase hover:bg-slate-50">Cancel</button>
                                 <button onClick={handleSave} disabled={submitLoading || gridRows.length === 0} className="bg-blue-600 text-white border border-blue-700 px-12 py-2 text-[11px] font-black rounded flex items-center gap-2 hover:bg-blue-700 shadow-md">

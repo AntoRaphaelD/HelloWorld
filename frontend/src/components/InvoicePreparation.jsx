@@ -476,6 +476,35 @@ const filteredInvoiceTypes = useMemo(() => {
 
         doc.save(`Kayaar_TAX_INVOICE_${data.invoice_no}.pdf`);
     };
+    const exportToJSON = () => {
+    // 1. Prepare the data object
+    const exportData = {
+        ...formData,
+        Details: gridRows // Include the line items
+    };
+
+    // 2. Convert to JSON string (with 2-space indentation for readability)
+    const jsonString = JSON.stringify(exportData, null, 2);
+
+    // 3. Create a Blob from the JSON string
+    const blob = new Blob([jsonString], { type: "application/json" });
+
+    // 4. Create a temporary download link
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    // 5. Set the filename as [invoiceNumber].json
+    const fileName = formData.invoice_no ? `${formData.invoice_no}.json` : 'invoice.json';
+    
+    link.href = url;
+    link.download = fileName;
+
+    // 6. Trigger the download and cleanup
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+};
 
     // ==========================================
     // 2. MATH ENGINE (Strict Logic: H -> A -> Tax -> Deductions)
@@ -1199,7 +1228,13 @@ const filteredInvoiceTypes = useMemo(() => {
                                 <FooterBtn icon={<Hash size={14} />} label="GST" />
                                 <FooterBtn icon={<Database size={14} />} label="A4" />
                                 <FooterBtn icon={<Printer size={14} />} label="Report [A80]" />
-                                <FooterBtn icon={<Calculator size={14} />} label="JSON" />
+                                <button 
+    onClick={exportToJSON}
+    className="bg-indigo-600 text-white border border-indigo-700 px-4 py-1.5 text-[10px] font-black flex items-center gap-1.5 hover:bg-indigo-700 shadow-sm transition-all rounded active:scale-95"
+>
+    <FileJson size={14} className="text-indigo-100" /> 
+    EXPORT JSON
+</button>
                             </div>
                             <div className="flex gap-3">
 
