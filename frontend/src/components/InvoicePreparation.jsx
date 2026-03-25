@@ -253,28 +253,13 @@ const InvoicePreparation = () => {
     // ==========================================
     // Filter Invoice Types with Exclusion Logic to prevent overlap
 const filteredInvoiceTypes = useMemo(() => {
+    // If no sales type is selected in the header, hide all invoice types
+    if (!formData.sales_type) return [];
+
     return listData.types.filter(type => {
-        const typeName = (type.type_name || '').toLowerCase();
-        const salesType = formData.sales_type;
-        
-        if (salesType === 'DEPOT SALES') {
-            // Must contain "depot yarn sales"
-            return typeName.includes("depot yarn sales");
-        }
-        
-        if (salesType === 'GST SALES') {
-            // Must contain "yarn sales gst" 
-            // BUT must NOT contain "depot" (This fixes the overlap)
-            return typeName.includes("yarn sales gst") && !typeName.includes("depot");
-        }
-        
-        if (salesType === 'DIRECT SALES') {
-            // Must contain "depot stock transfer" OR "lab yarn sales"
-            return typeName.includes("depot stock transfer") || 
-                   typeName.includes("lab yarn sales");
-        }
-        
-        return false;
+        // This matches the 'sales_type' field from your tbl_InvoiceTypes model
+        // directly against the 'sales_type' selected on the screen.
+        return String(type.sales_type).trim().toUpperCase() === String(formData.sales_type).trim().toUpperCase();
     });
 }, [listData.types, formData.sales_type]);
     const filteredInvoices = useMemo(() => {

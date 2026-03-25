@@ -137,25 +137,12 @@ const DepotSalesInvoice = () => {
     const [searchValue, setSearchValue] = useState('');
     // Add this near your other useMemo/useEffect hooks
 const filteredInvoiceTypes = useMemo(() => {
+    if (!formData.sales_type) return [];
+
     return listData.types.filter(type => {
-        const typeName = (type.type_name || '').toLowerCase();
-        const salesType = formData.sales_type;
-        
-        if (salesType === 'DEPOT SALES') {
-            return typeName.includes("depot yarn sales");
-        }
-        
-        if (salesType === 'GST SALES') {
-            // Include "Yarn Sales GST" but EXCLUDE "Depot"
-            return typeName.includes("yarn sales gst") && !typeName.includes("depot");
-        }
-        
-        if (salesType === 'DIRECT SALES') {
-            return typeName.includes("depot stock transfer") || 
-                   typeName.includes("lab yarn sales");
-        }
-        
-        return false;
+        // This compares the 'sales_type' field inside your tbl_InvoiceTypes 
+        // directly with the 'sales_type' selected in the UI dropdown.
+        return String(type.sales_type).trim().toUpperCase() === String(formData.sales_type).trim().toUpperCase();
     });
 }, [listData.types, formData.sales_type]);
     useEffect(() => {
