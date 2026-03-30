@@ -524,103 +524,127 @@ const filteredInvoiceTypes = useMemo(() => {
         }
     };
     const runCalculations = useCallback((rows, typeId, hFreight = formData.freight_charges, salesType = formData.sales_type) => {
-    if (!typeId) return rows;
+        if (!typeId) return rows;
 
-    const config = listData.types.find(t => t.id === parseInt(typeId));
-    if (!config) return rows;
+        const config = listData.types.find(t => t.id === parseInt(typeId));
+        if (!config) return rows;
 
-    const totalWeight = rows.reduce((sum, r) => sum + num(r.total_kgs), 0);
+        // 1. Freight Per Bag Calculation
+        const load = listData.loads.find(l => l.id === parseInt(formData.load_id));
+        const totalBagsInLoad = num(load?.no_of_bags) || rows.reduce((sum, r) => sum + num(r.packs), 0);
+        const freightPerBag = totalBagsInLoad > 0 ? num(hFreight) / totalBagsInLoad : 0;
 
-    let hTotals = {
-        assess: 0, charity: 0, vat: 0, cenvat: 0, duty: 0, cess: 0, 
-        hcess: 0, tcs: 0, gst: 0, sgst: 0, cgst: 0, igst: 0, 
-        disc: 0, brok: 0, other: 0, net: 0
-    };
-
-    const updatedRows = rows.map((item) => {
-        const product = listData.products.find(p => p.id === parseInt(item.product_id));
-
-        // 1. Base Logic
-        const H = num(item.rate) * num(item.total_kgs);
-        const A = H - num(item.resale) + num(item.convert_to_hank) - num(item.convert_to_cone);
-        
-        const freightShare = totalWeight > 0 ? (num(hFreight) * num(item.total_kgs)) / totalWeight : 0;
-        const taxable = A + freightShare;
-
-        // 2. NEW CHARITY LOGIC
-        // If GST SALES -> ₹3, else Product Master Rate
-        const charityRate = (salesType === 'GST SALES') ? 3 : num(product?.charity_rs);
-        const charity = config.charity_checked ? (charityRate * num(item.total_kgs)) : 0;
-
-        // 3. TAX CALCULATIONS (Based on row's editable percentages)
-        const vat = (num(item.vat_per) * taxable) / 100;
-        const cenvat = (num(item.cenvat_per) * taxable) / 100;
-        const duty = (num(item.duty_per) * taxable) / 100;
-        const cess = (num(item.cess_per) * taxable) / 100;
-        const hcess = (num(item.hcess_per) * taxable) / 100;
-        const tcs = (num(item.tcs_per) * taxable) / 100;
-        const gst = (num(item.gst_per) * taxable) / 100;
-        const sgst = (num(item.sgst_per) * taxable) / 100;
-        const cgst = (num(item.cgst_per) * taxable) / 100;
-        const igst = (num(item.igst_per) * taxable) / 100;
-
-        // 4. Basis and Deductions
-        const basis = taxable + gst + sgst + cgst + igst + vat + cenvat + duty + cess + hcess + tcs + charity + num(item.other_amt);
-        const discAmt = (num(item.discount_percentage) * basis) / 100;
-        const brokAmt = (num(item.broker_percentage) * basis) / 100;
-        
-        const rowTotal = basis - discAmt - brokAmt;
-
-        // Accumulate Header Totals
-        hTotals.assess += A;
-        hTotals.charity += charity;
-        hTotals.gst += gst; hTotals.sgst += sgst; hTotals.cgst += cgst; hTotals.igst += igst;
-        hTotals.vat += vat; hTotals.cenvat += cenvat; hTotals.duty += duty;
-        hTotals.cess += cess; hTotals.hcess += hcess; hTotals.tcs += tcs;
-        hTotals.disc += discAmt; hTotals.brok += brokAmt;
-        hTotals.other += num(item.other_amt);
-        hTotals.net += rowTotal;
-
-        return {
-            ...item,
-            base_h: H,
-            assessable_value: A,
-            charity_amt: charity,
-            freight_amt: freightShare,
-            vat_amt: vat, cenvat_amt: cenvat, duty_amt: duty, cess_amt: cess, 
-            hr_sec_cess_amt: hcess, tcs_amt: tcs, gst_amt: gst, 
-            sgst_amt: sgst, cgst_amt: cgst, igst_amt: igst,
-            discount_amt: discAmt, broker_amt: brokAmt,
-            sub_total: basis, final_value: rowTotal
+        let hTotals = {
+            assess: 0, charity: 0, vat: 0, cenvat: 0, duty: 0, cess: 0, 
+            hcess: 0, tcs: 0, gst: 0, sgst: 0, cgst: 0, igst: 0, other: 0, net: 0
         };
-    });
 
-    const finalNetTotal = Number(hTotals.net.toFixed(config.round_off_digits || 0));
+        const updatedRows = rows.map((item, index) => {
+            const product = listData.products.find(p => p.id === parseInt(item.product_id));
 
-    setFormData(prev => ({
-        ...prev,
-        total_assessable: money(hTotals.assess),
-        total_charity: money(hTotals.charity),
-        total_gst: money(hTotals.gst),
-        total_sgst: money(hTotals.sgst),
-        total_cgst: money(hTotals.cgst),
-        total_igst: money(hTotals.igst),
-        total_vat: money(hTotals.vat),
-        total_cenvat: money(hTotals.cenvat),
-        total_duty: money(hTotals.duty),
-        total_cess: money(hTotals.cess),
-        total_hr_sec_cess: money(hTotals.hcess),
-        total_tcs: money(hTotals.tcs),
-        total_discount: money(hTotals.disc),
-        total_broker: money(hTotals.brok),
-        total_other: money(hTotals.other),
-        sub_total: money(hTotals.net),
-        round_off: money(finalNetTotal - hTotals.net),
-        net_amount: finalNetTotal
-    }));
+            // --- STEP 1: ASSESSABLE VALUE ---
+            // Total Net Weight * Rate
+            const assessableValue = num(item.total_kgs) * num(item.rate); 
 
-    return updatedRows;
-}, [listData.types, listData.products, formData.freight_charges, formData.sales_type]);
+            // --- STEP 2: CHARITY CALCULATION (NEW LOGIC) ---
+            let rowCharity = 0;
+            if (salesType === 'GST SALES') {
+                // Force 3% of Assessable Value regardless of Master settings
+                rowCharity = (assessableValue * 3) / 100;
+                console.log(`Row ${index + 1}: Forced 3% Charity for GST SALES: ${rowCharity.toFixed(2)}`);
+            } else {
+                // Standard Logic: Multiplier/Rate from Product Master per Kg
+                const charityRate = num(product?.charity_rs);
+                rowCharity = config.charity_checked ? (charityRate * num(item.total_kgs)) : 0;
+            }
+
+            // --- STEP 3: FREIGHT CALCULATION ---
+            const rowFreight = num(item.packs) * freightPerBag;
+
+            // --- STEP 4: TAXABLE BASIS ---
+            // Taxable Base = Goods Value + Charity + Freight
+            const taxableBasis = assessableValue + rowCharity + rowFreight;
+
+            // --- STEP 5: CALCULATE GST ON TAXABLE BASIS ---
+            const igst = (taxableBasis * num(item.igst_per || config.igst_percentage || 0)) / 100;
+            const sgst = (taxableBasis * num(item.sgst_per || config.sgst_percentage || 0)) / 100;
+            const cgst = (taxableBasis * num(item.cgst_per || config.cgst_percentage || 0)) / 100;
+            const gst  = (taxableBasis * num(item.gst_per  || config.gst_percentage  || 0)) / 100;
+
+            const vat    = (taxableBasis * num(item.vat_per)) / 100;
+            const duty   = (taxableBasis * num(item.duty_per)) / 100;
+            const cess   = (taxableBasis * num(item.cess_per)) / 100;
+            const hcess  = (taxableBasis * num(item.hcess_per)) / 100;
+
+            // --- STEP 6: TOTAL BEFORE TCS ---
+            const totalBeforeTcs = taxableBasis + igst + sgst + cgst + gst + vat + duty + cess + hcess;
+
+            // --- STEP 7: CALCULATE TCS (Final tax on Gross) ---
+            const tcs = (totalBeforeTcs * num(item.tcs_per || config.tcs_percentage || 0)) / 100;
+
+            // FINAL ROW TOTAL
+            const rowFinal = totalBeforeTcs + tcs + num(item.other_amt);
+
+            // Accumulate Header Totals
+            hTotals.assess  += assessableValue;
+            hTotals.charity += rowCharity;
+            hTotals.gst     += gst;
+            hTotals.sgst    += sgst;
+            hTotals.cgst    += cgst;
+            hTotals.igst    += igst;
+            hTotals.vat     += vat;
+            hTotals.duty    += duty;
+            hTotals.cess    += cess;
+            hTotals.hcess   += hcess;
+            hTotals.tcs     += tcs;
+            hTotals.other   += num(item.other_amt);
+            hTotals.net     += rowFinal;
+
+            return {
+                ...item,
+                assessable_value: assessableValue,
+                charity_amt: rowCharity,
+                freight_amt: rowFreight,
+                vat_amt: vat, 
+                duty_amt: duty, 
+                cess_amt: cess, 
+                hr_sec_cess_amt: hcess, 
+                tcs_amt: tcs, 
+                gst_amt: gst, 
+                sgst_amt: sgst, 
+                cgst_amt: cgst, 
+                igst_amt: igst,
+                sub_total: taxableBasis, 
+                final_value: rowFinal
+            };
+        });
+
+        // 8. FINAL ROUNDING & HEADER SYNC
+        const roundDigits = num(config.round_off_digits);
+        const finalNetTotal = Math.round(hTotals.net);
+
+        setFormData(prev => ({
+            ...prev,
+            total_assessable: money(hTotals.assess),
+            total_charity: money(hTotals.charity),
+            total_gst: money(hTotals.gst),
+            total_sgst: money(hTotals.sgst),
+            total_cgst: money(hTotals.cgst),
+            total_igst: money(hTotals.igst),
+            total_vat: money(hTotals.vat),
+            total_cenvat: money(hTotals.cenvat),
+            total_duty: money(hTotals.duty),
+            total_cess: money(hTotals.cess),
+            total_hr_sec_cess: money(hTotals.hcess),
+            total_tcs: money(hTotals.tcs),
+            freight_charges: num(hFreight),
+            sub_total: money(hTotals.net),
+            round_off: money(finalNetTotal - hTotals.net),
+            net_amount: finalNetTotal
+        }));
+
+        return updatedRows;
+    }, [listData.types, listData.products, formData.freight_charges, formData.sales_type, formData.load_id]);
 
     // ==========================================
     // 3. INITIAL LOAD
@@ -660,116 +684,149 @@ const filteredInvoiceTypes = useMemo(() => {
 
     useEffect(() => { init(); }, []);
     
+// ==========================================
+    // 4. HANDLERS
+    // ==========================================
+    
+    // FIX: Restoring missing handleLoadSync to stop the ReferenceError
+        const handleAccountSync = (accId) => {
+        const partyId = parseInt(accId);
+        const acc = listData.parties.find(a => a.id === partyId);
+        if (!acc) return;
+
+        setFormData(prev => ({
+            ...prev,
+            party_id: partyId,
+            addr1: acc.addr1 || '',
+            addr2: acc.addr2 || '',
+            addr3: acc.addr3 || ''
+        }));
+    };
+const handleLoadSync = (loadId) => {
+        const load = listData.loads.find(l => l.id === parseInt(loadId));
+        if (!load) return;
+
+        const updatedForm = {
+            ...formData,
+            load_id: load.id,
+            transport_id: load.transport_id,
+            vehicle_no: load.vehicle_no,
+            delivery: load.delivery,
+            lr_no: load.lr_no,
+            lr_date: load.lr_date,
+            ebill_no: load.insurance_no,
+            freight_charges: num(load.freight),
+            removal_time: load.out_time || '',
+            prepare_time: load.in_time || ''
+        };
+        setFormData(updatedForm);
+
+        setGridRows(prev => {
+            const updatedRows = prev.map(r => {
+                const bags = num(load.no_of_bags);
+                const kgs = num(r.total_kgs);
+                return {
+                    ...r,
+                    packs: bags,
+                    avg_content: bags > 0 ? (kgs / bags).toFixed(3) : 0
+                };
+            });
+            return runCalculations(updatedRows, updatedForm.invoice_type_id, load.freight);
+        });
+    };
 
     // ==========================================
     // 4. HANDLERS
     // ==========================================
-    const handleLoadSync = (loadId) => {
-
-        const load = listData.loads.find(
-            l => l.id === parseInt(loadId)
-        );
-
-        if (!load) return;
-
-        const bags = num(load.no_of_bags);
-
-        const updatedForm = {
-            ...formData,
-
-            load_id: load.id,
-
-            transport_id: load.transport_id,
-            vehicle_no: load.vehicle_no,
-            delivery: load.delivery,
-
-            lr_no: load.lr_no,
-            lr_date: load.lr_date,
-
-            ebill_no: load.insurance_no,
-            freight_charges: load.freight,
-
-            // FETCH TIME EXACTLY AS STORED
-            removal_time: load.out_time || '',
-            prepare_time: load.in_time || ''
-        };
-
-        setFormData(updatedForm);
-
-        setGridRows(prev => {
-
-            const updatedRows = prev.map(r => ({
-                ...r,
-                packs: bags
-            }));
-
-            return runCalculations(
-                updatedRows,
-                updatedForm.invoice_type_id,
-                load.freight
-            );
-        });
-    };
-    const handleAccountSync = (accId) => {
-
-    const partyId = parseInt(accId);
-
-    const acc = listData.parties.find(a => a.id === partyId);
-
-    if (!acc) return;
-
-    setFormData(prev => ({
-        ...prev,
-        party_id: partyId,
-
-        addr1: acc.addr1 || '',
-        addr2: acc.addr2 || '',
-        addr3: acc.addr3 || ''
-    }));
-};
     const handleOrderSync = (e) => {
-        const val = e.target.value;
-        if (!val) return;
-        const [source, orderNo] = val.split('|');
-        const order = source === 'WITH' ? listData.orders.find(o => o.order_no === orderNo) : listData.directOrders.find(o => o.order_no === orderNo);
-        const config = listData.types.find(t => t.id === parseInt(formData.invoice_type_id));
-        if (!config) return alert("Select Invoice Type first.");
-        const load = listData.loads.find(l => l.id === parseInt(formData.load_id));
-        const details = source === 'WITH' ? order.OrderDetails || [] : order.DirectInvoiceDetails || [];
-        const newRows = details.map(d => {
+    const val = e.target.value;
+    if (!val) return;
+
+    const [source, orderNo] = val.split('|');
+    const order = source === 'WITH' 
+        ? listData.orders.find(o => o.order_no === orderNo) 
+        : listData.directOrders.find(o => o.order_no === orderNo);
+
+    const config = listData.types.find(t => t.id === parseInt(formData.invoice_type_id));
+    if (!config) { alert("Select Invoice Type first."); e.target.value = ""; return; }
+
+    const load = listData.loads.find(l => l.id === parseInt(formData.load_id));
+    const details = source === 'WITH' ? order.OrderDetails || [] : order.DirectInvoiceDetails || [];
+
+    console.log(`%c 📑 SYNCING ORDER: ${orderNo} `, "background: #2563eb; color: #fff; font-weight: bold; padding: 4px;");
+    console.log("Raw Order Details from DB:", details);
+
+    const newRows = details.map((d, index) => {
         const broker = listData.brokers.find(b => b.id === order.broker_id);
-        const qty = num(d.qty || 0);
-        const bagWt = num(d.bag_wt || 0);
-            return {
-                order_no: orderNo, order_type: source === 'WITH' ? 'WITH_ORDER' : 'WITHOUT_ORDER',
-                sales_type_label: source === 'WITH' ? 'Order' : 'Direct', product_id: d.product_id,
-                broker_code: broker?.broker_code || '', broker_percentage: broker?.commission_pct || 0,
-                product_description: d.Product?.product_name || '', packs: load?.no_of_bags || d.packs || 0,
-                packing_type: d.packing_type || d.Product?.packing_type || 'BAGS', total_kgs: qty * bagWt || d.total_kgs || 0,
-                avg_content: d.bag_wt || 0, rate: d.rate_cr || d.rate || 0, rate_per: d.rate_per || d.Product?.rate_per || 'KG', identification_mark: '',
-                from_no: '', to_no: '', resale: 0, convert_to_hank: 0, convert_to_cone: 0,
-                vat_per: config.vat_percentage || 0, cenvat_per: config.cenvat_percentage || 0, duty_per: config.duty_percentage || 0,
-                cess_per: config.cess_percentage || 0, hcess_per: config.hr_sec_cess_percentage || 0,
-                gst_per: config.gst_percentage || 0, sgst_per: config.sgst_percentage || 0, cgst_per: config.cgst_percentage || 0,
-                igst_per: config.igst_percentage || 0, tcs_per: config.tcs_percentage || 0,
-                discount_percentage: 0, other_amt: 0, freight_amt: 0
-            };
-        });
-        setGridRows(runCalculations([...gridRows, ...newRows], formData.invoice_type_id));
-        e.target.value = "";
-    };
+        
+        // 1. Weight Logic
+        const weightPerBag = num(d.bag_wt) > 0 ? num(d.bag_wt) : num(d.Product?.pack_nett_wt);
+        
+        // 2. Packs Logic
+        const rowPacks = num(load?.no_of_bags) > 0 ? num(load?.no_of_bags) : num(d.packs);
+        
+        // 3. Total Kgs
+        const rowKgs = weightPerBag * rowPacks;
+        
+        // 4. Avg Content
+        const rowAvg = rowPacks > 0 ? (rowKgs / rowPacks) : weightPerBag;
+
+        console.group(`Row ${index + 1}: ${d.Product?.product_name}`);
+        console.log(`Weight Source: ${num(d.bag_wt) > 0 ? 'Order Detail' : 'Product Master'}`);
+        console.log(`Packs Source: ${num(load?.no_of_bags) > 0 ? 'Load/Despatch' : 'Order Detail'}`);
+        console.log(`Calculation: ${weightPerBag}kg x ${rowPacks} packs = ${rowKgs}kg`);
+        console.groupEnd();
+
+        return {
+            order_no: orderNo,
+            order_type: source === 'WITH' ? 'WITH_ORDER' : 'WITHOUT_ORDER',
+            product_id: d.product_id,
+            product_description: d.Product?.product_name || '',
+            packing_type: d.packing_type || d.Product?.packing_type || 'BAGS',
+            packs: rowPacks,
+            total_kgs: rowKgs,
+            avg_content: rowAvg.toFixed(3), 
+            broker_code: broker?.broker_code || '',
+            broker_percentage: broker?.commission_pct || 0,
+            rate: d.rate_cr || d.rate || 0,
+            rate_per: d.rate_per || d.Product?.rate_per || 'KG',
+            resale: 0, convert_to_hank: 0, convert_to_cone: 0,
+            vat_per: num(config.vat_percentage),
+            gst_per: num(config.gst_percentage),
+            sgst_per: num(config.sgst_percentage),
+            cgst_per: num(config.cgst_percentage),
+            igst_per: num(config.igst_percentage),
+            discount_percentage: 0, other_amt: 0, freight_amt: 0
+        };
+    });
+
+    setGridRows(runCalculations([...gridRows, ...newRows], formData.invoice_type_id));
+    e.target.value = "";
+};
 
     const updateGrid = (idx, field, val) => {
-        setGridRows(prev => {
-            const updated = [...prev];
-            updated[idx] = {
-                ...updated[idx],
-                [field]: val
-            };
-            return runCalculations(updated, formData.invoice_type_id);
-        });
-    };
-    const handleSave = async () => {
+    setGridRows(prev => {
+        const updated = [...prev];
+        const row = { ...updated[idx], [field]: val };
+
+        if (field === 'packs') {
+            row.total_kgs = num(val) * num(row.avg_content);
+            console.log(`%c PACKS CHANGED: ${row.product_description}`, "color: #f59e0b;");
+            console.log(`New Kgs: ${val} packs x ${row.avg_content}kg = ${row.total_kgs}`);
+        }
+        
+        if (field === 'total_kgs') {
+            const p = num(row.packs);
+            row.avg_content = p > 0 ? (num(val) / p).toFixed(3) : 0;
+            console.log(`%c KGS CHANGED: ${row.product_description}`, "color: #f59e0b;");
+            console.log(`New Avg Content: ${val}kg / ${p} packs = ${row.avg_content}`);
+        }
+
+        updated[idx] = row;
+        return runCalculations(updated, formData.invoice_type_id);
+    });
+};
+      const handleSave = async () => {
 
         setSubmitLoading(true);
 
@@ -1126,10 +1183,11 @@ const filteredInvoiceTypes = useMemo(() => {
                 <th className="p-3 border-r w-10"></th>
                 <th className="p-3 border-r w-32 text-left">Order No</th>
                 <th className="p-3 border-r w-80 text-left">Product</th>
+                <th className="p-3 border-r w-32 text-center">Packing Type</th>
                 <th className="p-3 border-r w-24 text-center">Packs</th>
+                <th className="p-3 border-r w-32 text-center">Avg. Content</th>
                 <th className="p-3 border-r w-32 text-center">Total Kgs</th>
                 <th className="p-3 border-r w-32 text-center">Rate</th>
-                <th className="p-3 border-r w-40 text-center font-black bg-blue-100">Assess [A]</th>
                 <th className="p-3 border-r w-32 text-center">Charity</th>
                 
                 {/* TAX HEADERS (Span 2 columns each) */}
@@ -1152,7 +1210,7 @@ const filteredInvoiceTypes = useMemo(() => {
             </tr>
             {/* Row 2: Sub-headers for % and Amt */}
             <tr className="bg-slate-200 text-[9px] uppercase font-bold">
-                <th colSpan="8"></th>
+                <th colSpan="9"></th>
                 {[...Array(11)].map((_, i) => (
                     <React.Fragment key={i}>
                         <th className="border-r p-1 w-16 text-blue-700">Percent %</th>
@@ -1163,37 +1221,113 @@ const filteredInvoiceTypes = useMemo(() => {
             </tr>
         </thead>
         <tbody className="divide-y divide-slate-200">
-            {gridRows.map((r, i) => (
-                <tr key={i} className="hover:bg-blue-50 font-black">
-                    <td className="p-2 border-r text-center text-slate-300">▶</td>
-                    <td className="p-2 border-r text-blue-700 font-mono">{r.order_no}</td>
-                    <td className="p-2 border-r uppercase">{r.product_description}</td>
-                    <td className="p-2 border-r text-center font-black bg-pink-50">{r.packs}</td>
-                    <td className="p-2 border-r text-center text-blue-700 font-black">{r.total_kgs}</td>
-                    <td className="p-2 border-r text-center">₹{r.rate}</td>
-                    <td className="p-2 border-r text-center bg-blue-100 font-black">₹{num(r.assessable_value).toFixed(2)}</td>
-                    <td className="p-2 border-r text-center text-orange-600">₹{num(r.charity_amt).toFixed(2)}</td>
+    {gridRows.map((r, i) => (
+        <tr key={i} className="hover:bg-blue-50 font-black">
+            {/* 1. Selector Icon (Fixed) */}
+            <td className="p-2 border-r text-center text-slate-300">▶</td>
 
-                    {/* RENDER PAIR CELLS (Percentage is Editable, Amount is Calculated) */}
-                    {renderPairCell(r, i, 'gst_per', 'gst_amt', true, updateGrid)}
-                    {renderPairCell(r, i, 'sgst_per', 'sgst_amt', true, updateGrid)}
-                    {renderPairCell(r, i, 'cgst_per', 'cgst_amt', true, updateGrid)}
-                    {renderPairCell(r, i, 'igst_per', 'igst_amt', true, updateGrid)}
-                    {renderPairCell(r, i, 'vat_per', 'vat_amt', true, updateGrid)}
-                    {renderPairCell(r, i, 'cenvat_per', 'cenvat_amt', true, updateGrid)}
-                    {renderPairCell(r, i, 'duty_per', 'duty_amt', true, updateGrid)}
-                    {renderPairCell(r, i, 'cess_per', 'cess_amt', true, updateGrid)}
-                    {renderPairCell(r, i, 'hcess_per', 'hr_sec_cess_amt', true, updateGrid)}
-                    {renderPairCell(r, i, 'tcs_per', 'tcs_amt', true, updateGrid)}
-                    {renderPairCell(r, i, 'discount_percentage', 'discount_amt', true, updateGrid, "text-rose-600")}
+            {/* 2. Order No (Fixed) */}
+            <td className="p-2 border-r text-blue-700 font-mono bg-slate-50">{r.order_no}</td>
 
-                    <td className="p-1 border-r"><input type="number" className="w-full p-2 text-center outline-none" value={r.other_amt} onChange={e => updateGrid(i, 'other_amt', parseFloat(e.target.value) || 0)} /></td>
-                    <td className="p-1 border-r"><input type="number" className="w-full p-2 text-center outline-none" value={r.freight_amt} onChange={e => updateGrid(i, 'freight_amt', parseFloat(e.target.value) || 0)} /></td>
-                    <td className="p-1 border-r"><input type="text" className="w-full p-2 text-xs border rounded font-black uppercase text-center" value={r.identification_mark} onChange={e => updateGrid(i, 'identification_mark', e.target.value)} /></td>
-                    <td className="p-2 text-center"><button onClick={() => setGridRows(gridRows.filter((_, idx) => idx !== i))}><MinusCircle size={22} className="text-red-500 hover:scale-110 transition-transform" /></button></td>
-                </tr>
-            ))}
-        </tbody>
+            {/* 3. Product Description (Fixed) */}
+            <td className="p-2 border-r uppercase text-slate-600 bg-slate-50">{r.product_description}</td>
+             <td className="p-0 border-r w-32">
+                <input 
+                    type="text" 
+                    className="w-full h-full p-2 text-center bg-white outline-none uppercase font-bold" 
+                    value={r.packing_type} 
+                    onChange={e => updateGrid(i, 'packing_type', e.target.value)} 
+                />
+            </td>
+            {/* <td className="p-0 border-r w-32">
+                <input type="text" className="w-full h-full p-2 text-center bg-white outline-none uppercase" 
+                       value={r.packing_type} onChange={e => updateGrid(i, 'packing_type', e.target.value)} />
+            </td> */}
+
+            {/* 4. Packs (Editable) */}
+            <td className="p-0 border-r w-24">
+                <input 
+                    type="number" 
+                    className="w-full h-full p-2 text-center bg-pink-50 outline-none focus:bg-pink-100 font-black" 
+                    value={r.packs} 
+                    onChange={e => updateGrid(i, 'packs', e.target.value)} 
+                />
+            </td>
+
+            <td className="p-0 border-r w-32">
+                <input type="number" className="w-full h-full p-2 text-center bg-emerald-50 text-emerald-700 outline-none font-black" 
+                       value={r.avg_content} readOnly />
+            </td>
+
+            {/* 5. Bag Weight / avg_content (Editable) - NEW */}
+            {/* <td className="p-0 border-r w-24">
+                <input 
+                    type="number" 
+                    className="w-full h-full p-2 text-center bg-white outline-none focus:bg-yellow-50 font-black text-blue-600" 
+                    value={r.avg_content} 
+                    onChange={e => updateGrid(i, 'avg_content', e.target.value)} 
+                />
+            </td> */}
+
+            {/* 6. Total Kgs (Editable / Auto-calculated) */}
+            <td className="p-0 border-r w-32">
+                <input 
+                    type="number" 
+                    className="w-full h-full p-2 text-center text-blue-700 font-black outline-none bg-blue-50" 
+                    value={r.total_kgs} 
+                    onChange={e => updateGrid(i, 'total_kgs', e.target.value)} 
+                />
+            </td>
+
+            {/* 7. Rate (Editable) */}
+            <td className="p-0 border-r w-32">
+                <input 
+                    type="number" 
+                    className="w-full h-full p-2 text-center outline-none bg-white font-black" 
+                    value={r.rate} 
+                    onChange={e => updateGrid(i, 'rate', e.target.value)} 
+                />
+            </td>
+
+            
+
+            {/* 9. Charity (Editable) */}
+            <td className="p-0 border-r w-32">
+                <input 
+                    type="number" 
+                    className="w-full h-full p-2 text-center text-orange-600 outline-none bg-white font-black" 
+                    value={num(r.charity_amt)} 
+                    onChange={e => updateGrid(i, 'charity_amt', e.target.value)} 
+                />
+            </td>
+
+            {/* TAX PAIRS (Handled by helper) */}
+            {renderPairCell(r, i, 'gst_per', 'gst_amt', true, updateGrid)}
+            {renderPairCell(r, i, 'sgst_per', 'sgst_amt', true, updateGrid)}
+            {renderPairCell(r, i, 'cgst_per', 'cgst_amt', true, updateGrid)}
+            {renderPairCell(r, i, 'igst_per', 'igst_amt', true, updateGrid)}
+            {renderPairCell(r, i, 'vat_per', 'vat_amt', true, updateGrid)}
+            {renderPairCell(r, i, 'cenvat_per', 'cenvat_amt', true, updateGrid)}
+            {renderPairCell(r, i, 'duty_per', 'duty_amt', true, updateGrid)}
+            {renderPairCell(r, i, 'cess_per', 'cess_amt', true, updateGrid)}
+            {renderPairCell(r, i, 'hcess_per', 'hr_sec_cess_amt', true, updateGrid)}
+            {renderPairCell(r, i, 'tcs_per', 'tcs_amt', true, updateGrid)}
+            {renderPairCell(r, i, 'discount_percentage', 'discount_amt', true, updateGrid, "text-rose-600")}
+
+            {/* Footer Row fields (Already Editable in your code) */}
+            <td className="p-1 border-r"><input type="number" className="w-full p-2 text-center outline-none" value={r.other_amt} onChange={e => updateGrid(i, 'other_amt', e.target.value)} /></td>
+            <td className="p-1 border-r"><input type="number" className="w-full p-2 text-center outline-none" value={r.freight_amt} onChange={e => updateGrid(i, 'freight_amt', e.target.value)} /></td>
+            <td className="p-1 border-r"><input type="text" className="w-full p-2 text-xs border rounded font-black uppercase text-center" value={r.identification_mark} onChange={e => updateGrid(i, 'identification_mark', e.target.value)} /></td>
+            
+            {/* Action Button */}
+            <td className="p-2 text-center">
+                <button onClick={() => setGridRows(gridRows.filter((_, idx) => idx !== i))}>
+                    <MinusCircle size={22} className="text-red-500 hover:scale-110 transition-transform" />
+                </button>
+            </td>
+        </tr>
+    ))}
+</tbody>
     </table>
 </div>
                                 </div>

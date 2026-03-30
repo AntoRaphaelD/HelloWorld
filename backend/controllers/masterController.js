@@ -223,74 +223,85 @@ invoiceCtrl.create = async (req, res) => {
         if (!config) throw new Error("Invoice Type logic not found.");
 
         let hTotals = {
-            assess: 0, charity: 0, igst: 0, sgst: 0, cgst: 0, disc: 0, brok: 0, net: 0
+            assess: 0, charity: 0, igst: 0, sgst: 0, cgst: 0, disc: 0, brok: 0, net: 0, gst: 0
         };
 
         const processedRows = [];
 
         for (const item of Details) {
-            console.log("---------- ROW INPUT ----------");
-            console.log({
-                product_id: item.product_id,
-                rate: item.rate,
-                total_kgs: item.total_kgs,
-                packs: item.packs,
-
-                resale: item.resale,
-                convert_to_hank: item.convert_to_hank,
-                convert_to_cone: item.convert_to_cone,
-
-                vat_per: item.vat_per,
-                sgst_per: item.sgst_per,
-                cgst_per: item.cgst_per,
-                igst_per: item.igst_per,
-
-                discount_percentage: item.discount_percentage,
-                other_amt: item.other_amt,
-                freight_amt: item.freight_amt
-            });
-            console.log("-------------------------------");
             const product = await Product.findByPk(item.product_id);
 
-            // 1. BASE H
-            const H = (parseFloat(item.rate) || 0) * (parseFloat(item.total_kgs) || 0);
+            // 1. CALCULATE BASE H (Gross inclusive/total as per your manual note)
+            // H = Rate * Total Kgs (In your note: 2236.5 * 500)
+            const H = num(item.rate) * num(item.total_kgs);
 
-            // 2. ASSESS A = H - Resale + Hank - Cone
-            const A = H - parseFloat(item.resale || 0) + parseFloat(item.convert_to_hank || 0) - parseFloat(item.convert_to_cone || 0);
+            // 2. PREPARE REVERSE TAX MATH 
+            // We need these to evaluate formulas like [H] - [igstamt]
+            const igst_per = num(item.igst_per || config.igst_percentage);
+            const sgst_per = num(item.sgst_per || config.sgst_percentage);
+            const cgst_per = num(item.cgst_per || config.cgst_percentage);
+            const total_tax_per = igst_per + sgst_per + cgst_per;
 
-            let ctx = {
-                H: H,
-                A: A,
-                "Total Kgs": num(item.total_kgs),
-                Rate: num(item.rate),
-                CharityRs: num(product?.charity_rs),
+            // Mathematical Reverse GST Amount (Tax component hidden inside H)
+            const reverse_tax_amt = H * (total_tax_per / (100 + total_tax_per));
+            const row_freight = num(item.freight_amt || 0);
+
+            // 3. DEFINE ASSESSABLE VALUE (A)
+            // ... (previous logic for calculating H and reverse_tax_amt) ...
+
+            let A = 0;
+            
+            console.log(`\n--- [ROW CALCULATION START: Product ID ${item.product_id}] ---`);
+            console.log(`BASE GROSS [H]: ${H}`);
+
+            // Check if a custom formula exists in the Master
+            if (config.assess_checked && config.assess_formula && config.assess_formula !== '-') {
                 
-                // Add these to context so formulas can use them
-                gstper: num(item.gst_per || config.gst_percentage),
-                sgstper: num(item.sgst_per || config.sgst_percentage),
-                cgstper: num(item.cgst_per || config.cgst_percentage),
-                igstper: num(item.igst_per || config.igst_percentage),
+                const assess_ctx = {
+                    H: H,
+                    igstamt: reverse_tax_amt, 
+                    Lorryfright: row_freight,
+                    Rate: num(item.rate),
+                    "Total Kgs": num(item.total_kgs),
+                    round_digits: num(config.round_off_digits)
+                };
+
+                A = evaluateFormula(config.assess_formula, assess_ctx);
+
+                // ⭐ CONSOLE LOG FOR CUSTOM FORMULA
+                console.log(`%c MODE: CUSTOM FORMULA APPLIED`, "color: cyan; font-weight: bold;");
+                console.log(`FORMULA USED: ${config.assess_formula}`);
+                console.log(`CONTEXT VARS: H=${H}, TaxAmt=${reverse_tax_amt.toFixed(2)}, Freight=${row_freight}`);
+                console.log(`RESULTING ASSESSABLE VALUE [A]: ${A}`);
+
+            } else {
+                // FALLBACK: Standard formula
+                A = H - num(item.resale) + num(item.convert_to_hank) - num(item.convert_to_cone);
                 
-                round_digits: num(config.round_off_digits)
-            };
-            console.log("IGST FORMULA:", config.igst_formula);
-            console.log("CTX:", ctx);
-            // 3. TAXES ON A
-            const charity = config.charity_checked ? evaluateFormula(config.charity_formula, ctx) : 0;
-            const gst     = config.gst_checked     ? evaluateFormula(config.gst_formula, ctx)     : 0;
-            const sgst    = config.sgst_checked    ? evaluateFormula(config.sgst_formula, ctx)    : 0;
-            const cgst    = config.cgst_checked    ? evaluateFormula(config.cgst_formula, ctx)    : 0;
-            const igst    = config.igst_checked    ? evaluateFormula(config.igst_formula, ctx)    : 0;
+                // ⭐ CONSOLE LOG FOR FALLBACK
+                console.log(`%c MODE: STANDARD FALLBACK APPLIED`, "color: yellow; font-weight: bold;");
+                console.log(`LOGIC: H(${H}) - Resale(${item.resale}) + Hank(${item.convert_to_hank}) - Cone(${item.convert_to_cone})`);
+                console.log(`RESULTING ASSESSABLE VALUE [A]: ${A}`);
+            }
 
+            console.log(`--- [ROW CALCULATION END] ---\n`);
 
-            // 4. DEDUCTIONS ON (A + TAX)
-            const postTaxBasis = A + gst + sgst + cgst + igst + charity;
-            const discAmt = (parseFloat(item.discount_per || 0) * postTaxBasis / 100);
-            const brokAmt = (parseFloat(item.broker_per || 0) * postTaxBasis / 100);
+            // 4. CALCULATE TAXES BASED ON % (Straight calculation on A)
+            // Just take the percentage given and calculate it as requested
+            const charity = config.charity_checked ? (num(product?.charity_rs || 3) * num(item.packs || 0)) : 0;
+            const igst    = config.igst_checked    ? (A * igst_per / 100) : 0;
+            const sgst    = config.sgst_checked    ? (A * sgst_per / 100) : 0;
+            const cgst    = config.cgst_checked    ? (A * cgst_per / 100) : 0;
+            const gst     = config.gst_checked     ? (A * num(item.gst_per || config.gst_percentage) / 100) : 0;
 
-            // 5. ROW FINAL
+            // 5. DEDUCTIONS & FINAL ROW VALUE
+            const postTaxBasis = A + gst + sgst + cgst + igst + charity + row_freight;
+            const discAmt = (num(item.discount_per) * postTaxBasis / 100);
+            const brokAmt = (num(item.broker_per) * postTaxBasis / 100);
+
             const rowFinal = postTaxBasis - discAmt - brokAmt;
 
+            // Accumulate Header Totals
             hTotals.assess += A;
             hTotals.charity += charity;
             hTotals.gst  += gst;
@@ -314,6 +325,7 @@ invoiceCtrl.create = async (req, res) => {
             });
         }
 
+        // 6. SAVE HEADER & DETAILS
         const header = await InvoiceHeader.create({
             ...sanitizeData(headerData),
             invoice_type_id,
@@ -325,8 +337,8 @@ invoiceCtrl.create = async (req, res) => {
             total_cgst: hTotals.cgst,
             total_discount: hTotals.disc,
             total_broker: hTotals.brok,
-            freight_charges: parseFloat(freight_charges || 0),
-            net_amount: Math.round(hTotals.net + parseFloat(freight_charges || 0))
+            freight_charges: num(freight_charges),
+            net_amount: Math.round(hTotals.net)
         }, { transaction: t });
 
         for (const row of processedRows) {
