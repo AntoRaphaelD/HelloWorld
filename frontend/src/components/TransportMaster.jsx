@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { mastersAPI } from '../service/api';
+import { graphqlAPI } from '../service/api';
 import { 
     Plus, Edit, Trash2, X, ChevronLeft, 
     ChevronRight, RefreshCw, Save, Truck, Search, Filter, 
@@ -37,10 +37,20 @@ const TransportMaster = () => {
     const fetchRecords = async () => {
         setLoading(true);
         try {
-            const res = await mastersAPI.transports.getAll();
-            const rawData = res?.data?.data || res?.data || [];
-            setList(Array.isArray(rawData) ? rawData : []);
-        } catch (err) { setList([]); } finally { setLoading(false); }
+            const query = `
+                query {
+                    getTransports {
+                        id
+                        transport_code
+                        transport_name
+                        place
+                        address
+                    }
+                }
+            `;
+            const data = await graphqlAPI(query);
+            setList(Array.isArray(data.getTransports) ? data.getTransports : []);
+        } catch (err) { console.error(err); setList([]); } finally { setLoading(false); }
     };
 
     const filteredData = useMemo(() => {
@@ -84,7 +94,10 @@ const TransportMaster = () => {
         if (window.confirm(`Permanently delete ${selectedIds.length} transport agencies?`)) {
             setLoading(true);
             try {
-                await Promise.all(selectedIds.map(id => mastersAPI.transports.delete(id)));
+                await Promise.all(selectedIds.map(id => {
+                    const mutation = `mutation { deleteTransport(id: ${id}) }`;
+                    return graphqlAPI(mutation);
+                }));
                 setSelectedIds([]);
                 setIsSelectionMode(false);
                 fetchRecords();
@@ -97,8 +110,31 @@ const TransportMaster = () => {
         if (!formData.transport_name?.trim()) return alert("Transport name is required");
         setSubmitLoading(true);
         try {
-            if (formData.id) await mastersAPI.transports.update(formData.id, formData);
-            else await mastersAPI.transports.create(formData);
+            if (formData.id) {
+                const mutation = `
+                    mutation {
+                        updateTransport(id: ${formData.id}, input: {
+                            transport_code: "${formData.transport_code}"
+                            transport_name: "${formData.transport_name}"
+                            place: "${formData.place || ''}"
+                            address: "${formData.address || ''}"
+                        }) { id }
+                    }
+                `;
+                await graphqlAPI(mutation);
+            } else {
+                const mutation = `
+                    mutation {
+                        createTransport(input: {
+                            transport_code: "${formData.transport_code}"
+                            transport_name: "${formData.transport_name}"
+                            place: "${formData.place || ''}"
+                            address: "${formData.address || ''}"
+                        }) { id }
+                    }
+                `;
+                await graphqlAPI(mutation);
+            }
             fetchRecords();
             setIsModalOpen(false);
         } catch (err) { alert("Error saving."); } finally { setSubmitLoading(false); }

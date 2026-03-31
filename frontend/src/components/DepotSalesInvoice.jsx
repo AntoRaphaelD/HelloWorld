@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { mastersAPI, transactionsAPI } from '../service/api';
+// Change this line
+import { graphqlAPI } from '../service/api';
 import {
     Save, FileText, Calculator, Plus, MinusCircle,
     Layers, Activity, Search, Hash, Printer,
@@ -357,25 +358,54 @@ const filteredInvoiceTypes = useMemo(() => {
     // 4. DATA LOAD
     // ==========================================
     const init = async () => {
-        setLoading(true);
-        try {
-            const [types, accounts, transports, products, orders, history, brokers] = await Promise.all([
-                mastersAPI.invoiceTypes.getAll(), mastersAPI.accounts.getAll(), mastersAPI.transports.getAll(),
-                mastersAPI.products.getAll(), transactionsAPI.orders.getAll(),
-                transactionsAPI.depotSales.getAll(), mastersAPI.brokers.getAll()
-            ]);
-            const accs = accounts.data?.data || [];
-            setListData({
-                types: types.data?.data || [],
-                parties: accs.filter(a => !a.account_group?.toUpperCase().includes('DEPOT')),
-                depots: accs.filter(a => a.account_group?.toUpperCase().includes('DEPOT')),
-                transports: transports.data?.data || [],
-                products: products.data?.data || [],
-                orders: orders.data?.data || [],
-                history: history.data?.data || [], brokers: brokers.data?.data || []
-            });
-        } catch (e) { console.error(e); } finally { setLoading(false); }
-    };
+    setLoading(true);
+    try {
+        const query = `
+            query GetDepotInvoiceData {
+                getInvoiceTypes { id type_name sales_type vat_percentage gst_percentage sgst_percentage cgst_percentage igst_percentage tcs_percentage charity_checked charity_value }
+                getAccounts { id account_name account_group addr1 addr2 addr3 }
+                getTransports { id transport_name }
+                getProducts { id product_name charity_rs }
+                getBrokers { id broker_name }
+                getOrderHeaders { 
+                    id order_no 
+                    Party { id account_name addr1 addr2 addr3 }
+                    Broker { id broker_name broker_code }
+                    OrderDetails { id product_id qty bag_wt rate_cr packing_type Product { product_name } }
+                }
+                getDepotSalesHeaders {
+                    id invoice_no date final_invoice_value invoice_type_id removal_time
+                    Depot { account_name }
+                    Party { account_name addr1 addr2 addr3 }
+                    DepotSalesDetails {
+                        id order_no order_type product_id product_description packs avg_content total_kgs 
+                        rate assessable_value charity_amt vat_per vat_amt gst_per gst_amt 
+                        sgst_per sgst_amt cgst_per cgst_amt igst_per igst_amt tcs_per tcs_amt 
+                        discount_percentage discount_amt other_amt freight_amt identification_mark
+                    }
+                }
+            }
+        `;
+
+        const data = await graphqlAPI(query);
+        const accs = data.getAccounts || [];
+
+        setListData({
+            types: data.getInvoiceTypes || [],
+            parties: accs.filter(a => !a.account_group?.toUpperCase().includes('DEPOT')),
+            depots: accs.filter(a => a.account_group?.toUpperCase().includes('DEPOT')),
+            transports: data.getTransports || [],
+            products: data.getProducts || [],
+            orders: data.getOrderHeaders || [],
+            history: data.getDepotSalesHeaders || [],
+            brokers: data.getBrokers || []
+        });
+    } catch (e) { 
+        console.error("GraphQL Init Error:", e); 
+    } finally { 
+        setLoading(false); 
+    }
+};
     useEffect(() => { init(); }, []);
     // ==========================================
     // 5. HANDLERS
@@ -465,14 +495,99 @@ const filteredInvoiceTypes = useMemo(() => {
         });
     };
     const handleSave = async () => {
-        setSubmitLoading(true);
-        try {
-        await transactionsAPI.production.create(formData);
-        await fetchMasters(); // 🟢 THIS IS THE MISSING LINK: Refresh dropdown stock values
-        fetchRecords();
+    if (!formData.depot_id || gridRows.length === 0) return alert("Missing required fields");
+    
+    setSubmitLoading(true);
+    try {
+        const { id, ...header } = formData;
+        const payload = {
+            ...header,
+            invoice_type_id: header.invoice_type_id ? Number(header.invoice_type_id) : null,
+            depot_id: header.depot_id ? Number(header.depot_id) : null,
+            party_id: header.party_id ? Number(header.party_id) : null,
+            broker_id: header.broker_id ? Number(header.broker_id) : null,
+            transport_id: header.transport_id ? Number(header.transport_id) : null,
+            credit_days: Number(header.credit_days) || 0,
+            interest_pct: Number(header.interest_pct) || 0,
+            total_assessable: Number(header.total_assessable) || 0,
+            total_charity: Number(header.total_charity) || 0,
+            total_vat: Number(header.total_vat) || 0,
+            total_cenvat: Number(header.total_cenvat) || 0,
+            total_duty: Number(header.total_duty) || 0,
+            total_cess: Number(header.total_cess) || 0,
+            total_hr_sec_cess: Number(header.total_hr_sec_cess) || 0,
+            total_gst: Number(header.total_gst) || 0,
+            total_sgst: Number(header.total_sgst) || 0,
+            total_cgst: Number(header.total_cgst) || 0,
+            total_igst: Number(header.total_igst) || 0,
+            total_discount: Number(header.total_discount) || 0,
+            total_other: Number(header.total_other) || 0,
+            pf_amount: Number(header.pf_amount) || 0,
+            freight: Number(header.freight) || 0,
+            sub_total: Number(header.sub_total) || 0,
+            round_off: Number(header.round_off) || 0,
+            final_invoice_value: Number(header.final_invoice_value) || 0,
+            Details: gridRows.map((r) => ({
+                ...r,
+                product_id: r.product_id ? Number(r.product_id) : null,
+                packs: Number(r.packs) || 0,
+                total_kgs: Number(r.total_kgs) || 0,
+                avg_content: Number(r.avg_content) || 0,
+                broker_percentage: Number(r.broker_percentage) || 0,
+                rate: Number(r.rate) || 0,
+                resale: Number(r.resale) || 0,
+                convert_to_hank: Number(r.convert_to_hank) || 0,
+                convert_to_cone: Number(r.convert_to_cone) || 0,
+                assessable_value: Number(r.assessable_value) || 0,
+                charity_amt: Number(r.charity_amt) || 0,
+                vat_per: Number(r.vat_per) || 0,
+                vat_amt: Number(r.vat_amt) || 0,
+                cenvat_per: Number(r.cenvat_per) || 0,
+                cenvat_amt: Number(r.cenvat_amt) || 0,
+                duty_per: Number(r.duty_per) || 0,
+                duty_amt: Number(r.duty_amt) || 0,
+                cess_per: Number(r.cess_per) || 0,
+                cess_amt: Number(r.cess_amt) || 0,
+                hcess_per: Number(r.hcess_per) || 0,
+                hcess_amt: Number(r.hcess_amt) || 0,
+                gst_per: Number(r.gst_per) || 0,
+                gst_amt: Number(r.gst_amt) || 0,
+                sgst_per: Number(r.sgst_per) || 0,
+                sgst_amt: Number(r.sgst_amt) || 0,
+                cgst_per: Number(r.cgst_per) || 0,
+                cgst_amt: Number(r.cgst_amt) || 0,
+                igst_per: Number(r.igst_per) || 0,
+                igst_amt: Number(r.igst_amt) || 0,
+                tcs_per: Number(r.tcs_per) || 0,
+                tcs_amt: Number(r.tcs_amt) || 0,
+                discount_percentage: Number(r.discount_percentage) || 0,
+                discount_amt: Number(r.discount_amt) || 0,
+                other_amt: Number(r.other_amt) || 0,
+                freight_amt: Number(r.freight_amt) || 0,
+                sub_total: Number(r.sub_total) || 0,
+                rounded_off: Number(r.rounded_off) || 0,
+                final_value: Number(r.final_value) || 0
+            }))
+        };
+        
+        const mutation = `
+            mutation CreateDepotSales($input: DepotSalesHeaderInput) {
+                createDepotSalesHeader(input: $input) { id }
+            }
+        `;
+        await graphqlAPI(mutation, { input: payload });
+        
+        // REFRESH DATA using our new GraphQL init
+        await init(); 
+        
         setIsModalOpen(false);
-    } catch (e) { alert("Save Error"); } finally { setSubmitLoading(false); }
-    };
+        alert("Invoice Saved Successfully");
+    } catch (e) { 
+        alert("Save Error: " + e.message); 
+    } finally { 
+        setSubmitLoading(false); 
+    }
+};
     const filteredHistory = useMemo(() => {
         const history = Array.isArray(listData.history) ? listData.history : [];
         const term = searchValue.toLowerCase().trim();
@@ -525,29 +640,65 @@ const filteredInvoiceTypes = useMemo(() => {
                     </thead>
                     <tbody className="divide-y text-sm font-mono">
                         {filteredHistory.map(item => (
-                            <tr key={item.id} className="hover:bg-blue-50 cursor-pointer" onClick={() => {
+                            <tr key={item.id} className="hover:bg-blue-50 cursor-pointer" onClick={async () => {
+                                try {
+                                    setLoading(true);
+                                    const query = `
+                                        query GetDepotSalesHeader($id: ID!) {
+                                            getDepotSalesHeader(id: $id) {
+                                                id invoice_no date sales_type invoice_type_id invoice_type
+                                                depot_id party_id broker_id transport_id
+                                                addr1 addr2 addr3 credit_days interest_pct
+                                                lr_no lr_date vehicle_no removal_time agent_name
+                                                pay_mode remarks country are_no form_jj
+                                                total_assessable total_charity total_vat total_cenvat
+                                                total_duty total_cess total_hr_sec_cess
+                                                total_gst total_sgst total_cgst total_igst total_discount total_other
+                                                pf_amount freight sub_total round_off final_invoice_value
+                                                Party { id account_name addr1 addr2 addr3 }
+                                                Depot { id account_name }
+                                                Broker { id broker_name }
+                                                DepotSalesDetails {
+                                                    id order_no order_type product_id product_description
+                                                    packs packing_type total_kgs avg_content
+                                                    broker_code broker_percentage rate_per rate identification_mark
+                                                    from_no to_no resale convert_to_hank convert_to_cone
+                                                    assessable_value charity_amt vat_per vat_amt
+                                                    cenvat_per cenvat_amt duty_per duty_amt
+                                                    cess_per cess_amt hcess_per hcess_amt
+                                                    gst_per gst_amt sgst_per sgst_amt
+                                                    cgst_per cgst_amt igst_per igst_amt
+                                                    tcs_per tcs_amt discount_percentage discount_amt
+                                                    other_amt freight_amt sub_total rounded_off final_value
+                                                }
+                                            }
+                                        }
+                                    `;
+                                    const data = await graphqlAPI(query, { id: String(item.id) });
+                                    const full = data.getDepotSalesHeader;
+                                    if (!full) return;
 
-                                const formattedItem = {
-                                    ...item,
+                                    const formatted = {
+                                        ...full,
+                                        removal_time: full.removal_time
+                                            ? String(full.removal_time).replace(' ', 'T').slice(0, 16)
+                                            : '',
+                                        addr1: full.addr1 || full.Party?.addr1 || '',
+                                        addr2: full.addr2 || full.Party?.addr2 || '',
+                                        addr3: full.addr3 || full.Party?.addr3 || ''
+                                    };
 
-                                    removal_time: item.removal_time
-                                        ? item.removal_time.replace(' ', 'T').slice(0, 16)
-                                        : ''
-                                };
-
-                                setFormData({
-                                        ...formattedItem,
-
-                                        addr1: formattedItem.Party?.addr1 || '',
-                                        addr2: formattedItem.Party?.addr2 || '',
-                                        addr3: formattedItem.Party?.addr3 || ''
-                                    });
-
-                                const rows = item.DepotSalesDetails || [];
-                                const recalculated = runCalculations(rows, item.invoice_type_id);
-
-                                setGridRows(recalculated);
-                                setIsModalOpen(true);
+                                    setFormData(formatted);
+                                    const rows = full.DepotSalesDetails || [];
+                                    const recalculated = runCalculations(rows, full.invoice_type_id, full.sales_type);
+                                    setGridRows(recalculated);
+                                    setIsModalOpen(true);
+                                } catch (err) {
+                                    console.error("Error loading depot sales invoice:", err);
+                                    alert("Failed to load invoice details");
+                                } finally {
+                                    setLoading(false);
+                                }
                             }}>
                                 <td className="p-5 font-bold text-blue-600">{item.invoice_no}</td>
                                 <td className="p-5 text-slate-500">{item.date}</td>

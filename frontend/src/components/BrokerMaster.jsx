@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { mastersAPI } from '../service/api';
+// Change this line
+import { graphqlAPI } from '../service/api';
 import { 
     Plus, Edit, Trash2, X, ChevronLeft, 
     ChevronRight, RefreshCw, Save, Briefcase, Search, Filter, 
@@ -35,13 +36,31 @@ const BrokerMaster = () => {
     useEffect(() => { fetchRecords(); }, []);
 
     const fetchRecords = async () => {
-        setLoading(true);
-        try {
-            const res = await mastersAPI.brokers.getAll();
-            const rawData = res?.data?.data || res?.data || [];
-            setList(Array.isArray(rawData) ? rawData : []);
-        } catch (err) { setList([]); } finally { setLoading(false); }
-    };
+    setLoading(true);
+    try {
+        // Define the fields we actually need for the table
+        const query = `
+            query {
+                getBrokers {
+                    id
+                    broker_code
+                    broker_name
+                    commission_pct
+                    is_comm_per_kg
+                    address
+                }
+            }
+        `;
+        const data = await graphqlAPI(query);
+        // data.getBrokers matches the array name in your Resolver
+        setList(data.getBrokers || []); 
+    } catch (err) { 
+        console.error("GraphQL Fetch Error:", err);
+        setList([]); 
+    } finally { 
+        setLoading(false); 
+    }
+};
 
     const filteredData = useMemo(() => {
         let result = Array.isArray(list) ? [...list] : [];
@@ -68,23 +87,42 @@ const BrokerMaster = () => {
         setIsModalOpen(true);
     };
 
-    const handleRowClick = (item) => {
-        if (isSelectionMode) {
-            setSelectedIds(prev => 
-                prev.includes(item.id) ? prev.filter(id => id !== item.id) : [...prev, item.id]
-            );
-        } else {
-            setFormData({ ...item });
+    const handleRowClick = async (item) => {
+    if (isSelectionMode) {
+        setSelectedIds(prev => 
+            prev.includes(item.id) ? prev.filter(id => id !== item.id) : [...prev, item.id]
+        );
+    } else {
+        setLoading(true);
+        try {
+            const query = `
+                query GetBroker($id: ID!) {
+                    getBroker(id: $id) {
+                        id broker_code broker_name address commission_pct is_comm_per_kg
+                    }
+                }
+            `;
+            const data = await graphqlAPI(query, { id: String(item.id) });
+            const fullData = data.getBroker;
+            setFormData({ ...fullData });
             setIsModalOpen(true);
+        } catch (err) {
+            alert("Error loading broker details.");
+        } finally {
+            setLoading(false);
         }
-    };
+    }
+};
 
     const handleBulkDelete = async () => {
         if (selectedIds.length === 0) return;
         if (window.confirm(`Permanently delete ${selectedIds.length} brokers?`)) {
             setLoading(true);
             try {
-                await Promise.all(selectedIds.map(id => mastersAPI.brokers.delete(id)));
+                await Promise.all(selectedIds.map(id => {
+                    const mutation = `mutation DeleteBroker($id: ID!) { deleteBroker(id: $id) }`;
+                    return graphqlAPI(mutation, { id: String(id) });
+                }));
                 setSelectedIds([]);
                 setIsSelectionMode(false);
                 fetchRecords();
@@ -97,8 +135,22 @@ const BrokerMaster = () => {
         if (!formData.broker_name?.trim()) return alert("Broker name is required");
         setSubmitLoading(true);
         try {
-            if (formData.id) await mastersAPI.brokers.update(formData.id, formData);
-            else await mastersAPI.brokers.create(formData);
+            const { id, ...payload } = formData;
+            if (formData.id) {
+                const mutation = `
+                    mutation UpdateBroker($id: ID!, $input: BrokerInput) {
+                        updateBroker(id: $id, input: $input) { id }
+                    }
+                `;
+                await graphqlAPI(mutation, { id: String(formData.id), input: payload });
+            } else {
+                const mutation = `
+                    mutation CreateBroker($input: BrokerInput) {
+                        createBroker(input: $input) { id }
+                    }
+                `;
+                await graphqlAPI(mutation, { input: payload });
+            }
             fetchRecords();
             setIsModalOpen(false);
         } catch (err) { alert("Error saving."); } finally { setSubmitLoading(false); }

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { mastersAPI, transactionsAPI } from '../service/api';
+// Change this line
+import { graphqlAPI } from '../service/api';
 import { 
     Warehouse, Search, Package, Layers, 
     AlertTriangle, ArrowUpDown, Download, 
@@ -45,28 +46,59 @@ const DepotStorage = () => {
     }, [selectedDepot]);
 
     const fetchDepots = async () => {
-        try {
-            const res = await mastersAPI.accounts.getAll();
-            const all = res.data?.data || res.data || [];
-            const filtered = all.filter(a => {
-                const grp = String(a.account_group || "").toUpperCase();
-                const name = String(a.account_name || "").toUpperCase();
-                return grp.includes('DEPOT') || name.includes('DEPOT');
-            });
-            setDepots(filtered);
-            if (filtered.length > 0) setSelectedDepot(filtered[0].id);
-        } catch (err) { console.error("Depot fetch error", err); }
-    };
+    try {
+        const query = `
+            query {
+                getAccounts { 
+                    id 
+                    account_name 
+                    account_group 
+                }
+            }
+        `;
+        const data = await graphqlAPI(query);
+        const all = data.getAccounts || [];
+        
+        // Filter logic remains similar but data is leaner
+        const filtered = all.filter(a => {
+            const grp = String(a.account_group || "").toUpperCase();
+            return grp.includes('DEPOT');
+        });
+        
+        setDepots(filtered);
+        if (filtered.length > 0 && !selectedDepot) setSelectedDepot(filtered[0].id);
+    } catch (err) { console.error("Depot fetch error", err); }
+};
 
-    const fetchInventory = async () => {
-        if (!selectedDepot) return;
-        setLoading(true);
-        try {
-            const res = await transactionsAPI.depotStock.getInventory(selectedDepot);
-            setInventory(res.data?.data || []);
-        } catch (err) { alert("Could not load inventory database"); }
-        finally { setLoading(false); }
-    };
+   const fetchInventory = async () => {
+    if (!selectedDepot) return;
+    setLoading(true);
+    try {
+        const query = `
+            query GetInventory($depotId: ID!) {
+                getDepotInventory(depotId: $depotId) {
+                    id
+                    product_name
+                    product_code
+                    depot_stock
+                    TariffSubHead {
+                        tariff_no
+                    }
+                }
+            }
+        `;
+        
+        // Pass the selectedDepot as a variable
+        const data = await graphqlAPI(query, { depotId: selectedDepot });
+        setInventory(data.getDepotInventory || []);
+        
+    } catch (err) { 
+        console.error("Inventory fetch error", err);
+        alert("Could not load inventory database"); 
+    } finally { 
+        setLoading(false); 
+    }
+};
 
     // --- Selection Logic ---
     const handleRowClick = (id) => {
@@ -294,7 +326,7 @@ const DepotStorage = () => {
                 </div>
             </div>
 
-            <style jsx>{`
+            <style>{`
                 ::-webkit-scrollbar { width: 5px; height: 5px; }
                 ::-webkit-scrollbar-track { background: transparent; }
                 ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }

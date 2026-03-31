@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { mastersAPI, transactionsAPI } from '../service/api';
+import { graphqlAPI } from '../service/api';
 import { 
     Plus, Edit, Trash2, X, ChevronLeft, 
     ChevronRight, RefreshCw, Save, ShoppingCart, Search, Filter, 
@@ -58,22 +58,40 @@ const SalesWithOrder = () => {
 
     const fetchMasters = async () => {
         try {
-            const [p, b, pr] = await Promise.all([
-                mastersAPI.accounts.getAll(),
-                mastersAPI.brokers.getAll(),
-                mastersAPI.products.getAll()
-            ]);
-            setParties(p?.data?.data || []);
-            setBrokers(b?.data?.data || []);
-            setProducts(pr?.data?.data || []);
+            const query = `
+                query {
+                    getAccounts { id account_name }
+                    getBrokers { id broker_name }
+                    getProducts { id product_name packing_type pack_nett_wt }
+                }
+            `;
+            const data = await graphqlAPI(query);
+            setParties(data.getAccounts || []);
+            setBrokers(data.getBrokers || []);
+            setProducts(data.getProducts || []);
         } catch (err) { console.error(err); }
     };
 
     const fetchRecords = async () => {
         setLoading(true);
         try {
-            const res = await transactionsAPI.orders.getAll();
-            setList(res?.data?.data || []);
+            const query = `
+                query {
+                    getOrderHeaders {
+                        id order_no date place broker_id is_cancelled status
+                        Party { id account_name }
+                        Broker { id broker_name }
+                        OrderDetails { product_id qty rate_cr packing_type Product { product_name } }
+                    }
+                }
+            `;
+            const data = await graphqlAPI(query);
+            const mapped = (data.getOrderHeaders || []).map(item => ({
+                ...item,
+                party_id: item.Party?.id ? String(item.Party.id) : '',
+                broker_id: item.broker_id ? String(item.broker_id) : '',
+            }));
+            setList(mapped);
         } catch (err) { setList([]); } 
         finally { setLoading(false); }
     };
@@ -126,7 +144,10 @@ const SalesWithOrder = () => {
         if (selectedIds.length === 0) return;
         if (window.confirm(`Permanently delete ${selectedIds.length} orders?`)) {
             try {
-                await Promise.all(selectedIds.map(id => transactionsAPI.orders.delete(id)));
+                await Promise.all(selectedIds.map(id => {
+                    const mutation = `mutation { deleteOrderHeader(id: ${id}) }`;
+                    return graphqlAPI(mutation);
+                }));
                 setSelectedIds([]);
                 setIsSelectionMode(false);
                 fetchRecords();
@@ -141,14 +162,40 @@ const SalesWithOrder = () => {
         
         setSubmitLoading(true);
         try {
-            const payload = { 
-                ...formData, 
-                OrderDetails: gridRows.filter(r => r.product_id) 
+            const payload = {
+                order_no: formData.order_no || '',
+                date: formData.date || '',
+                place: formData.place || '',
+                broker_id: formData.broker_id ? Number(formData.broker_id) : null,
+                is_cancelled: Boolean(formData.is_cancelled),
+                status: formData.status || 'OPEN',
+                party_id: Number(formData.party_id),
+                OrderDetails: gridRows
+                    .filter(r => r.product_id)
+                    .map(r => ({
+                        product_id: Number(r.product_id),
+                        qty: r.qty === '' ? 0 : Number(r.qty),
+                        bag_wt: r.bag_wt === '' ? 0 : Number(r.bag_wt),
+                        rate_cr: r.rate_cr === '' ? 0 : Number(r.rate_cr),
+                        rate_imm: r.rate_imm === '' ? 0 : Number(r.rate_imm),
+                        rate_per: r.rate_per === '' ? 0 : Number(r.rate_per),
+                        packing_type: r.packing_type || '',
+                    }))
             };
             if (formData.id) {
-                await transactionsAPI.orders.update(formData.id, payload);
+                const mutation = `
+                    mutation UpdateOrder($id: ID!, $input: OrderHeaderInput) {
+                        updateOrderHeader(id: $id, input: $input) { id }
+                    }
+                `;
+                await graphqlAPI(mutation, { id: String(formData.id), input: payload });
             } else {
-                await transactionsAPI.orders.create(payload);
+                const mutation = `
+                    mutation CreateOrder($input: OrderHeaderInput) {
+                        createOrderHeader(input: $input) { id }
+                    }
+                `;
+                await graphqlAPI(mutation, { input: payload });
             }
             fetchRecords();
             setIsModalOpen(false);

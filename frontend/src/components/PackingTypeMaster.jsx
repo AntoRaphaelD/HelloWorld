@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { mastersAPI } from '../service/api';
+import { graphqlAPI } from '../service/api';
 import { 
     Plus, Edit, Trash2, X, ChevronLeft, 
     ChevronRight, RefreshCw, Save, Package, Search, Filter, 
@@ -34,10 +34,16 @@ const PackingTypeMaster = () => {
     const fetchRecords = async () => {
         setLoading(true);
         try {
-            const res = await mastersAPI.packingTypes.getAll();
-            const rawData = res?.data?.data || res?.data || [];
-            setList(Array.isArray(rawData) ? rawData : []);
-        } catch (err) { setList([]); } finally { setLoading(false); }
+            const query = `
+                query {
+                    getPackingTypes {
+                        id packing_type
+                    }
+                }
+            `;
+            const data = await graphqlAPI(query);
+            setList(Array.isArray(data.getPackingTypes) ? data.getPackingTypes : []);
+        } catch (err) { console.error(err); setList([]); } finally { setLoading(false); }
     };
 
     const filteredData = useMemo(() => {
@@ -79,13 +85,15 @@ const PackingTypeMaster = () => {
             setIsModalOpen(true);
         }
     };
-
     const handleBulkDelete = async () => {
         if (selectedIds.length === 0) return;
         if (window.confirm(`Permanently delete ${selectedIds.length} packing types?`)) {
             setLoading(true);
             try {
-                await Promise.all(selectedIds.map(id => mastersAPI.packingTypes.delete(id)));
+                await Promise.all(selectedIds.map(id => {
+                    const mutation = `mutation DeletePacking($id: ID!) { deletePackingType(id: $id) }`;
+                    return graphqlAPI(mutation, { id: String(id) });
+                }));
                 setSelectedIds([]);
                 setIsSelectionMode(false);
                 fetchRecords();
@@ -98,10 +106,21 @@ const PackingTypeMaster = () => {
         if (!formData.packing_type?.trim()) return alert("Packing Type name is required");
         setSubmitLoading(true);
         try {
+            const payload = { packing_type: formData.packing_type };
             if (formData.id && list.some(item => item.id === formData.id)) {
-                await mastersAPI.packingTypes.update(formData.id, formData);
+                const mutation = `
+                    mutation UpdatePacking($id: ID!, $input: PackingTypeInput) {
+                        updatePackingType(id: $id, input: $input) { id }
+                    }
+                `;
+                await graphqlAPI(mutation, { id: String(formData.id), input: payload });
             } else {
-                await mastersAPI.packingTypes.create(formData);
+                const mutation = `
+                    mutation CreatePacking($input: PackingTypeInput) {
+                        createPackingType(input: $input) { id }
+                    }
+                `;
+                await graphqlAPI(mutation, { input: payload });
             }
             fetchRecords();
             setIsModalOpen(false);

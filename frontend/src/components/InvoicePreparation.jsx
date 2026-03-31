@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { mastersAPI, transactionsAPI } from '../service/api';
+// Change this line
+import { mastersAPI, transactionsAPI, graphqlAPI } from '../service/api';
 import {
     Save, FileText, Calculator, RefreshCw, X, Plus,
     Database, MinusCircle, Box, Layers, Activity, Lock,
-    ShoppingCart, ChevronDown, Clock, Truck, User,
+    ShoppingCart, ChevronDown, ChevronLeft, ChevronRight, Clock, Truck, User,
     Search, Hash, Info, MapPin, Printer, FileJson
 } from 'lucide-react';
 import jsPDF from 'jspdf';
@@ -247,6 +248,8 @@ const InvoicePreparation = () => {
     const [searchField, setSearchField] = useState('invoice_no');
     const [searchCondition, setSearchCondition] = useState('Like');
     const [searchValue, setSearchValue] = useState('');
+    const [currentPage, setCurrentPage] = useState(1);
+    const itemsPerPage = 10;
     const [printData, setPrintData] = useState(null);
     // ==========================================
     // SEARCH FILTER ENGINE
@@ -306,6 +309,22 @@ const filteredInvoiceTypes = useMemo(() => {
         return result;
 
     }, [listData.history, searchField, searchCondition, searchValue]);
+
+    const totalPages = Math.max(1, Math.ceil(filteredInvoices.length / itemsPerPage));
+    const paginatedInvoices = useMemo(() => {
+        const start = (currentPage - 1) * itemsPerPage;
+        return filteredInvoices.slice(start, start + itemsPerPage);
+    }, [filteredInvoices, currentPage]);
+
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [searchField, searchCondition, searchValue, listData.history]);
+
+    useEffect(() => {
+        if (currentPage > totalPages) {
+            setCurrentPage(totalPages);
+        }
+    }, [currentPage, totalPages]);
 
     // =====================================================
     // PROFESSIONAL EXPORT TO PDF - MATCHES PRINT VIEW 100%
@@ -523,131 +542,183 @@ const filteredInvoiceTypes = useMemo(() => {
             return 0;
         }
     };
-    const runCalculations = useCallback((rows, typeId, hFreight = formData.freight_charges) => {
+    const runCalculations = useCallback((rows, typeId, hFreight = formData.freight_charges, salesType = formData.sales_type) => {
+        if (!typeId) return rows;
 
-    if (!typeId) return rows;
+        const config = listData.types.find(t => t.id === parseInt(typeId));
+        if (!config) return rows;
 
-    const config = listData.types.find(t => t.id === parseInt(typeId));
-    if (!config) return rows;
+        // 1. Freight Per Bag Calculation
+        const load = listData.loads.find(l => l.id === parseInt(formData.load_id));
+        const totalBagsInLoad = num(load?.no_of_bags) || rows.reduce((sum, r) => sum + num(r.packs), 0);
+        const freightPerBag = totalBagsInLoad > 0 ? num(hFreight) / totalBagsInLoad : 0;
 
-    const totalBags = rows.reduce((sum, r) => sum + num(r.packs), 0);
+        let hTotals = {
+            assess: 0, charity: 0, vat: 0, cenvat: 0, duty: 0, cess: 0, 
+            hcess: 0, tcs: 0, gst: 0, sgst: 0, cgst: 0, igst: 0, other: 0, net: 0
+        };
 
-    const freightPerBag = totalBags > 0 ? num(hFreight) / totalBags : 0;
+        const updatedRows = rows.map((item, index) => {
+            const product = listData.products.find(p => p.id === parseInt(item.product_id));
 
-    let hTotals = {
-        assess: 0,
-        charity: 0,
-        freight: 0,
-        igst: 0,
-        net: 0
-    };
+            // --- STEP 1: ASSESSABLE VALUE ---
+            // Total Net Weight * Rate
+            const assessableValue = num(item.total_kgs) * num(item.rate); 
 
-    const updatedRows = rows.map((item) => {
+            // --- STEP 2: CHARITY CALCULATION (NEW LOGIC) ---
+            let rowCharity = 0;
+            if (salesType === 'GST SALES') {
+                // Force 3% of Assessable Value regardless of Master settings
+                rowCharity = (assessableValue * 3) / 100;
+                console.log(`Row ${index + 1}: Forced 3% Charity for GST SALES: ${rowCharity.toFixed(2)}`);
+            } else {
+                // Standard Logic: Multiplier/Rate from Product Master per Kg
+                const charityRate = num(product?.charity_rs);
+                rowCharity = config.charity_checked ? (charityRate * num(item.total_kgs)) : 0;
+            }
 
-    const packs = num(item.packs);
-    const avgContent = num(item.avg_content);
-    const rate = num(item.rate);
+            // --- STEP 3: FREIGHT CALCULATION ---
+            const rowFreight = num(item.packs) * freightPerBag;
 
-    const igst_per = num(item.igst_per || config.igst_percentage || 5);
+            // --- STEP 4: TAXABLE BASIS ---
+            // Taxable Base = Goods Value + Charity + Freight
+            const taxableBasis = assessableValue + rowCharity + rowFreight;
 
-    // STEP 1 — rate with GST
-    const rateWithGST = rate + (rate * igst_per / 100);
+            // --- STEP 5: CALCULATE GST ON TAXABLE BASIS ---
+            const igst = (taxableBasis * num(item.igst_per || config.igst_percentage || 0)) / 100;
+            const sgst = (taxableBasis * num(item.sgst_per || config.sgst_percentage || 0)) / 100;
+            const cgst = (taxableBasis * num(item.cgst_per || config.cgst_percentage || 0)) / 100;
+            const gst  = (taxableBasis * num(item.gst_per  || config.gst_percentage  || 0)) / 100;
 
-    const totalKgs = packs * avgContent;
+            const vat    = (taxableBasis * num(item.vat_per)) / 100;
+            const duty   = (taxableBasis * num(item.duty_per)) / 100;
+            const cess   = (taxableBasis * num(item.cess_per)) / 100;
+            const hcess  = (taxableBasis * num(item.hcess_per)) / 100;
 
-    // charity
-    const charity = totalKgs * 3;
+            // --- STEP 6: TOTAL BEFORE TCS ---
+            const totalBeforeTcs = taxableBasis + igst + sgst + cgst + gst + vat + duty + cess + hcess;
 
-    // freight
-    const rowFreight = packs * freightPerBag;
+            // --- STEP 7: CALCULATE TCS (Final tax on Gross) ---
+            const tcs = (totalBeforeTcs * num(item.tcs_per || config.tcs_percentage || 0)) / 100;
 
-    // STEP 2 — total with GST
-    const multiplier = item.product_description?.includes("68") ? 10 : 1;
-    const totalWithGST = packs * multiplier * rateWithGST;
+            // FINAL ROW TOTAL
+            const rowFinal = totalBeforeTcs + tcs + num(item.other_amt);
 
-    // STEP 3 — taxable value
-    const taxableValue = Math.round(totalWithGST / (1 + igst_per / 100));
+            // Accumulate Header Totals
+            hTotals.assess  += assessableValue;
+            hTotals.charity += rowCharity;
+            hTotals.gst     += gst;
+            hTotals.sgst    += sgst;
+            hTotals.cgst    += cgst;
+            hTotals.igst    += igst;
+            hTotals.vat     += vat;
+            hTotals.duty    += duty;
+            hTotals.cess    += cess;
+            hTotals.hcess   += hcess;
+            hTotals.tcs     += tcs;
+            hTotals.other   += num(item.other_amt);
+            hTotals.net     += rowFinal;
 
-    // STEP 4 — igst
-    const igst = taxableValue * igst_per / 100;
+            return {
+                ...item,
+                assessable_value: assessableValue,
+                charity_amt: rowCharity,
+                freight_amt: rowFreight,
+                vat_amt: vat, 
+                duty_amt: duty, 
+                cess_amt: cess, 
+                hr_sec_cess_amt: hcess, 
+                tcs_amt: tcs, 
+                gst_amt: gst, 
+                sgst_amt: sgst, 
+                cgst_amt: cgst, 
+                igst_amt: igst,
+                sub_total: taxableBasis, 
+                final_value: rowFinal
+            };
+        });
 
-    // STEP 5 — assessable
-    const assessable = taxableValue - charity - rowFreight;
+        // 8. FINAL ROUNDING & HEADER SYNC
+        const roundDigits = num(config.round_off_digits);
+        const finalNetTotal = Math.round(hTotals.net);
 
-    hTotals.assess += assessable;
-    hTotals.charity += charity;
-    hTotals.freight += rowFreight;
-    hTotals.igst += igst;
-    hTotals.net += totalWithGST;
+        setFormData(prev => ({
+            ...prev,
+            total_assessable: money(hTotals.assess),
+            total_charity: money(hTotals.charity),
+            total_gst: money(hTotals.gst),
+            total_sgst: money(hTotals.sgst),
+            total_cgst: money(hTotals.cgst),
+            total_igst: money(hTotals.igst),
+            total_vat: money(hTotals.vat),
+            total_cenvat: money(hTotals.cenvat),
+            total_duty: money(hTotals.duty),
+            total_cess: money(hTotals.cess),
+            total_hr_sec_cess: money(hTotals.hcess),
+            total_tcs: money(hTotals.tcs),
+            freight_charges: num(hFreight),
+            sub_total: money(hTotals.net),
+            round_off: money(finalNetTotal - hTotals.net),
+            net_amount: finalNetTotal
+        }));
 
-    return {
-        ...item,
-        total_kgs: totalKgs,
-        assessable_value: assessable,
-        charity_amt: charity,
-        freight_amt: rowFreight,
-        igst_amt: igst,
-        final_value: totalWithGST
-    };
-});
-
-    const finalNetTotal = Math.ceil(hTotals.net);
-
-    setFormData(prev => ({
-        ...prev,
-
-        total_assessable: money(hTotals.assess),
-        total_charity: money(hTotals.charity),
-        freight_charges: num(hFreight),
-        total_igst: money(hTotals.igst),
-
-        sub_total: money(hTotals.net),
-        round_off: money(finalNetTotal - hTotals.net),
-        net_amount: finalNetTotal
-    }));
-
-    return updatedRows;
-
-}, [
-    listData.types,
-    formData.freight_charges
-]);
+        return updatedRows;
+    }, [listData.types, listData.products, formData.freight_charges, formData.sales_type, formData.load_id]);
 
     // ==========================================
     // 3. INITIAL LOAD
     // ==========================================
     const init = async () => {
-        setLoading(true);
-        try {
-            const [types, accounts, transports, products, orders, direct, invoices, despatch, brokers] = await Promise.all([
-                mastersAPI.invoiceTypes.getAll(),
-                mastersAPI.accounts.getAll(),
-                mastersAPI.transports.getAll(),
-                mastersAPI.products.getAll(),
-                transactionsAPI.orders.getAll(),
-                transactionsAPI.directInvoices.getAll(),
-                transactionsAPI.invoices.getAll(),
-                transactionsAPI.despatch.getAll(),
-                mastersAPI.brokers.getAll()
-            ]);
+    setLoading(true);
+    try {
+        const query = `
+            query GetInvoiceInitData {
+                getInvoiceTypes { id type_name sales_type vat_percentage gst_percentage sgst_percentage cgst_percentage igst_percentage tcs_percentage round_off_digits charity_checked }
+                getAccounts { id account_name addr1 addr2 addr3 gst_no }
+                getTransports { id transport_name }
+                getProducts { id product_name pack_nett_wt printing_tariff_sub_head_no charity_rs packing_type }
+                getBrokers { id broker_name broker_code commission_pct }
+                getDespatchEntries { id load_no transport_id vehicle_no delivery lr_no lr_date insurance_no freight in_time out_time no_of_bags }
+                getOrderHeaders { 
+                    id order_no broker_id
+                    Party { id account_name addr1 addr2 addr3 }
+                    OrderDetails { product_id qty bag_wt rate_cr packing_type Product { product_name } }
+                }
+                getDirectInvoiceHeaders { 
+                    id order_no party_id broker_id
+                    DirectInvoiceDetails { product_id qty bag_wt rate_cr packs Product { product_name } }
+                }
+                getInvoiceHeaders {
+                    id invoice_no date is_approved
+                    Party { account_name addr1 addr2 addr3 }
+                }
+            }
+        `;
 
-            const historyData = invoices.data.data || [];
-            setListData({
-                types: types.data.data || [],
-                parties: accounts.data.data || [],
-                transports: transports.data.data || [],
-                products: products.data.data || [],
-                orders: orders.data.data || [],
-                directOrders: direct.data.data || [],
-                history: historyData,
-                loads: despatch.data.data || [],
-                brokers: brokers.data.data || []
-            });
+        const data = await graphqlAPI(query);
 
-            const maxNo = historyData.reduce((max, item) => Math.max(max, parseInt(item.invoice_no) || 0), 0);
-            setFormData(prev => ({ ...prev, invoice_no: (maxNo + 1).toString() }));
-        } catch (e) { console.error(e); } finally { setLoading(false); }
-    };
+        setListData({
+            types: data.getInvoiceTypes || [],
+            parties: data.getAccounts || [],
+            transports: data.getTransports || [],
+            products: data.getProducts || [],
+            orders: data.getOrderHeaders || [],
+            directOrders: data.getDirectInvoiceHeaders || [],
+            history: data.getInvoiceHeaders || [],
+            loads: data.getDespatchEntries || [],
+            brokers: data.getBrokers || []
+        });
+
+        // Auto-increment Invoice Number
+        const maxNo = (data.getInvoiceHeaders || []).reduce((max, item) => Math.max(max, parseInt(item.invoice_no) || 0), 0);
+        setFormData(prev => ({ ...prev, invoice_no: (maxNo + 1).toString() }));
+
+    } catch (e) { 
+        console.error("GraphQL Init Error:", e); 
+    } finally { 
+        setLoading(false); 
+    }
+};
 
     useEffect(() => { init(); }, []);
     
@@ -935,45 +1006,57 @@ const handleLoadSync = (loadId) => {
                         <tr><th className="p-6">InvoiceNo</th><th className="p-6">Date</th><th className="p-6">Party</th></tr>
                     </thead>
                     <tbody className="divide-y text-sm font-mono">
-                        {filteredInvoices.map(item => (
+                        {paginatedInvoices.map(item => (
                             <tr
                                 key={item.id}
                                 className="hover:bg-blue-50 cursor-pointer"
                                 onClick={async () => {
-                                    try {
-                                        const res = await transactionsAPI.invoices.getById(item.id);
-                                        const invoice = res.data.data;
-                                        const party = invoice.Party;
-                                        
-
-                                        setFormData({
-                                            ...invoice,
-                                            addr1: invoice.addr1 || party?.addr1 || '',
-                                            addr2: invoice.addr2 || party?.addr2 || '',
-                                            addr3: invoice.addr3 || party?.addr3 || ''
-                                        });
-
-                                        const details =
-                                            invoice.InvoiceDetails ||
-                                            invoice.Details ||
-                                            invoice.details ||
-                                            [];
-
-                                        setGridRows(
-                                            runCalculations(
-                                                details,
-                                                invoice.invoice_type_id,
-                                                invoice.freight_charges
-                                            )
-                                        );
-
-                                        setIsModalOpen(true);
-
-                                    } catch (err) {
-                                        console.error("Error loading invoice:", err);
+                        try {
+                            setLoading(true);
+                            const query = `
+                                query GetFullInvoice($id: ID!) {
+                                    getInvoiceHeader(id: $id) {
+                                        id invoice_no date sales_type invoice_type_id party_id load_id
+                                        credit_days interest_percentage broker_id
+                                        transport_id lr_no delivery lr_date ebill_no vehicle_no remarks
+                                        removal_time prepare_time pay_mode form_j sales_against epcg_no
+                                        total_assessable total_charity total_gst freight_charges net_amount
+                                        Party { id account_name addr1 addr2 addr3 gst_no }
+                                        InvoiceDetails {
+                                            id order_no order_type product_id product_description packing_type
+                                            packs total_kgs avg_content rate rate_per charity_amt
+                                            vat_per vat_amt gst_per gst_amt sgst_per sgst_amt cgst_per cgst_amt igst_per igst_amt
+                                            tcs_per tcs_amt other_amt freight_amt identification_mark
+                                            Product { product_name printing_tariff_sub_head_no }
+                                        }
                                     }
-                                }}
-                            >
+                                }
+                            `;
+                            
+                            const response = await graphqlAPI(query, { id: item.id });
+                            const invoice = response.getInvoiceHeader;
+
+                            setFormData({
+                                ...invoice,
+                                addr1: invoice.addr1 || invoice.Party?.addr1 || '',
+                                addr2: invoice.addr2 || invoice.Party?.addr2 || '',
+                                addr3: invoice.addr3 || invoice.Party?.addr3 || ''
+                            });
+
+                            const details = invoice.InvoiceDetails || [];
+                            // Recalculate using your existing Math Engine
+                            setGridRows(runCalculations(details, invoice.invoice_type_id, invoice.freight_charges));
+                            setIsModalOpen(true);
+
+                        } catch (err) {
+                            console.error("Error loading invoice:", err);
+                            alert("Failed to load invoice details");
+                        } finally {
+                            setLoading(false);
+                        }
+                    }}
+                    
+                >
                                 <td className="p-6 font-bold text-blue-600">
                                     {item.invoice_no}
                                 </td>
@@ -991,6 +1074,25 @@ const handleLoadSync = (loadId) => {
                         ))}
                     </tbody>
                 </table>
+                <div className="p-3 bg-slate-50 border-t flex items-center justify-between text-sm">
+                    <span className="text-slate-500 font-medium">Page {currentPage} of {totalPages}</span>
+                    <div className="flex gap-1">
+                        <button
+                            disabled={currentPage === 1}
+                            onClick={() => setCurrentPage((p) => p - 1)}
+                            className="p-1.5 border rounded bg-white disabled:opacity-40"
+                        >
+                            <ChevronLeft size={16} />
+                        </button>
+                        <button
+                            disabled={currentPage === totalPages}
+                            onClick={() => setCurrentPage((p) => p + 1)}
+                            className="p-1.5 border rounded bg-white disabled:opacity-40"
+                        >
+                            <ChevronRight size={16} />
+                        </button>
+                    </div>
+                </div>
             </div>
 
             {/* PREPARATION MODAL */}

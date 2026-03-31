@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { mastersAPI, transactionsAPI } from '../service/api';
+import { graphqlAPI, transactionsAPI } from '../service/api';
 import { 
     Plus, Edit, Trash2, X, ChevronLeft, 
     ChevronRight, RefreshCw, Save, Factory, Search, Filter, 
@@ -69,20 +69,31 @@ const RG1Production = () => {
 
     const fetchMasters = async () => {
         try {
-            const [pr, pk] = await Promise.all([
-                mastersAPI.products.getAll(),
-                mastersAPI.packingTypes.getAll()
-            ]);
-            setProducts(pr?.data?.data || []);
-            setPackingTypes(pk?.data?.data || []);
+            const query = `
+                query {
+                    getProducts { id product_code product_name packing_type pack_nett_wt mill_stock }
+                    getPackingTypes { id packing_type }
+                }
+            `;
+            const data = await graphqlAPI(query);
+            setProducts(Array.isArray(data.getProducts) ? data.getProducts : []);
+            setPackingTypes(Array.isArray(data.getPackingTypes) ? data.getPackingTypes : []);
         } catch (err) { console.error(err); }
     };
 
     const fetchRecords = async () => {
         setLoading(true);
         try {
-            const res = await transactionsAPI.production.getAll();
-            setList(res?.data?.data || []);
+            const query = `
+                query {
+                    getRG1Productions {
+                        id product_id packing_type_id weight_per_bag production_kgs 
+                        prev_closing_kgs invoice_kgs stock_kgs date Product { product_name }
+                    }
+                }
+            `;
+            const data = await graphqlAPI(query);
+            setList(Array.isArray(data.getRG1Productions) ? data.getRG1Productions : []);
         } catch (err) { setList([]); } 
         finally { setLoading(false); }
     };

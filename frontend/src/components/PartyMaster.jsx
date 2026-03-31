@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { mastersAPI } from '../service/api';
+import { graphqlAPI } from '../service/api';
 import { Search, Save, X, Plus, Edit } from 'lucide-react';
 
 const PartyMaster = () => {
@@ -21,16 +21,28 @@ const PartyMaster = () => {
 
   const fetchAll = async () => {
     try {
-      const [pRes, bRes] = await Promise.all([
-        mastersAPI.accounts.getAll(), 
-        mastersAPI.brokers.getAll()
-      ]);
-
-      const partyData = pRes.data.data || pRes.data;
-      const brokerData = bRes.data.data || bRes.data;
-
-      setList(Array.isArray(partyData) ? partyData : []);
-      setBrokers(Array.isArray(brokerData) ? brokerData : []);
+      const query = `
+        query {
+          getAccounts {
+            id
+            account_code
+            account_name
+            address
+            place
+            gst_no
+            broker_id
+            Broker { id broker_name }
+          }
+          getBrokers {
+            id
+            broker_code
+            broker_name
+          }
+        }
+      `;
+      const data = await graphqlAPI(query);
+      setList(Array.isArray(data.getAccounts) ? data.getAccounts : []);
+      setBrokers(Array.isArray(data.getBrokers) ? data.getBrokers : []);
     } catch (err) {
       console.error("Failed to fetch master data", err);
     }
@@ -58,13 +70,36 @@ const PartyMaster = () => {
   const handleSave = async (e) => {
     e.preventDefault();
     try {
-      // Create payload ensuring broker_id is sent as null if empty
       const payload = { ...form, broker_id: form.broker_id || null };
       
       if (editingId) {
-        await mastersAPI.accounts.update(editingId, payload);
+        const mutation = `
+          mutation {
+            updateAccount(id: "${editingId}", input: {
+              account_code: "${payload.account_code}"
+              account_name: "${payload.account_name}"
+              address: "${(payload.address || '').replace(/"/g, '\\"')}"
+              place: "${payload.place || ''}"
+              gst_no: "${payload.gst_no || ''}"
+              broker_id: ${payload.broker_id || null}
+            }) { id }
+          }
+        `;
+        await graphqlAPI(mutation);
       } else {
-        await mastersAPI.accounts.create(payload);
+        const mutation = `
+          mutation {
+            createAccount(input: {
+              account_code: "${payload.account_code}"
+              account_name: "${payload.account_name}"
+              address: "${(payload.address || '').replace(/"/g, '\\"')}"
+              place: "${payload.place || ''}"
+              gst_no: "${payload.gst_no || ''}"
+              broker_id: ${payload.broker_id || null}
+            }) { id }
+          }
+        `;
+        await graphqlAPI(mutation);
       }
       setShow(false);
       fetchAll();

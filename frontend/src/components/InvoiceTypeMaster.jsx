@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { mastersAPI } from '../service/api';
+import { graphqlAPI } from '../service/api';
 import { 
     Plus, Edit, Trash2, X, ChevronLeft, 
     ChevronRight, RefreshCw, Save, Calculator, Search, Filter, 
@@ -155,10 +155,16 @@ const InvoiceTypeMaster = () => {
     const fetchRecords = async () => {
         setLoading(true);
         try {
-            const res = await mastersAPI.invoiceTypes.getAll();
-            const rawData = res?.data?.data || res?.data || [];
-            setList(Array.isArray(rawData) ? rawData : []);
-        } catch (err) { setList([]); } finally { setLoading(false); }
+            const query = `
+                query {
+                    getInvoiceTypes {
+                        id code type_name sales_type group_name is_option_ii
+                    }
+                }
+            `;
+            const data = await graphqlAPI(query);
+            setList(Array.isArray(data.getInvoiceTypes) ? data.getInvoiceTypes : []);
+        } catch (err) { console.error(err); setList([]); } finally { setLoading(false); }
     };
 
     const handleAddNew = () => {
@@ -187,7 +193,10 @@ const InvoiceTypeMaster = () => {
         if (selectedIds.length === 0) return;
         if (window.confirm(`Permanently delete ${selectedIds.length} invoice types?`)) {
             try {
-                await Promise.all(selectedIds.map(id => mastersAPI.invoiceTypes.delete(id)));
+                await Promise.all(selectedIds.map(id => {
+                    const mutation = `mutation { deleteInvoiceType(id: ${id}) }`;
+                    return graphqlAPI(mutation);
+                }));
                 setSelectedIds([]);
                 setIsSelectionMode(false);
                 fetchRecords();
@@ -200,9 +209,49 @@ const InvoiceTypeMaster = () => {
         if (!formData.type_name?.trim()) return alert("Invoice Type name is required");
         setSubmitLoading(true);
         try {
-            const payload = mapUiToDb(formData);
-            if (formData.id) await mastersAPI.invoiceTypes.update(formData.id, payload);
-            else await mastersAPI.invoiceTypes.create(payload);
+            const rawPayload = mapUiToDb(formData);
+            const payload = { ...rawPayload };
+
+            delete payload.id;
+            delete payload.rows;
+            Object.keys(payload).forEach((key) => {
+                if (key.endsWith('_credit') || key === 'assess_credit') {
+                    delete payload[key];
+                }
+            });
+
+            const intFields = ['round_off_digits'];
+            const floatFields = [
+                'charity_value', 'vat_percentage', 'duty_percentage', 'cess_percentage',
+                'hr_sec_cess_percentage', 'tcs_percentage', 'cst_percentage', 'cenvat_percentage',
+                'gst_percentage', 'sgst_percentage', 'cgst_percentage', 'igst_percentage'
+            ];
+            const boolFields = [
+                'is_option_ii', 'account_posting', 'assess_checked', 'charity_checked',
+                'vat_checked', 'duty_checked', 'cess_checked', 'hr_sec_cess_checked',
+                'tcs_checked', 'cst_checked', 'cenvat_checked', 'gst_checked',
+                'sgst_checked', 'cgst_checked', 'igst_checked'
+            ];
+
+            intFields.forEach((k) => { payload[k] = parseInt(payload[k], 10) || 0; });
+            floatFields.forEach((k) => { payload[k] = Number(payload[k]) || 0; });
+            boolFields.forEach((k) => { payload[k] = Boolean(payload[k]); });
+
+            if (formData.id) {
+                const mutation = `
+                    mutation UpdateInvoiceType($id: ID!, $input: InvoiceTypeInput) {
+                        updateInvoiceType(id: $id, input: $input) { id }
+                    }
+                `;
+                await graphqlAPI(mutation, { id: String(formData.id), input: payload });
+            } else {
+                const mutation = `
+                    mutation CreateInvoiceType($input: InvoiceTypeInput) {
+                        createInvoiceType(input: $input) { id }
+                    }
+                `;
+                await graphqlAPI(mutation, { input: payload });
+            }
             fetchRecords();
             setIsModalOpen(false);
         } catch (err) { alert("Error saving."); } finally { setSubmitLoading(false); }

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { mastersAPI, transactionsAPI } from '../service/api';
+import { graphqlAPI } from '../service/api';
 import { 
     Plus, Edit, Trash2, X, ChevronLeft, 
     ChevronRight, RefreshCw, Save, Factory, Search, Filter, 
@@ -59,16 +59,41 @@ const DespatchEntry = () => {
     const fetchRecords = async () => {
         setLoading(true);
         try {
-            const res = await transactionsAPI.despatch.getAll();
-            setList(res?.data?.data || []);
-        } catch (err) { setList([]); } 
+            const query = `
+                query {
+                    getDespatchEntries {
+                        id
+                        load_no
+                        load_date
+                        transport_id
+                        vehicle_no
+                        no_of_bags
+                        freight
+                        Transport { id transport_name }
+                    }
+                }
+            `;
+            const data = await graphqlAPI(query);
+            setList(data.getDespatchEntries || []);
+        } catch (err) { console.error(err); setList([]); } 
         finally { setLoading(false); }
     };
 
     const fetchTransports = async () => {
         try {
-            const res = await mastersAPI.transports.getAll();
-            setTransports(res?.data?.data || []);
+            const query = `
+                query {
+                    getTransports {
+                        id
+                        transport_code
+                        transport_name
+                        place
+                        address
+                    }
+                }
+            `;
+            const data = await graphqlAPI(query);
+            setTransports(data.getTransports || []);
         } catch (err) { console.error(err); }
     };
 
@@ -106,7 +131,10 @@ const DespatchEntry = () => {
         if (selectedIds.length === 0) return;
         if (window.confirm(`Permanently delete ${selectedIds.length} despatch records?`)) {
             try {
-                await Promise.all(selectedIds.map(id => transactionsAPI.despatch.delete(id)));
+                await Promise.all(selectedIds.map(id => {
+                    const mutation = `mutation { deleteDespatch(id: ${id}) }`;
+                    return graphqlAPI(mutation);
+                }));
                 setSelectedIds([]);
                 setIsSelectionMode(false);
                 fetchRecords();
@@ -129,8 +157,37 @@ const DespatchEntry = () => {
         };
 
         try {
-            if (formData.id) await transactionsAPI.despatch.update(formData.id, payload);
-            else await transactionsAPI.despatch.create(payload);
+            const input = {
+                load_no: payload.load_no || '',
+                load_date: payload.load_date || '',
+                transport_id: payload.transport_id ? Number(payload.transport_id) : null,
+                lr_no: payload.lr_no || '',
+                lr_date: payload.lr_date || '',
+                vehicle_no: payload.vehicle_no || '',
+                delivery: payload.delivery || '',
+                insurance_no: payload.insurance_no || '',
+                in_time: finalIn,
+                out_time: finalOut,
+                no_of_bags: Number(payload.no_of_bags) || 0,
+                freight: Number(payload.freight) || 0,
+                freight_per_bag: Number(calculatedFreightPerBag) || 0
+            };
+
+            if (formData.id) {
+                const mutation = `
+                    mutation UpdateDespatch($id: ID!, $input: DespatchEntryInput) {
+                        updateDespatch(id: $id, input: $input) { id }
+                    }
+                `;
+                await graphqlAPI(mutation, { id: String(formData.id), input });
+            } else {
+                const mutation = `
+                    mutation CreateDespatch($input: DespatchEntryInput) {
+                        createDespatch(input: $input) { id }
+                    }
+                `;
+                await graphqlAPI(mutation, { input });
+            }
             fetchRecords();
             setIsModalOpen(false);
         } catch (err) { alert("Error saving."); } 

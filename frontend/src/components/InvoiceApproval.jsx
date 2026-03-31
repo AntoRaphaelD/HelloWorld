@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { transactionsAPI } from '../service/api';
+import { graphqlAPI } from '../service/api';
 import { 
     ShieldCheck, Clock, CheckCircle, Search, 
     AlertCircle, Eye, X, RefreshCw, ChevronLeft, 

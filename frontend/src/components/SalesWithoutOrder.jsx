@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { mastersAPI, transactionsAPI } from '../service/api';
+import { graphqlAPI } from '../service/api';
 import { 
     Plus, Edit, Trash2, X, ChevronLeft, 
     ChevronRight, RefreshCw, Save, Zap, Search, Filter, 
@@ -58,22 +58,35 @@ const SalesWithoutOrder = () => {
 
     const fetchMasters = async () => {
         try {
-            const [p, b, pr] = await Promise.all([
-                mastersAPI.accounts.getAll(),
-                mastersAPI.brokers.getAll(),
-                mastersAPI.products.getAll()
-            ]);
-            setParties(p?.data?.data || []);
-            setBrokers(b?.data?.data || []);
-            setProducts(pr?.data?.data || []);
+            const query = `
+                query {
+                    getAccounts { id account_name }
+                    getBrokers { id broker_name }
+                    getProducts { id product_name }
+                }
+            `;
+            const data = await graphqlAPI(query);
+            setParties(data.getAccounts || []);
+            setBrokers(data.getBrokers || []);
+            setProducts(data.getProducts || []);
         } catch (err) { console.error(err); }
     };
 
     const fetchRecords = async () => {
         setLoading(true);
         try {
-            const res = await transactionsAPI.directInvoices.getAll();
-            setList(res?.data?.data || []);
+            const query = `
+                query {
+                    getDirectInvoiceHeaders {
+                        id order_no date place party_id broker_id is_cancelled status
+                        Party { account_name }
+                        Broker { broker_name }
+                        DirectInvoiceDetails { product_id qty rate_cr packing_type Product { product_name } }
+                    }
+                }
+            `;
+            const data = await graphqlAPI(query);
+            setList(data.getDirectInvoiceHeaders || []);
         } catch (err) { setList([]); } 
         finally { setLoading(false); }
     };
@@ -126,7 +139,10 @@ const SalesWithoutOrder = () => {
         if (selectedIds.length === 0) return;
         if (window.confirm(`Permanently delete ${selectedIds.length} bills?`)) {
             try {
-                await Promise.all(selectedIds.map(id => transactionsAPI.directInvoices.delete(id)));
+                await Promise.all(selectedIds.map(id => {
+                    const mutation = `mutation { deleteDirectInvoiceHeader(id: ${id}) }`;
+                    return graphqlAPI(mutation);
+                }));
                 setSelectedIds([]);
                 setIsSelectionMode(false);
                 fetchRecords();
@@ -141,14 +157,45 @@ const SalesWithoutOrder = () => {
         
         setSubmitLoading(true);
         try {
-            const payload = { 
-                ...formData, 
-                Details: gridRows.filter(r => r.product_id) 
+            const payload = {
+                order_no: formData.order_no || '',
+                date: formData.date || '',
+                party_id: Number(formData.party_id),
+                broker_id: formData.broker_id ? Number(formData.broker_id) : null,
+                place: formData.place || '',
+                vehicle_no: formData.vehicle_no || '',
+                is_cancelled: Boolean(formData.is_cancelled),
+                status: formData.status || 'OPEN',
+                final_invoice_value: Number(formData.final_invoice_value) || 0,
+                is_depot_inwarded: Boolean(formData.is_depot_inwarded),
+                depot_id: formData.depot_id ? Number(formData.depot_id) : null,
+                DirectInvoiceDetails: gridRows
+                    .filter(r => r.product_id)
+                    .map(r => ({
+                        product_id: Number(r.product_id),
+                        qty: Number(r.qty) || 0,
+                        bag_wt: Number(r.bag_wt) || 0,
+                        rate_cr: Number(r.rate_cr) || 0,
+                        rate_imm: Number(r.rate_imm) || 0,
+                        rate_per: Number(r.rate_per) || 0,
+                        packing_type: r.packing_type || '',
+                        packs: Number(r.packs) || 0
+                    }))
             };
             if (formData.id) {
-                await transactionsAPI.directInvoices.update(formData.id, payload);
+                const mutation = `
+                    mutation UpdateDirectInvoice($id: ID!, $input: DirectInvoiceHeaderInput) {
+                        updateDirectInvoiceHeader(id: $id, input: $input) { id }
+                    }
+                `;
+                await graphqlAPI(mutation, { id: String(formData.id), input: payload });
             } else {
-                await transactionsAPI.directInvoices.create(payload);
+                const mutation = `
+                    mutation CreateDirectInvoice($input: DirectInvoiceHeaderInput) {
+                        createDirectInvoiceHeader(input: $input) { id }
+                    }
+                `;
+                await graphqlAPI(mutation, { input: payload });
             }
             fetchRecords();
             setIsModalOpen(false);

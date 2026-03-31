@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { mastersAPI } from '../service/api';
+// Change this line
+import { graphqlAPI } from '../service/api';
 import { 
     Plus, Edit, Trash2, X, ChevronLeft, 
     ChevronRight, RefreshCw, Save, Building2, Search, Filter, 
@@ -58,13 +59,33 @@ const AccountMaster = () => {
     useEffect(() => { fetchRecords(); }, []);
 
     const fetchRecords = async () => {
-        setLoading(true);
-        try {
-            const res = await mastersAPI.accounts.getAll();
-            const rawData = res?.data?.data || res?.data || [];
-            setList(Array.isArray(rawData) ? rawData : []);
-        } catch (err) { setList([]); } finally { setLoading(false); }
-    };
+    setLoading(true);
+    try {
+        // We only ask for fields displayed in the table + id
+        const query = `
+            query {
+                getAccounts {
+                    id
+                    account_code
+                    account_name
+                    account_group
+                    primary_group
+                    main_group
+                    place
+                    phone_no
+                    email
+                }
+            }
+        `;
+        const data = await graphqlAPI(query);
+        setList(data.getAccounts || []);
+    } catch (err) { 
+        console.error("GraphQL Fetch Error:", err);
+        setList([]); 
+    } finally { 
+        setLoading(false); 
+    }
+};
 
     const handleAddNew = () => {
         const safeList = Array.isArray(list) ? list : [];
@@ -76,20 +97,43 @@ const AccountMaster = () => {
         setIsModalOpen(true);
     };
 
-    const handleRowClick = (item) => {
-        if (isSelectionMode) {
-            setSelectedIds(prev => prev.includes(item.id) ? prev.filter(id => id !== item.id) : [...prev, item.id]);
-        } else {
-            setFormData(mapDbToUi(item));
+const handleRowClick = async (item) => {
+    if (isSelectionMode) {
+        setSelectedIds(prev => prev.includes(item.id) ? prev.filter(id => id !== item.id) : [...prev, item.id]);
+    } else {
+        setLoading(true);
+        try {
+            const query = `
+                query GetAccount($id: ID!) {
+                    getAccount(id: $id) {
+                        id account_code account_name place gst_no phone_no
+                        main_group primary_group account_group
+                        addr1 addr2 addr3 del1 del2 del3 pincode state
+                        tin_no cst_no email fax website account_no
+                        contact_person cell_no opening_credit opening_debit
+                    }
+                }
+            `;
+            const data = await graphqlAPI(query, { id: String(item.id) });
+            const fullData = data.getAccount;
+            setFormData(mapDbToUi(fullData));
             setIsModalOpen(true);
+        } catch (err) {
+            alert("Error loading full account details.");
+        } finally {
+            setLoading(false);
         }
-    };
+    }
+};
 
     const handleBulkDelete = async () => {
         if (selectedIds.length === 0) return;
         if (window.confirm(`Permanently delete ${selectedIds.length} accounts?`)) {
             try {
-                await Promise.all(selectedIds.map(id => mastersAPI.accounts.delete(id)));
+                await Promise.all(selectedIds.map(id => {
+                    const mutation = `mutation DeleteAccount($id: ID!) { deleteAccount(id: $id) }`;
+                    return graphqlAPI(mutation, { id: String(id) });
+                }));
                 setSelectedIds([]);
                 setIsSelectionMode(false);
                 fetchRecords();
@@ -101,9 +145,23 @@ const AccountMaster = () => {
         e.preventDefault();
         setSubmitLoading(true);
         try {
-            const payload = mapUiToDb(formData);
-            if (formData.id) await mastersAPI.accounts.update(formData.id, payload);
-            else await mastersAPI.accounts.create(payload);
+            const mapped = mapUiToDb(formData);
+            const { id, ...payload } = mapped;
+            if (formData.id) {
+                const mutation = `
+                    mutation UpdateAccount($id: ID!, $input: AccountInput) {
+                        updateAccount(id: $id, input: $input) { id }
+                    }
+                `;
+                await graphqlAPI(mutation, { id: String(formData.id), input: payload });
+            } else {
+                const mutation = `
+                    mutation CreateAccount($input: AccountInput) {
+                        createAccount(input: $input) { id }
+                    }
+                `;
+                await graphqlAPI(mutation, { input: payload });
+            }
             fetchRecords();
             setIsModalOpen(false);
         } catch (err) { alert("Error saving."); } finally { setSubmitLoading(false); }

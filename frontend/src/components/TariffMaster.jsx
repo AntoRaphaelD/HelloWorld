@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { mastersAPI } from '../service/api';
+import { graphqlAPI } from '../service/api';
 import { 
     Plus, Edit, Trash2, X, ChevronLeft, 
     ChevronRight, RefreshCw, Save, BookOpen, Search, Filter, 
@@ -40,10 +40,23 @@ const TariffMaster = () => {
     const fetchRecords = async () => {
         setLoading(true);
         try {
-            const res = await mastersAPI.tariffs.getAll();
-            const rawData = res?.data?.data || res?.data || [];
-            setList(Array.isArray(rawData) ? rawData : []);
-        } catch (err) { setList([]); } finally { setLoading(false); }
+            const query = `
+                query {
+                    getTariffSubHeads {
+                        id
+                        tariff_code
+                        tariff_name
+                        tariff_no
+                        product_type
+                        commodity
+                        fibre
+                        yarn_type
+                    }
+                }
+            `;
+            const data = await graphqlAPI(query);
+            setList(Array.isArray(data.getTariffSubHeads) ? data.getTariffSubHeads : []);
+        } catch (err) { console.error(err); setList([]); } finally { setLoading(false); }
     };
 
     const filteredData = useMemo(() => {
@@ -87,7 +100,10 @@ const TariffMaster = () => {
         if (window.confirm(`Permanently delete ${selectedIds.length} records?`)) {
             setLoading(true);
             try {
-                await Promise.all(selectedIds.map(id => mastersAPI.tariffs.delete(id)));
+                await Promise.all(selectedIds.map(id => {
+                    const mutation = `mutation DeleteTariff($id: ID!) { deleteTariffSubHead(id: $id) }`;
+                    return graphqlAPI(mutation, { id: String(id) });
+                }));
                 setSelectedIds([]);
                 setIsSelectionMode(false);
                 fetchRecords();
@@ -100,7 +116,8 @@ const TariffMaster = () => {
         if (window.confirm("Delete this tariff record permanently?")) {
             setSubmitLoading(true);
             try {
-                await mastersAPI.tariffs.delete(formData.id);
+                const mutation = `mutation DeleteTariff($id: ID!) { deleteTariffSubHead(id: $id) }`;
+                await graphqlAPI(mutation, { id: String(formData.id) });
                 setIsModalOpen(false);
                 fetchRecords();
             } catch (err) { alert("Delete failed."); } finally { setSubmitLoading(false); }
@@ -111,8 +128,31 @@ const TariffMaster = () => {
         e.preventDefault();
         setSubmitLoading(true);
         try {
-            if (formData.id) await mastersAPI.tariffs.update(formData.id, formData);
-            else await mastersAPI.tariffs.create(formData);
+            const payload = {
+                tariff_code: formData.tariff_code,
+                tariff_name: formData.tariff_name,
+                tariff_no: formData.tariff_no,
+                product_type: formData.product_type,
+                commodity: formData.commodity,
+                fibre: formData.fibre,
+                yarn_type: formData.yarn_type
+            };
+
+            if (formData.id) {
+                const mutation = `
+                    mutation UpdateTariff($id: ID!, $input: TariffSubHeadInput) {
+                        updateTariffSubHead(id: $id, input: $input) { id }
+                    }
+                `;
+                await graphqlAPI(mutation, { id: String(formData.id), input: payload });
+            } else {
+                const mutation = `
+                    mutation CreateTariff($input: TariffSubHeadInput) {
+                        createTariffSubHead(input: $input) { id }
+                    }
+                `;
+                await graphqlAPI(mutation, { input: payload });
+            }
             fetchRecords();
             setIsModalOpen(false);
         } catch (err) { alert("Error saving."); } finally { setSubmitLoading(false); }

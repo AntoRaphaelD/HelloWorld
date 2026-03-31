@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { mastersAPI, transactionsAPI } from '../service/api';
+import { graphqlAPI } from '../service/api';
 import { 
     Truck, ArrowRightLeft, Warehouse, Send, AlertCircle, 
     Calendar, Plus, Trash2, X, Search, RefreshCw, 
@@ -60,30 +60,93 @@ export const DepotTransfer = () => {
 
     const fetchDepots = async () => {
         try {
-            const res = await mastersAPI.accounts.getAll();
-            const all = res.data.data || res.data || [];
+            const query = `
+                query {
+                    getAccounts {
+                        id account_name account_group
+                    }
+                }
+            `;
+            const data = await graphqlAPI(query);
+            const all = data.getAccounts || [];
             setDepots(all.filter(acc => (acc.account_group?.includes('DEPOT') || (acc.account_name || '').toUpperCase().includes('DEPOT'))));
         } catch (err) { console.error("Error fetching depots:", err); }
     };
 
     const fetchRecords = async () => {
-        setLoading(true);
-        try {
-            const res = await transactionsAPI.depotSales.getAll();
-            const data = Array.isArray(res.data) ? res.data : (res.data.data || []);
-            setList(data.filter(inv => inv.sales_type === 'DEPOT TRANSFER'));
-        } catch (err) { console.error("Fetch records error:", err); }
-        finally { setLoading(false); }
-    };
+    setLoading(true);
+    try {
+        // GraphQL Query for Sync History
+        const query = `
+            query {
+                getDepotReceived {
+                    id date invoice_no
+                    Depot { account_name }
+                }
+            }
+        `;
+        const data = await graphqlAPI(query);
+        setList(data.getDepotReceived || []);
+    } catch (err) { console.error(err); }
+    finally { setLoading(false); }
+};
 
     const fetchSourceStock = async (depotId) => {
         setIsFetchingStock(true);
         try {
-            const res = await transactionsAPI.depotStock.getInventory(depotId);
-            setSourceInventory(res.data.data || []);
+            const query = `
+                query GetInventory($depotId: ID!) {
+                    getDepotInventory(depotId: $depotId) {
+                        id
+                        product_name
+                        depot_stock
+                    }
+                }
+            `;
+            const data = await graphqlAPI(query, { depotId });
+            setSourceInventory(data.getDepotInventory || []);
         } catch (err) { console.error("Source stock fetch error"); }
         finally { setIsFetchingStock(false); }
     };
+    const handleLookupInvoice = async () => {
+    if (!formData.invoice_no) return alert("Please enter an Invoice Number");
+    setIsFetchingInvoice(true);
+    try {
+        // 🔥 BIG WIN: Query for exactly ONE invoice by its number
+        const query = `
+            query {
+                getInvoiceByNo(invoice_no: "${formData.invoice_no}") {
+                    id
+                    is_depot_inwarded
+                    InvoiceDetails {
+                        product_id
+                        total_kgs
+                        Product { product_name }
+                    }
+                }
+            }
+        `;
+        const data = await graphqlAPI(query);
+        const target = data.getInvoiceByNo;
+
+        if (!target) {
+            alert(`Invoice "${formData.invoice_no}" not found.`);
+            setPreviewItems([]);
+            return;
+        }
+
+        if (target.is_depot_inwarded) {
+            alert("❌ This invoice already inwarded.");
+            return;
+        }
+
+        setPreviewItems(target.InvoiceDetails || []);
+    } catch (err) {
+        alert("Error fetching invoice");
+    } finally {
+        setIsFetchingInvoice(false);
+    }
+};
 
     const handleAddNew = () => {
         setViewMode(false);
@@ -119,20 +182,25 @@ export const DepotTransfer = () => {
         try {
             const payload = {
                 sales_type: 'DEPOT TRANSFER',
-                depot_id: formData.from_depot_id,
-                party_id: formData.to_depot_id,
-                vehicle_no: formData.vehicle_no,
-                remarks: formData.remarks,
-                date: formData.transfer_date,
+                depot_id: formData.from_depot_id ? Number(formData.from_depot_id) : null,
+                party_id: formData.to_depot_id ? Number(formData.to_depot_id) : null,
+                vehicle_no: formData.vehicle_no || '',
+                remarks: formData.remarks || '',
+                date: formData.transfer_date || '',
                 Details: formData.items.map(item => ({
-                    product_id: item.product_id,
+                    product_id: Number(item.product_id),
                     total_kgs: parseFloat(item.qty),
                     rate: 0,
                     order_type: 'TRANSFER'
                 }))
             };
 
-            await transactionsAPI.depotSales.create(payload);
+            const mutation = `
+                mutation CreateDepotTransfer($input: DepotSalesHeaderInput) {
+                    createDepotSalesHeader(input: $input) { id }
+                }
+            `;
+            await graphqlAPI(mutation, { input: payload });
             
             alert("Stock Transfer Authorized Successfully!");
             setIsModalOpen(false);
@@ -146,8 +214,19 @@ export const DepotTransfer = () => {
     const handleRowClick = async (item) => {
         try {
             setViewMode(true);
-            const res = await transactionsAPI.depotSales.getOne(item.id);
-            const record = res.data.data;
+            const query = `
+                query GetDepotSalesHeader($id: ID!) {
+                    getDepotSalesHeader(id: $id) {
+                        id depot_id party_id vehicle_no remarks date
+                        DepotSalesDetails {
+                            product_id total_kgs
+                            Product { product_name }
+                        }
+                    }
+                }
+            `;
+            const data = await graphqlAPI(query, { id: item.id });
+            const record = data.getDepotSalesHeader;
 
             await fetchSourceStock(record.depot_id);
 
@@ -521,7 +600,7 @@ export const DepotTransfer = () => {
                 </div>
             )}
 
-            <style jsx>{`
+            <style>{`
                 input[type='number']::-webkit-inner-spin-button, 
                 input[type='number']::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
                 ::-webkit-scrollbar { width: 6px; height: 6px; }

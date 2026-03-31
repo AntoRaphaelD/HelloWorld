@@ -1,18 +1,49 @@
 import axios from 'axios';
 
-// Initialize Axios
+// 1. BASE URL CONFIGURATION
+const BASE_URL = 'http://localhost:5000';
+
+// REST API Instance (Existing)
 const api = axios.create({ 
-  baseURL: 'http://localhost:5000/api',
+  baseURL: `${BASE_URL}/api`,
   headers: {
     'Content-Type': 'application/json'
   }
 });
 
+// GraphQL Endpoint (New)
+const GRAPHQL_URL = `${BASE_URL}/graphql`;
+
 /**
  * ==========================================
- * 1. MASTER API
+ * NEW: GRAPHQL HELPER FUNCTION
  * ==========================================
- * These use the generic factory on the backend
+ * Use this to run any GraphQL Query or Mutation.
+ * Example usage: 
+ * graphqlAPI(`query { getAccounts { id account_name } }`)
+ */
+export const graphqlAPI = async (query, variables = {}) => {
+  try {
+    const response = await axios.post(GRAPHQL_URL, {
+      query,
+      variables,
+    });
+
+    if (response.data.errors) {
+      throw new Error(response.data.errors[0].message);
+    }
+
+    return response.data.data;
+  } catch (error) {
+    console.error("GraphQL Error:", error.message);
+    throw error;
+  }
+};
+
+/**
+ * ==========================================
+ * 1. MASTER API (REST - Existing)
+ * ==========================================
  */
 export const mastersAPI = {
   accounts: {
@@ -68,7 +99,7 @@ export const mastersAPI = {
 
 /**
  * ==========================================
- * 2. TRANSACTIONAL API
+ * 2. TRANSACTIONAL API (REST - Existing)
  * ==========================================
  */
 export const transactionsAPI = {
@@ -118,8 +149,6 @@ export const transactionsAPI = {
   },
 
   // --- DEPOT OPERATIONS ---
-
-  // Sales made from the Depot Hub
   depotSales: {
     getAll: () => api.get('/depot-sales'),
     getOne: (id) => api.get(`/depot-sales/${id}`),
@@ -129,7 +158,6 @@ export const transactionsAPI = {
     bulkDelete: (ids) => api.post('/depot-sales/bulk-delete', { ids })
   },
 
-  // Log of stock arrivals at Depot
   depotReceived: {
     getAll: () => api.get('/depot-received'),
     create: (data) => api.post('/depot-received', data), 
@@ -137,12 +165,10 @@ export const transactionsAPI = {
     bulkDelete: (ids) => api.post('/depot-received/bulk-delete', { ids })
   },
 
-  // Triggering the Inward Sync (Moves Mill Invoice to Depot Stock)
   depotInward: {
     create: (data) => api.post('/depot-inward', data)
   },
 
-  // Live Inventory Calculation for Depot Storage
   depotStock: {
     getInventory: (depotId) => api.get(`/depot-inventory/${depotId}`),
   }
@@ -150,15 +176,13 @@ export const transactionsAPI = {
 
 /**
  * ==========================================
- * 3. REPORTING API
+ * 3. REPORTING API (REST - Existing)
  * ==========================================
  */
 export const reportsAPI = {
-    // Fetches sales registers (sales-with-order or sales-direct)
     getReportData: (reportId, params) => 
         api.get(`/reports/${reportId}`, { params }),
 
-    // Fetches full invoice data for print-outs
     getInvoicePrint: (invoiceNo) =>
         api.get(`/reports/invoice-print/${invoiceNo}`)
 };

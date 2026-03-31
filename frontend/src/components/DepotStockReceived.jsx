@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { mastersAPI, transactionsAPI } from '../service/api';
+import { graphqlAPI } from '../service/api';
 import { 
     Download, Save, Search, Hash, 
     Calendar, Warehouse, FileText, 
@@ -40,89 +40,106 @@ const DepotStockReceived = () => {
     }, []);
 
     const fetchMasters = async () => {
-        try {
-            const res = await mastersAPI.accounts.getAll();
-            const all = res.data.data || res.data || [];
-            const filtered = all.filter(a => {
-                const group = (a.account_group || a.group_name || "").toUpperCase().trim();
-                return group === 'DEBTORS - DEPOT - SALES';
-            });
-            setDepots(filtered);
-        } catch (err) { console.error("Master fetch error", err); }
-    };
+    try {
+        const query = `
+            query {
+                getAccounts { id account_name account_group }
+            }
+        `;
+        const data = await graphqlAPI(query);
+        const all = data.getAccounts || [];
+        // Filter specifically for Depot accounts
+        setDepots(all.filter(a => a.account_group?.includes('DEPOT')));
+    } catch (err) { console.error("Master fetch error", err); }
+};
 
-    const fetchRecords = async () => {
-        setLoading(true);
-        try {
-            const res = await transactionsAPI.depotReceived.getAll();
-            const data = Array.isArray(res.data) ? res.data : (res.data.data || []);
-            setList(data);
-        } catch (err) { console.error("Records fetch error", err); }
-        finally { setLoading(false); }
-    };
+const fetchRecords = async () => {
+    setLoading(true);
+    try {
+        const query = `
+            query {
+                getDepotReceived {
+                    id date invoice_no
+                    Depot { account_name }
+                }
+            }
+        `;
+        const data = await graphqlAPI(query);
+        setList(data.getDepotReceived || []);
+    } catch (err) { console.error("Records fetch error", err); }
+    finally { setLoading(false); }
+};
+
+
 
     const handleLookupInvoice = async () => {
-        if (!formData.invoice_no) 
-            return alert("Please enter an Invoice Number");
+    if (!formData.invoice_no) 
+        return alert("Please enter an Invoice Number");
 
-        setIsFetchingInvoice(true);
+    setIsFetchingInvoice(true);
 
-        try {
-            const res = await transactionsAPI.invoices.getAll();
-            const allInvoices = res.data.data || res.data || [];
-
-            const target = allInvoices.find(inv =>
-                String(inv.invoice_no).trim() === String(formData.invoice_no).trim()
-            );
-
-            if (!target) {
-                alert(`Invoice "${formData.invoice_no}" not found.`);
-                setPreviewItems([]);
-                return;
+    try {
+        // Targeted GraphQL Query for a specific Invoice Number
+        const query = `
+            query {
+                getInvoiceByNo(invoice_no: "${formData.invoice_no}") {
+                    id
+                    invoice_no
+                    is_depot_inwarded
+                    InvoiceDetails {
+                        product_id
+                        total_kgs
+                        Product { product_name }
+                    }
+                }
             }
+        `;
+        
+        const data = await graphqlAPI(query);
+        const target = data.getInvoiceByNo;
 
-            if (target.is_depot_inwarded) {
-                alert("❌ This invoice already inwarded to depot.");
-                return;
-            }
-
-            const items = target.InvoiceDetails || [];
-
-            if (!items.length) {
-                alert("Invoice found but no items.");
-                return;
-            }
-
-            setPreviewItems(items);
-
-        } catch (err) {
-            console.error(err);
-            alert("Error fetching invoice");
-        } finally {
-            setIsFetchingInvoice(false);
+        if (!target) {
+            alert(`Invoice "${formData.invoice_no}" not found.`);
+            setPreviewItems([]);
+            return;
         }
-    };
+
+        if (target.is_depot_inwarded) {
+            alert("❌ This invoice is already inwarded to a depot.");
+            return;
+        }
+
+        setPreviewItems(target.InvoiceDetails || []);
+
+    } catch (err) {
+        console.error(err);
+        alert("Error fetching invoice details");
+    } finally {
+        setIsFetchingInvoice(false);
+    }
+};
 
     const handleSave = async () => {
-        if (!formData.depot_id) return alert("Select a Depot");
-        setSubmitLoading(true);
-        try {
-            const payload = { 
-                invoice_no: formData.invoice_no,
-                depot_id: formData.depot_id,
-                date: formData.date 
-            };
-            await transactionsAPI.depotInward.create(payload);
-            window.dispatchEvent(new Event("depotStockUpdated"));
-            setIsModalOpen(false);
-            fetchRecords(); 
-            alert("Stock Inwarded Successfully!");
-        } catch (err) { 
-            alert("Error: " + (err.response?.data?.error || "Check Connection")); 
-        } finally { 
-            setSubmitLoading(false); 
-        }
-    };
+    if (!formData.depot_id || !previewItems.length) return alert("Select Depot and Fetch a valid Invoice");
+    setSubmitLoading(true);
+    try {
+        const payload = { 
+            invoice_no: formData.invoice_no,
+            depot_id: formData.depot_id,
+            date: formData.date 
+        };
+        // Keep REST for the actual "Command" action
+        await transactionsAPI.depotInward.create(payload);
+        
+        setIsModalOpen(false);
+        fetchRecords(); // Refresh the list using GraphQL
+        alert("Stock Inwarded Successfully!");
+    } catch (err) { 
+        alert("Error: " + (err.response?.data?.error || "Sync failed")); 
+    } finally { 
+        setSubmitLoading(false); 
+    }
+};
 
     const handleRowClick = (item) => {
         if (isSelectionMode) {

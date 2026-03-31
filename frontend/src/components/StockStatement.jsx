@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { mastersAPI } from '../service/api';
+import { graphqlAPI } from '../service/api';
 
 const StockStatement = () => {
   const [report, setReport] = useState([]);
@@ -8,9 +8,15 @@ const StockStatement = () => {
   useEffect(() => {
     // Logic: Fetches the current calculated stock per product
     const loadStock = async () => {
-      const res = await mastersAPI.products.getAll(); // Fetching products
-      // In a real system, the backend would aggregate the kgs/bales
-      setReport(res.data.data);
+      const query = `
+        query {
+          getProducts {
+            id product_code product_name mill_stock
+          }
+        }
+      `;
+      const data = await graphqlAPI(query);
+      setReport(Array.isArray(data.getProducts) ? data.getProducts : []);
     };
     loadStock();
   }, [date]);

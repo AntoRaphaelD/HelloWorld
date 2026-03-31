@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { mastersAPI, transactionsAPI } from '../service/api';
+import { graphqlAPI } from '../service/api';
 import { Plus, Trash, Save, Loader2 } from 'lucide-react';
 
 const OrderConfirmation = () => {
@@ -19,15 +19,18 @@ const OrderConfirmation = () => {
   useEffect(() => {
     const fetchMasters = async () => {
       try {
-        const [a, b, p] = await Promise.all([
-          mastersAPI.accounts.getAll(),
-          mastersAPI.brokers.getAll(),
-          mastersAPI.products.getAll()
-        ]);
+        const query = `
+          query {
+            getAccounts { id account_code account_name }
+            getBrokers { id broker_name }
+            getProducts { id product_name }
+          }
+        `;
+        const data = await graphqlAPI(query);
         setDropdowns({ 
-          accounts: a.data.data || [], 
-          brokers: b.data.data || [], 
-          products: p.data.data || [] 
+          accounts: data.getAccounts || [], 
+          brokers: data.getBrokers || [], 
+          products: data.getProducts || [] 
         });
       } catch (err) {
         console.error("Fetch Masters Error:", err);
@@ -43,10 +46,14 @@ const OrderConfirmation = () => {
 
     // Prepare payload with sanitized data types
     const payload = { 
-      ...header, 
-      // Sequelize expects 'Details' (Capital D) based on your model alias
+      order_no: header.order_no || '',
+      date: header.date || '',
+      place: header.place || '',
+      account_id: header.account_id ? Number(header.account_id) : null,
+      broker_id: header.broker_id ? Number(header.broker_id) : null,
+      is_with_order: Boolean(header.is_with_order),
       Details: details.map(d => ({
-        product_id: d.product_id,
+        product_id: Number(d.product_id),
         qty: parseFloat(d.qty) || 0,
         rate_cr: parseFloat(d.rate_cr) || 0,
         bag_wt: parseFloat(d.bag_wt) || 0
@@ -56,8 +63,13 @@ const OrderConfirmation = () => {
     console.log("🚀 SUBMITTING ORDER PAYLOAD:", payload);
 
     try {
-      const response = await transactionsAPI.orders.create(payload);
-      console.log("✅ SERVER RESPONSE:", response.data);
+      const mutation = `
+        mutation CreateOrder($input: OrderHeaderInput) {
+          createOrderHeader(input: $input) { id }
+        }
+      `;
+      const response = await graphqlAPI(mutation, { input: payload });
+      console.log("✅ SERVER RESPONSE:", response);
       alert("Order Saved Successfully");
       
       // Reset form
