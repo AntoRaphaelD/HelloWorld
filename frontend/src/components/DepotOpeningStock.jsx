@@ -43,26 +43,43 @@ export const DepotOpeningStock = () => {
     }, []);
 
     const fetchMasters = async () => {
-        try {
-            const [dep, pro] = await Promise.all([
-                mastersAPI.accounts.getAll({ account_group: 'Depot' }),
-                mastersAPI.products.getAll()
-            ]);
-            setDepots(dep.data.data || dep.data || []);
-            setProducts(pro.data.data || pro.data || []);
-        } catch (err) { console.error("Master Data Error", err); }
-    };
+    try {
+        const [accountsRes, productsRes] = await Promise.all([
+            mastersAPI.accounts.getAll(),
+            mastersAPI.products.getAll()
+        ]);
+        const data = {
+            getAccounts: accountsRes.data.data || [],
+            getProducts: productsRes.data.data || []
+        };
+        
+        // Filter for Depots from the combined account list
+        const allAccounts = data.getAccounts || [];
+        const depotList = allAccounts.filter(acc => 
+            acc.account_group?.includes('DEPOT')
+        );
+        
+        setDepots(depotList);
+        setProducts(data.getProducts || []);
+    } catch (err) { 
+        console.error("Master Data Error", err); 
+    }
+};
 
-    const fetchRecords = async () => {
-        setLoading(true);
-        try {
-            // Fetching opening stock logs
-            const res = await transactionsAPI.depotReceived.getAll();
-            const data = Array.isArray(res.data) ? res.data : (res.data.data || []);
-            setList(data.filter(item => item.type === 'OPENING' || item.is_opening === true));
-        } catch (err) { console.error("Fetch Error", err); }
-        finally { setLoading(false); }
-    };
+const fetchRecords = async () => {
+    setLoading(true);
+    try {
+        const data = await transactionsAPI.depotReceived.getAll();
+        const allLogs = data.data.data || [];
+        
+        // Filter only the Opening Stock entries
+        setList(allLogs.filter(item => item.type === 'OPENING'));
+    } catch (err) { 
+        console.error("Fetch Error", err); 
+    } finally { 
+        setLoading(false); 
+    }
+};
 
     // --- Logic: Search & Pagination ---
     const processedData = useMemo(() => {
@@ -87,18 +104,30 @@ export const DepotOpeningStock = () => {
         setIsModalOpen(true);
     };
 
-    const handleRowClick = (item) => {
-        if (isSelectionMode) {
-            setSelectedIds(prev => prev.includes(item.id) ? prev.filter(i => i !== item.id) : [...prev, item.id]);
-            return;
-        }
+    const handleRowClick = async (item) => {
+    if (isSelectionMode) {
+        setSelectedIds(prev => prev.includes(item.id) ? prev.filter(i => i !== item.id) : [...prev, item.id]);
+        return;
+    }
+    
+    setLoading(true);
+    try {
+        // Fetch full log details from REST
+        const res = await transactionsAPI.depotReceived.getOne(item.id);
+        const fullData = res.data.data || res.data;
+        
         setFormData({
-            ...item,
-            depot_id: item.depot_id?.toString(),
-            product_id: item.product_id?.toString()
+            ...fullData,
+            depot_id: fullData.depot_id?.toString(),
+            product_id: fullData.product_id?.toString()
         });
         setIsModalOpen(true);
-    };
+    } catch (err) {
+        alert("Error loading details");
+    } finally {
+        setLoading(false);
+    }
+};
 
     const handleInitialize = async (e) => {
         if (e) e.preventDefault();
@@ -357,7 +386,7 @@ export const DepotOpeningStock = () => {
                 </div>
             )}
 
-            <style jsx>{`
+            <style>{`
                 ::-webkit-scrollbar { width: 5px; height: 5px; }
                 ::-webkit-scrollbar-track { background: transparent; }
                 ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }

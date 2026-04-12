@@ -69,20 +69,20 @@ const RG1Production = () => {
 
     const fetchMasters = async () => {
         try {
-            const [pr, pk] = await Promise.all([
+            const [productsRes, packingTypesRes] = await Promise.all([
                 mastersAPI.products.getAll(),
                 mastersAPI.packingTypes.getAll()
             ]);
-            setProducts(pr?.data?.data || []);
-            setPackingTypes(pk?.data?.data || []);
+            setProducts(Array.isArray(productsRes.data.data) ? productsRes.data.data : []);
+            setPackingTypes(Array.isArray(packingTypesRes.data.data) ? packingTypesRes.data.data : []);
         } catch (err) { console.error(err); }
     };
 
     const fetchRecords = async () => {
         setLoading(true);
         try {
-            const res = await transactionsAPI.production.getAll();
-            setList(res?.data?.data || []);
+            const data = await transactionsAPI.production.getAll();
+            setList(Array.isArray(data.data.data) ? data.data.data : []);
         } catch (err) { setList([]); } 
         finally { setLoading(false); }
     };

@@ -34,10 +34,9 @@ const PackingTypeMaster = () => {
     const fetchRecords = async () => {
         setLoading(true);
         try {
-            const res = await mastersAPI.packingTypes.getAll();
-            const rawData = res?.data?.data || res?.data || [];
-            setList(Array.isArray(rawData) ? rawData : []);
-        } catch (err) { setList([]); } finally { setLoading(false); }
+            const data = await mastersAPI.packingTypes.getAll();
+            setList(Array.isArray(data.data.data) ? data.data.data : []);
+        } catch (err) { console.error(err); setList([]); } finally { setLoading(false); }
     };
 
     const filteredData = useMemo(() => {
@@ -79,7 +78,6 @@ const PackingTypeMaster = () => {
             setIsModalOpen(true);
         }
     };
-
     const handleBulkDelete = async () => {
         if (selectedIds.length === 0) return;
         if (window.confirm(`Permanently delete ${selectedIds.length} packing types?`)) {
@@ -98,10 +96,11 @@ const PackingTypeMaster = () => {
         if (!formData.packing_type?.trim()) return alert("Packing Type name is required");
         setSubmitLoading(true);
         try {
+            const payload = { packing_type: formData.packing_type };
             if (formData.id && list.some(item => item.id === formData.id)) {
-                await mastersAPI.packingTypes.update(formData.id, formData);
+                await mastersAPI.packingTypes.update(formData.id, payload);
             } else {
-                await mastersAPI.packingTypes.create(formData);
+                await mastersAPI.packingTypes.create(payload);
             }
             fetchRecords();
             setIsModalOpen(false);

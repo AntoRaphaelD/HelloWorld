@@ -1,8 +1,11 @@
 import axios from 'axios';
 
-// Initialize Axios
+// 1. BASE URL CONFIGURATION
+const BASE_URL = 'http://localhost:5000';
+
+// REST API Instance (Existing)
 const api = axios.create({ 
-  baseURL: 'http://localhost:5000/api',
+  baseURL: `${BASE_URL}/api`,
   headers: {
     'Content-Type': 'application/json'
   }
@@ -10,13 +13,13 @@ const api = axios.create({
 
 /**
  * ==========================================
- * 1. MASTER API
+ * 1. MASTER API (REST - Existing)
  * ==========================================
- * These use the generic factory on the backend
  */
 export const mastersAPI = {
   accounts: {
     getAll: (params) => api.get('/accounts', { params }),
+    getById: (id) => api.get(`/accounts/${id}`),
     create: (data) => api.post('/accounts', data),
     update: (id, data) => api.put(`/accounts/${id}`, data),
     delete: (id) => api.delete(`/accounts/${id}`),
@@ -24,6 +27,7 @@ export const mastersAPI = {
   },
   brokers: {
     getAll: () => api.get('/brokers'),
+    getById: (id) => api.get(`/brokers/${id}`),
     create: (data) => api.post('/brokers', data),
     update: (id, data) => api.put(`/brokers/${id}`, data),
     delete: (id) => api.delete(`/brokers/${id}`),
@@ -31,6 +35,7 @@ export const mastersAPI = {
   },
   products: {
     getAll: () => api.get('/products'),
+    getById: (id) => api.get(`/products/${id}`),
     create: (data) => api.post('/products', data),
     update: (id, data) => api.put(`/products/${id}`, data),
     delete: (id) => api.delete(`/products/${id}`),
@@ -38,6 +43,7 @@ export const mastersAPI = {
   },
   transports: {
     getAll: () => api.get('/transports'),
+    getById: (id) => api.get(`/transports/${id}`),
     create: (data) => api.post('/transports', data),
     update: (id, data) => api.put(`/transports/${id}`, data),
     delete: (id) => api.delete(`/transports/${id}`),
@@ -45,6 +51,7 @@ export const mastersAPI = {
   },
   tariffs: {
     getAll: () => api.get('/tariffs'),
+    getById: (id) => api.get(`/tariffs/${id}`),
     create: (data) => api.post('/tariffs', data),
     update: (id, data) => api.put(`/tariffs/${id}`, data),
     delete: (id) => api.delete(`/tariffs/${id}`),
@@ -52,6 +59,7 @@ export const mastersAPI = {
   },
   packingTypes: {
     getAll: () => api.get('/packing-types'),
+    getById: (id) => api.get(`/packing-types/${id}`),
     create: (data) => api.post('/packing-types', data),
     update: (id, data) => api.put(`/packing-types/${id}`, data),
     delete: (id) => api.delete(`/packing-types/${id}`),
@@ -59,6 +67,7 @@ export const mastersAPI = {
   },
   invoiceTypes: {
     getAll: () => api.get('/invoice-types'),
+    getById: (id) => api.get(`/invoice-types/${id}`),
     create: (data) => api.post('/invoice-types', data),
     update: (id, data) => api.put(`/invoice-types/${id}`, data),
     delete: (id) => api.delete(`/invoice-types/${id}`),
@@ -68,13 +77,14 @@ export const mastersAPI = {
 
 /**
  * ==========================================
- * 2. TRANSACTIONAL API
+ * 2. TRANSACTIONAL API (REST - Existing)
  * ==========================================
  */
 export const transactionsAPI = {
   // Mill Orders
   orders: {
     getAll: () => api.get('/orders'),
+    getById: (id) => api.get(`/orders/${id}`),
     create: (data) => api.post('/orders', data),
     update: (id, data) => api.put(`/orders/${id}`, data),
     delete: (id) => api.delete(`/orders/${id}`),
@@ -84,7 +94,9 @@ export const transactionsAPI = {
   // Mill Production (RG1)
   production: {
     getAll: () => api.get('/production'),
+    getById: (id) => api.get(`/production/${id}`),
     create: (data) => api.post('/production', data), 
+    update: (id, data) => api.put(`/production/${id}`, data),
     delete: (id) => api.delete(`/production/${id}`),
     bulkDelete: (ids) => api.post('/production/bulk-delete', { ids })
   },
@@ -103,6 +115,7 @@ export const transactionsAPI = {
   // Mill Sales WITHOUT Order (Direct Sales)
   directInvoices: {
     getAll: () => api.get('/direct-invoices'),
+    getById: (id) => api.get(`/direct-invoices/${id}`),
     create: (data) => api.post('/direct-invoices', data),
     update: (id, data) => api.put(`/direct-invoices/${id}`, data),
     delete: (id) => api.delete(`/direct-invoices/${id}`)
@@ -118,8 +131,6 @@ export const transactionsAPI = {
   },
 
   // --- DEPOT OPERATIONS ---
-
-  // Sales made from the Depot Hub
   depotSales: {
     getAll: () => api.get('/depot-sales'),
     getOne: (id) => api.get(`/depot-sales/${id}`),
@@ -129,20 +140,19 @@ export const transactionsAPI = {
     bulkDelete: (ids) => api.post('/depot-sales/bulk-delete', { ids })
   },
 
-  // Log of stock arrivals at Depot
   depotReceived: {
     getAll: () => api.get('/depot-received'),
+    getOne: (id) => api.get(`/depot-received/${id}`),
     create: (data) => api.post('/depot-received', data), 
+    update: (id, data) => api.put(`/depot-received/${id}`, data),
     delete: (id) => api.delete(`/depot-received/${id}`),
     bulkDelete: (ids) => api.post('/depot-received/bulk-delete', { ids })
   },
 
-  // Triggering the Inward Sync (Moves Mill Invoice to Depot Stock)
   depotInward: {
     create: (data) => api.post('/depot-inward', data)
   },
 
-  // Live Inventory Calculation for Depot Storage
   depotStock: {
     getInventory: (depotId) => api.get(`/depot-inventory/${depotId}`),
   }
@@ -150,15 +160,13 @@ export const transactionsAPI = {
 
 /**
  * ==========================================
- * 3. REPORTING API
+ * 3. REPORTING API (REST - Existing)
  * ==========================================
  */
 export const reportsAPI = {
-    // Fetches sales registers (sales-with-order or sales-direct)
     getReportData: (reportId, params) => 
         api.get(`/reports/${reportId}`, { params }),
 
-    // Fetches full invoice data for print-outs
     getInvoicePrint: (invoiceNo) =>
         api.get(`/reports/invoice-print/${invoiceNo}`)
 };

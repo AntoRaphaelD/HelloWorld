@@ -60,21 +60,20 @@ const ProductMaster = () => {
     const fetchRecords = async () => {
         setLoading(true);
         try {
-            const res = await mastersAPI.products.getAll();
-            const data = res?.data?.data || res?.data || [];
-            setList(Array.isArray(data) ? data : []);
-        } catch (err) { setList([]); } 
+            const data = await mastersAPI.products.getAll();
+            setList(Array.isArray(data.data.data) ? data.data.data : []);
+        } catch (err) { console.error(err); setList([]); } 
         finally { setLoading(false); }
     };
 
     const fetchLookups = async () => {
         try {
-            const [tariffRes, packingRes] = await Promise.all([
+            const [tariffData, packingData] = await Promise.all([
                 mastersAPI.tariffs.getAll(),
                 mastersAPI.packingTypes.getAll()
             ]);
-            setTariffs(tariffRes?.data?.data || tariffRes?.data || []);
-            setPackingTypes(packingRes?.data?.data || packingRes?.data || []);
+            setTariffs(Array.isArray(tariffData.data.data) ? tariffData.data.data : []);
+            setPackingTypes(Array.isArray(packingData.data.data) ? packingData.data.data : []);
         } catch (err) { console.error(err); }
     };
 
@@ -117,18 +116,18 @@ const ProductMaster = () => {
         setFormData({ ...emptyState, product_code: (maxCode + 1).toString() });
         setIsModalOpen(true);
     };
-
-    const handleRowClick = (item) => {
-        if (isSelectionMode) {
-            setSelectedIds(prev =>
-                prev.includes(item.id) ? prev.filter(id => id !== item.id) : [...prev, item.id]
-            );
-        } else {
-            setFormData({ ...item });
-            setIsModalOpen(true);
-        }
-    };
-
+const handleRowClick = (item) => {
+    if (isSelectionMode) {
+        setSelectedIds(prev =>
+            prev.includes(item.id)
+                ? prev.filter(id => id !== item.id)
+                : [...prev, item.id]
+        );
+    } else {
+        setFormData({ ...item });
+        setIsModalOpen(true);
+    }
+};
     const handleBulkDelete = async () => {
         if (selectedIds.length === 0) return;
         if (window.confirm(`Permanently delete ${selectedIds.length} products?`)) {
@@ -141,18 +140,52 @@ const ProductMaster = () => {
         }
     };
 
-    const handleSave = async (e) => {
-        e.preventDefault();
-        if (!formData.product_name?.trim()) return alert("Product Name is required");
-        setSubmitLoading(true);
-        try {
-            if (formData.id) await mastersAPI.products.update(formData.id, formData);
-            else await mastersAPI.products.create(formData);
-            setIsModalOpen(false);
-            fetchRecords();
-        } catch (err) { alert("Error saving."); }
-        finally { setSubmitLoading(false); }
-    };
+const handleSave = async (e) => {
+    e.preventDefault();
+    setSubmitLoading(true);
+
+    try {
+        const payload = {
+            product_code: formData.product_code || '',
+            product_name: formData.product_name || '',
+            short_description: formData.short_description || '',
+            commodity: formData.commodity || '',
+            commodity_code: formData.commodity_code || '',
+            packing_type: formData.packing_type || '',
+            fibre: formData.fibre || '',
+            wt_per_cone: Number(formData.wt_per_cone) || 0,
+            charity_rs: Number(formData.charity_rs) || 0,
+            no_of_cones_per_pack: parseInt(formData.no_of_cones_per_pack, 10) || 0,
+            other_receipt: Number(formData.other_receipt) || 0,
+            pack_nett_wt: Number(formData.pack_nett_wt) || 0,
+            tariff_sub_head: formData.tariff_sub_head || '',
+            printing_tariff_sub_head_no: formData.printing_tariff_sub_head_no || '',
+            printing_tariff_desc: formData.printing_tariff_desc || '',
+            product_type: formData.product_type || '',
+            spinning_count_name: formData.spinning_count_name || '',
+            converted_factor_40s: Number(formData.converted_factor_40s) || 0,
+            actual_count: formData.actual_count || '',
+            roundoff: Boolean(formData.roundoff),
+            mill_stock: Number(formData.mill_stock) || 0
+        };
+
+        if (formData.id) {
+            await mastersAPI.products.update(formData.id, payload);
+
+        } else {
+            await mastersAPI.products.create(payload);
+        }
+
+        setIsModalOpen(false);
+        fetchRecords();
+
+    } catch (err) {
+        alert("Error saving.");
+        console.error(err);
+    } finally {
+        setSubmitLoading(false);
+    }
+};
 
     const FormLabel = ({ children }) => (
         <label className="text-right text-base text-slate-700 pr-3 font-semibold self-center whitespace-nowrap">

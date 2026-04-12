@@ -8,9 +8,8 @@ const StockStatement = () => {
   useEffect(() => {
     // Logic: Fetches the current calculated stock per product
     const loadStock = async () => {
-      const res = await mastersAPI.products.getAll(); // Fetching products
-      // In a real system, the backend would aggregate the kgs/bales
-      setReport(res.data.data);
+      const data = await mastersAPI.products.getAll();
+      setReport(Array.isArray(data.data.data) ? data.data.data : []);
     };
     loadStock();
   }, [date]);

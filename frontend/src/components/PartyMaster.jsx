@@ -21,16 +21,12 @@ const PartyMaster = () => {
 
   const fetchAll = async () => {
     try {
-      const [pRes, bRes] = await Promise.all([
-        mastersAPI.accounts.getAll(), 
+      const [accountsRes, brokersRes] = await Promise.all([
+        mastersAPI.accounts.getAll(),
         mastersAPI.brokers.getAll()
       ]);
-
-      const partyData = pRes.data.data || pRes.data;
-      const brokerData = bRes.data.data || bRes.data;
-
-      setList(Array.isArray(partyData) ? partyData : []);
-      setBrokers(Array.isArray(brokerData) ? brokerData : []);
+      setList(Array.isArray(accountsRes.data.data) ? accountsRes.data.data : []);
+      setBrokers(Array.isArray(brokersRes.data.data) ? brokersRes.data.data : []);
     } catch (err) {
       console.error("Failed to fetch master data", err);
     }
@@ -58,7 +54,6 @@ const PartyMaster = () => {
   const handleSave = async (e) => {
     e.preventDefault();
     try {
-      // Create payload ensuring broker_id is sent as null if empty
       const payload = { ...form, broker_id: form.broker_id || null };
       
       if (editingId) {
@@ -113,7 +108,7 @@ const PartyMaster = () => {
                   <td className="p-2 border-r font-bold uppercase">{i.account_name}</td>
                   <td className="p-2 border-r uppercase text-gray-600">{i.place}</td>
                   <td className="p-2 text-blue-800 font-semibold italic">
-                    {i.Broker?.broker_name || 'DIRECT'}
+                    {brokers.find(b => String(b.id) === String(i.broker_id))?.broker_name || 'DIRECT'}
                   </td>
                 </tr>
               ))}

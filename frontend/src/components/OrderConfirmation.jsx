@@ -19,15 +19,15 @@ const OrderConfirmation = () => {
   useEffect(() => {
     const fetchMasters = async () => {
       try {
-        const [a, b, p] = await Promise.all([
+        const [accountsRes, brokersRes, productsRes] = await Promise.all([
           mastersAPI.accounts.getAll(),
           mastersAPI.brokers.getAll(),
           mastersAPI.products.getAll()
         ]);
         setDropdowns({ 
-          accounts: a.data.data || [], 
-          brokers: b.data.data || [], 
-          products: p.data.data || [] 
+          accounts: accountsRes.data.data || [], 
+          brokers: brokersRes.data.data || [], 
+          products: productsRes.data.data || [] 
         });
       } catch (err) {
         console.error("Fetch Masters Error:", err);
@@ -43,10 +43,14 @@ const OrderConfirmation = () => {
 
     // Prepare payload with sanitized data types
     const payload = { 
-      ...header, 
-      // Sequelize expects 'Details' (Capital D) based on your model alias
+      order_no: header.order_no || '',
+      date: header.date || '',
+      place: header.place || '',
+      account_id: header.account_id ? Number(header.account_id) : null,
+      broker_id: header.broker_id ? Number(header.broker_id) : null,
+      is_with_order: Boolean(header.is_with_order),
       Details: details.map(d => ({
-        product_id: d.product_id,
+        product_id: Number(d.product_id),
         qty: parseFloat(d.qty) || 0,
         rate_cr: parseFloat(d.rate_cr) || 0,
         bag_wt: parseFloat(d.bag_wt) || 0
@@ -56,8 +60,16 @@ const OrderConfirmation = () => {
     console.log("🚀 SUBMITTING ORDER PAYLOAD:", payload);
 
     try {
-      const response = await transactionsAPI.orders.create(payload);
-      console.log("✅ SERVER RESPONSE:", response.data);
+      const response = await transactionsAPI.orders.create({
+        order_no: payload.order_no,
+        date: payload.date,
+        place: payload.place,
+        party_id: payload.account_id,
+        broker_id: payload.broker_id,
+        is_with_order: payload.is_with_order,
+        OrderDetails: payload.Details
+      });
+      console.log("✅ SERVER RESPONSE:", response);
       alert("Order Saved Successfully");
       
       // Reset form

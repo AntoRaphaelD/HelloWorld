@@ -58,22 +58,22 @@ const SalesWithoutOrder = () => {
 
     const fetchMasters = async () => {
         try {
-            const [p, b, pr] = await Promise.all([
+            const [accountsRes, brokersRes, productsRes] = await Promise.all([
                 mastersAPI.accounts.getAll(),
                 mastersAPI.brokers.getAll(),
                 mastersAPI.products.getAll()
             ]);
-            setParties(p?.data?.data || []);
-            setBrokers(b?.data?.data || []);
-            setProducts(pr?.data?.data || []);
+            setParties(accountsRes.data.data || []);
+            setBrokers(brokersRes.data.data || []);
+            setProducts(productsRes.data.data || []);
         } catch (err) { console.error(err); }
     };
 
     const fetchRecords = async () => {
         setLoading(true);
         try {
-            const res = await transactionsAPI.directInvoices.getAll();
-            setList(res?.data?.data || []);
+            const data = await transactionsAPI.directInvoices.getAll();
+            setList(data.data.data || []);
         } catch (err) { setList([]); } 
         finally { setLoading(false); }
     };
@@ -141,9 +141,30 @@ const SalesWithoutOrder = () => {
         
         setSubmitLoading(true);
         try {
-            const payload = { 
-                ...formData, 
-                Details: gridRows.filter(r => r.product_id) 
+            const payload = {
+                order_no: formData.order_no || '',
+                date: formData.date || '',
+                party_id: Number(formData.party_id),
+                broker_id: formData.broker_id ? Number(formData.broker_id) : null,
+                place: formData.place || '',
+                vehicle_no: formData.vehicle_no || '',
+                is_cancelled: Boolean(formData.is_cancelled),
+                status: formData.status || 'OPEN',
+                final_invoice_value: Number(formData.final_invoice_value) || 0,
+                is_depot_inwarded: Boolean(formData.is_depot_inwarded),
+                depot_id: formData.depot_id ? Number(formData.depot_id) : null,
+                DirectInvoiceDetails: gridRows
+                    .filter(r => r.product_id)
+                    .map(r => ({
+                        product_id: Number(r.product_id),
+                        qty: Number(r.qty) || 0,
+                        bag_wt: Number(r.bag_wt) || 0,
+                        rate_cr: Number(r.rate_cr) || 0,
+                        rate_imm: Number(r.rate_imm) || 0,
+                        rate_per: Number(r.rate_per) || 0,
+                        packing_type: r.packing_type || '',
+                        packs: Number(r.packs) || 0
+                    }))
             };
             if (formData.id) {
                 await transactionsAPI.directInvoices.update(formData.id, payload);

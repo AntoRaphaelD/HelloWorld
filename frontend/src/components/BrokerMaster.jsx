@@ -35,13 +35,17 @@ const BrokerMaster = () => {
     useEffect(() => { fetchRecords(); }, []);
 
     const fetchRecords = async () => {
-        setLoading(true);
-        try {
-            const res = await mastersAPI.brokers.getAll();
-            const rawData = res?.data?.data || res?.data || [];
-            setList(Array.isArray(rawData) ? rawData : []);
-        } catch (err) { setList([]); } finally { setLoading(false); }
-    };
+    setLoading(true);
+    try {
+        const response = await mastersAPI.brokers.getAll();
+        setList(response.data.data || []); 
+    } catch (err) { 
+        console.error("REST Fetch Error:", err);
+        setList([]); 
+    } finally { 
+        setLoading(false); 
+    }
+};
 
     const filteredData = useMemo(() => {
         let result = Array.isArray(list) ? [...list] : [];
@@ -68,16 +72,25 @@ const BrokerMaster = () => {
         setIsModalOpen(true);
     };
 
-    const handleRowClick = (item) => {
-        if (isSelectionMode) {
-            setSelectedIds(prev => 
-                prev.includes(item.id) ? prev.filter(id => id !== item.id) : [...prev, item.id]
-            );
-        } else {
-            setFormData({ ...item });
+    const handleRowClick = async (item) => {
+    if (isSelectionMode) {
+        setSelectedIds(prev => 
+            prev.includes(item.id) ? prev.filter(id => id !== item.id) : [...prev, item.id]
+        );
+    } else {
+        setLoading(true);
+        try {
+            const data = await mastersAPI.brokers.getById(item.id);
+            const fullData = data.data.data;
+            setFormData({ ...fullData });
             setIsModalOpen(true);
+        } catch (err) {
+            alert("Error loading broker details.");
+        } finally {
+            setLoading(false);
         }
-    };
+    }
+};
 
     const handleBulkDelete = async () => {
         if (selectedIds.length === 0) return;
@@ -97,8 +110,12 @@ const BrokerMaster = () => {
         if (!formData.broker_name?.trim()) return alert("Broker name is required");
         setSubmitLoading(true);
         try {
-            if (formData.id) await mastersAPI.brokers.update(formData.id, formData);
-            else await mastersAPI.brokers.create(formData);
+            const { id, ...payload } = formData;
+            if (formData.id) {
+                await mastersAPI.brokers.update(formData.id, payload);
+            } else {
+                await mastersAPI.brokers.create(payload);
+            }
             fetchRecords();
             setIsModalOpen(false);
         } catch (err) { alert("Error saving."); } finally { setSubmitLoading(false); }

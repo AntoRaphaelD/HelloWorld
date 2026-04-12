@@ -40,10 +40,9 @@ const TariffMaster = () => {
     const fetchRecords = async () => {
         setLoading(true);
         try {
-            const res = await mastersAPI.tariffs.getAll();
-            const rawData = res?.data?.data || res?.data || [];
-            setList(Array.isArray(rawData) ? rawData : []);
-        } catch (err) { setList([]); } finally { setLoading(false); }
+            const data = await mastersAPI.tariffs.getAll();
+            setList(Array.isArray(data.data.data) ? data.data.data : []);
+        } catch (err) { console.error(err); setList([]); } finally { setLoading(false); }
     };
 
     const filteredData = useMemo(() => {
@@ -111,8 +110,21 @@ const TariffMaster = () => {
         e.preventDefault();
         setSubmitLoading(true);
         try {
-            if (formData.id) await mastersAPI.tariffs.update(formData.id, formData);
-            else await mastersAPI.tariffs.create(formData);
+            const payload = {
+                tariff_code: formData.tariff_code,
+                tariff_name: formData.tariff_name,
+                tariff_no: formData.tariff_no,
+                product_type: formData.product_type,
+                commodity: formData.commodity,
+                fibre: formData.fibre,
+                yarn_type: formData.yarn_type
+            };
+
+            if (formData.id) {
+                await mastersAPI.tariffs.update(formData.id, payload);
+            } else {
+                await mastersAPI.tariffs.create(payload);
+            }
             fetchRecords();
             setIsModalOpen(false);
         } catch (err) { alert("Error saving."); } finally { setSubmitLoading(false); }

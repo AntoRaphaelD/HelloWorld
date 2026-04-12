@@ -59,16 +59,16 @@ const DespatchEntry = () => {
     const fetchRecords = async () => {
         setLoading(true);
         try {
-            const res = await transactionsAPI.despatch.getAll();
-            setList(res?.data?.data || []);
-        } catch (err) { setList([]); } 
+            const data = await transactionsAPI.despatch.getAll();
+            setList(data.data.data || []);
+        } catch (err) { console.error(err); setList([]); } 
         finally { setLoading(false); }
     };
 
     const fetchTransports = async () => {
         try {
-            const res = await mastersAPI.transports.getAll();
-            setTransports(res?.data?.data || []);
+            const data = await mastersAPI.transports.getAll();
+            setTransports(data.data.data || []);
         } catch (err) { console.error(err); }
     };
 
@@ -129,8 +129,27 @@ const DespatchEntry = () => {
         };
 
         try {
-            if (formData.id) await transactionsAPI.despatch.update(formData.id, payload);
-            else await transactionsAPI.despatch.create(payload);
+            const input = {
+                load_no: payload.load_no || '',
+                load_date: payload.load_date || '',
+                transport_id: payload.transport_id ? Number(payload.transport_id) : null,
+                lr_no: payload.lr_no || '',
+                lr_date: payload.lr_date || '',
+                vehicle_no: payload.vehicle_no || '',
+                delivery: payload.delivery || '',
+                insurance_no: payload.insurance_no || '',
+                in_time: finalIn,
+                out_time: finalOut,
+                no_of_bags: Number(payload.no_of_bags) || 0,
+                freight: Number(payload.freight) || 0,
+                freight_per_bag: Number(calculatedFreightPerBag) || 0
+            };
+
+            if (formData.id) {
+                await transactionsAPI.despatch.update(formData.id, input);
+            } else {
+                await transactionsAPI.despatch.create(input);
+            }
             fetchRecords();
             setIsModalOpen(false);
         } catch (err) { alert("Error saving."); } 

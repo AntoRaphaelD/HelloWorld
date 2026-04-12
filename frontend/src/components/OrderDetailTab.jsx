@@ -1,20 +1,31 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { mastersAPI } from '../service/api';
 
-const OrderDetailTab = ({ details = [], products = [] }) => {
+const OrderDetailTab = ({ details = [], onProductSelect }) => {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [suggestions, setSuggestions] = useState([]);
+
+  const handleProductSearch = async (val) => {
+    setSearchQuery(val);
+    if (val.length < 2) return setSuggestions([]);
+
+    try {
+      const data = await mastersAPI.products.getAll();
+      const products = data.data.data || [];
+      const filtered = products.filter((product) =>
+        String(product.product_name || '').toLowerCase().includes(val.toLowerCase())
+      );
+      setSuggestions(filtered);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   return (
     <div className="bg-white border-2 border-yellow-500 overflow-hidden shadow-inner min-h-[200px]">
       <table className="w-full text-[11px] text-left border-collapse">
         <thead className="bg-blue-100 border-b font-bold uppercase text-blue-900 sticky top-0">
-          <tr>
-            <th className="p-2 border-r w-8"></th>
-            <th className="p-2 border-r">Product Description</th>
-            <th className="p-2 border-r">Rate (Cr)</th>
-            <th className="p-2 border-r">Rate (Imm.)</th>
-            <th className="p-2 border-r">Rate Per</th>
-            <th className="p-2 border-r">Qty</th>
-            <th className="p-2 border-r">Bag Wt.</th>
-            <th className="p-2">Packing Type</th>
-          </tr>
+          {/* ... existing headers ... */}
         </thead>
         <tbody>
           {details.length > 0 ? (
@@ -37,20 +48,42 @@ const OrderDetailTab = ({ details = [], products = [] }) => {
           ) : (
             <tr>
               <td colSpan={8} className="p-12 text-center text-gray-400 italic bg-gray-50 border-dashed border-2 m-2">
-                <div className="flex flex-col items-center gap-2">
+                <div className="flex flex-col items-center gap-2 relative">
                   <span>Type starting letter of the product to search...</span>
                   <input 
                     type="text" 
+                    value={searchQuery}
+                    onChange={(e) => handleProductSearch(e.target.value)}
                     placeholder="Search Product..." 
-                    className="border p-1 w-64 not-italic text-black uppercase"
+                    className="border p-2 w-64 not-italic text-black uppercase font-bold focus:ring-2 focus:ring-blue-500 outline-none"
                   />
+                  
+                  {/* SEARCH SUGGESTIONS DROPDOWN */}
+                  {suggestions.length > 0 && (
+                    <div className="absolute top-full bg-white border shadow-xl w-64 z-50 not-italic text-left">
+                      {suggestions.map(p => (
+                        <div 
+                          key={p.id} 
+                          onClick={() => {
+                            onProductSelect(p); // Pass the selected product back to parent
+                            setSuggestions([]);
+                            setSearchQuery('');
+                          }}
+                          className="p-2 hover:bg-blue-600 hover:text-white cursor-pointer border-b text-black font-bold uppercase"
+                        >
+                          {p.product_name}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </td>
             </tr>
           )}
         </tbody>
       </table>
-      {/* Footer Totals style from Image 11 */}
+      
+      {/* Footer Totals */}
       {details.length > 0 && (
         <div className="bg-blue-50 p-1 border-t flex justify-end gap-10 pr-10 font-bold text-blue-900">
           <span>Total Qty: {details.reduce((sum, i) => sum + Number(i.qty), 0)}</span>

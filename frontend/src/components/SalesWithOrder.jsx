@@ -58,22 +58,27 @@ const SalesWithOrder = () => {
 
     const fetchMasters = async () => {
         try {
-            const [p, b, pr] = await Promise.all([
+            const [accountsRes, brokersRes, productsRes] = await Promise.all([
                 mastersAPI.accounts.getAll(),
                 mastersAPI.brokers.getAll(),
                 mastersAPI.products.getAll()
             ]);
-            setParties(p?.data?.data || []);
-            setBrokers(b?.data?.data || []);
-            setProducts(pr?.data?.data || []);
+            setParties(accountsRes.data.data || []);
+            setBrokers(brokersRes.data.data || []);
+            setProducts(productsRes.data.data || []);
         } catch (err) { console.error(err); }
     };
 
     const fetchRecords = async () => {
         setLoading(true);
         try {
-            const res = await transactionsAPI.orders.getAll();
-            setList(res?.data?.data || []);
+            const data = await transactionsAPI.orders.getAll();
+            const mapped = (data.data.data || []).map(item => ({
+                ...item,
+                party_id: item.Party?.id ? String(item.Party.id) : '',
+                broker_id: item.broker_id ? String(item.broker_id) : '',
+            }));
+            setList(mapped);
         } catch (err) { setList([]); } 
         finally { setLoading(false); }
     };
@@ -141,9 +146,25 @@ const SalesWithOrder = () => {
         
         setSubmitLoading(true);
         try {
-            const payload = { 
-                ...formData, 
-                OrderDetails: gridRows.filter(r => r.product_id) 
+            const payload = {
+                order_no: formData.order_no || '',
+                date: formData.date || '',
+                place: formData.place || '',
+                broker_id: formData.broker_id ? Number(formData.broker_id) : null,
+                is_cancelled: Boolean(formData.is_cancelled),
+                status: formData.status || 'OPEN',
+                party_id: Number(formData.party_id),
+                OrderDetails: gridRows
+                    .filter(r => r.product_id)
+                    .map(r => ({
+                        product_id: Number(r.product_id),
+                        qty: r.qty === '' ? 0 : Number(r.qty),
+                        bag_wt: r.bag_wt === '' ? 0 : Number(r.bag_wt),
+                        rate_cr: r.rate_cr === '' ? 0 : Number(r.rate_cr),
+                        rate_imm: r.rate_imm === '' ? 0 : Number(r.rate_imm),
+                        rate_per: r.rate_per === '' ? 0 : Number(r.rate_per),
+                        packing_type: r.packing_type || '',
+                    }))
             };
             if (formData.id) {
                 await transactionsAPI.orders.update(formData.id, payload);

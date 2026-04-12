@@ -45,28 +45,35 @@ const DepotStorage = () => {
     }, [selectedDepot]);
 
     const fetchDepots = async () => {
-        try {
-            const res = await mastersAPI.accounts.getAll();
-            const all = res.data?.data || res.data || [];
-            const filtered = all.filter(a => {
-                const grp = String(a.account_group || "").toUpperCase();
-                const name = String(a.account_name || "").toUpperCase();
-                return grp.includes('DEPOT') || name.includes('DEPOT');
-            });
-            setDepots(filtered);
-            if (filtered.length > 0) setSelectedDepot(filtered[0].id);
-        } catch (err) { console.error("Depot fetch error", err); }
-    };
+    try {
+        const data = await mastersAPI.accounts.getAll();
+        const all = data.data.data || [];
+        
+        // Filter logic remains similar but data is leaner
+        const filtered = all.filter(a => {
+            const grp = String(a.account_group || "").toUpperCase();
+            return grp.includes('DEPOT');
+        });
+        
+        setDepots(filtered);
+        if (filtered.length > 0 && !selectedDepot) setSelectedDepot(filtered[0].id);
+    } catch (err) { console.error("Depot fetch error", err); }
+};
 
-    const fetchInventory = async () => {
-        if (!selectedDepot) return;
-        setLoading(true);
-        try {
-            const res = await transactionsAPI.depotStock.getInventory(selectedDepot);
-            setInventory(res.data?.data || []);
-        } catch (err) { alert("Could not load inventory database"); }
-        finally { setLoading(false); }
-    };
+   const fetchInventory = async () => {
+    if (!selectedDepot) return;
+    setLoading(true);
+    try {
+        const data = await transactionsAPI.depotStock.getInventory(selectedDepot);
+        setInventory(data.data.data || []);
+        
+    } catch (err) { 
+        console.error("Inventory fetch error", err);
+        alert("Could not load inventory database"); 
+    } finally { 
+        setLoading(false); 
+    }
+};
 
     // --- Selection Logic ---
     const handleRowClick = (id) => {
@@ -294,7 +301,7 @@ const DepotStorage = () => {
                 </div>
             </div>
 
-            <style jsx>{`
+            <style>{`
                 ::-webkit-scrollbar { width: 5px; height: 5px; }
                 ::-webkit-scrollbar-track { background: transparent; }
                 ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }

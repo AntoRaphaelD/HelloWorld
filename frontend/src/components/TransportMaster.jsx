@@ -37,10 +37,9 @@ const TransportMaster = () => {
     const fetchRecords = async () => {
         setLoading(true);
         try {
-            const res = await mastersAPI.transports.getAll();
-            const rawData = res?.data?.data || res?.data || [];
-            setList(Array.isArray(rawData) ? rawData : []);
-        } catch (err) { setList([]); } finally { setLoading(false); }
+            const data = await mastersAPI.transports.getAll();
+            setList(Array.isArray(data.data.data) ? data.data.data : []);
+        } catch (err) { console.error(err); setList([]); } finally { setLoading(false); }
     };
 
     const filteredData = useMemo(() => {
@@ -97,8 +96,21 @@ const TransportMaster = () => {
         if (!formData.transport_name?.trim()) return alert("Transport name is required");
         setSubmitLoading(true);
         try {
-            if (formData.id) await mastersAPI.transports.update(formData.id, formData);
-            else await mastersAPI.transports.create(formData);
+            if (formData.id) {
+                await mastersAPI.transports.update(formData.id, {
+                    transport_code: formData.transport_code,
+                    transport_name: formData.transport_name,
+                    place: formData.place || '',
+                    address: formData.address || ''
+                });
+            } else {
+                await mastersAPI.transports.create({
+                    transport_code: formData.transport_code,
+                    transport_name: formData.transport_name,
+                    place: formData.place || '',
+                    address: formData.address || ''
+                });
+            }
             fetchRecords();
             setIsModalOpen(false);
         } catch (err) { alert("Error saving."); } finally { setSubmitLoading(false); }

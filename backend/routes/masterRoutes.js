@@ -84,7 +84,9 @@
 
     // Depot Registry (Listing of inwarded manifests)
     router.get('/depot-received', validate(ctrl.depotReceived.getAll));
+    router.get('/depot-received/:id', validate(ctrl.depotReceived.getOne));
     router.post('/depot-received', validate(ctrl.depotReceived.create));
+    router.put('/depot-received/:id', validate(ctrl.depotReceived.update));
     router.delete('/depot-received/:id', validate(ctrl.depotReceived.delete));
     router.post('/depot-received/bulk-delete', validate(ctrl.depotReceived.bulkDelete));
 

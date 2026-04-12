@@ -58,13 +58,17 @@ const AccountMaster = () => {
     useEffect(() => { fetchRecords(); }, []);
 
     const fetchRecords = async () => {
-        setLoading(true);
-        try {
-            const res = await mastersAPI.accounts.getAll();
-            const rawData = res?.data?.data || res?.data || [];
-            setList(Array.isArray(rawData) ? rawData : []);
-        } catch (err) { setList([]); } finally { setLoading(false); }
-    };
+    setLoading(true);
+    try {
+        const response = await mastersAPI.accounts.getAll();
+        setList(response.data.data || []);
+    } catch (err) { 
+        console.error("REST Fetch Error:", err);
+        setList([]); 
+    } finally { 
+        setLoading(false); 
+    }
+};
 
     const handleAddNew = () => {
         const safeList = Array.isArray(list) ? list : [];
@@ -76,14 +80,23 @@ const AccountMaster = () => {
         setIsModalOpen(true);
     };
 
-    const handleRowClick = (item) => {
-        if (isSelectionMode) {
-            setSelectedIds(prev => prev.includes(item.id) ? prev.filter(id => id !== item.id) : [...prev, item.id]);
-        } else {
-            setFormData(mapDbToUi(item));
+const handleRowClick = async (item) => {
+    if (isSelectionMode) {
+        setSelectedIds(prev => prev.includes(item.id) ? prev.filter(id => id !== item.id) : [...prev, item.id]);
+    } else {
+        setLoading(true);
+        try {
+            const response = await mastersAPI.accounts.getById(item.id);
+            const fullData = response.data.data;
+            setFormData(mapDbToUi(fullData));
             setIsModalOpen(true);
+        } catch (err) {
+            alert("Error loading full account details.");
+        } finally {
+            setLoading(false);
         }
-    };
+    }
+};
 
     const handleBulkDelete = async () => {
         if (selectedIds.length === 0) return;
@@ -101,9 +114,13 @@ const AccountMaster = () => {
         e.preventDefault();
         setSubmitLoading(true);
         try {
-            const payload = mapUiToDb(formData);
-            if (formData.id) await mastersAPI.accounts.update(formData.id, payload);
-            else await mastersAPI.accounts.create(payload);
+            const mapped = mapUiToDb(formData);
+            const { id, ...payload } = mapped;
+            if (formData.id) {
+                await mastersAPI.accounts.update(formData.id, payload);
+            } else {
+                await mastersAPI.accounts.create(payload);
+            }
             fetchRecords();
             setIsModalOpen(false);
         } catch (err) { alert("Error saving."); } finally { setSubmitLoading(false); }

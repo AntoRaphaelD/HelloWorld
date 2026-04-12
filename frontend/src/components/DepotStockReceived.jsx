@@ -39,90 +39,80 @@ const DepotStockReceived = () => {
         fetchRecords();
     }, []);
 
-    const fetchMasters = async () => {
-        try {
-            const res = await mastersAPI.accounts.getAll();
-            const all = res.data.data || res.data || [];
-            const filtered = all.filter(a => {
-                const group = (a.account_group || a.group_name || "").toUpperCase().trim();
-                return group === 'DEBTORS - DEPOT - SALES';
-            });
-            setDepots(filtered);
-        } catch (err) { console.error("Master fetch error", err); }
-    };
+const fetchMasters = async () => {
+    try {
+        const data = await mastersAPI.accounts.getAll();
+        const all = data.data.data || [];
+        // Filter specifically for Depot accounts
+        setDepots(all.filter(a => a.account_group?.includes('DEPOT')));
+    } catch (err) { console.error("Master fetch error", err); }
+};
 
-    const fetchRecords = async () => {
-        setLoading(true);
-        try {
-            const res = await transactionsAPI.depotReceived.getAll();
-            const data = Array.isArray(res.data) ? res.data : (res.data.data || []);
-            setList(data);
-        } catch (err) { console.error("Records fetch error", err); }
-        finally { setLoading(false); }
-    };
+const fetchRecords = async () => {
+    setLoading(true);
+    try {
+        const data = await transactionsAPI.depotReceived.getAll();
+        setList(data.data.data || []);
+    } catch (err) { console.error("Records fetch error", err); }
+    finally { setLoading(false); }
+};
+
+
 
     const handleLookupInvoice = async () => {
-        if (!formData.invoice_no) 
-            return alert("Please enter an Invoice Number");
+    if (!formData.invoice_no) 
+        return alert("Please enter an Invoice Number");
 
-        setIsFetchingInvoice(true);
+    setIsFetchingInvoice(true);
 
-        try {
-            const res = await transactionsAPI.invoices.getAll();
-            const allInvoices = res.data.data || res.data || [];
+    try {
+        const data = await transactionsAPI.invoices.getAll();
+        const invoices = data.data.data || [];
+        const target = invoices.find(
+            (invoice) => String(invoice.invoice_no).trim() === String(formData.invoice_no).trim()
+        );
 
-            const target = allInvoices.find(inv =>
-                String(inv.invoice_no).trim() === String(formData.invoice_no).trim()
-            );
-
-            if (!target) {
-                alert(`Invoice "${formData.invoice_no}" not found.`);
-                setPreviewItems([]);
-                return;
-            }
-
-            if (target.is_depot_inwarded) {
-                alert("❌ This invoice already inwarded to depot.");
-                return;
-            }
-
-            const items = target.InvoiceDetails || [];
-
-            if (!items.length) {
-                alert("Invoice found but no items.");
-                return;
-            }
-
-            setPreviewItems(items);
-
-        } catch (err) {
-            console.error(err);
-            alert("Error fetching invoice");
-        } finally {
-            setIsFetchingInvoice(false);
+        if (!target) {
+            alert(`Invoice "${formData.invoice_no}" not found.`);
+            setPreviewItems([]);
+            return;
         }
-    };
+
+        if (target.is_depot_inwarded) {
+            alert("❌ This invoice is already inwarded to a depot.");
+            return;
+        }
+
+        setPreviewItems(target.InvoiceDetails || []);
+
+    } catch (err) {
+        console.error(err);
+        alert("Error fetching invoice details");
+    } finally {
+        setIsFetchingInvoice(false);
+    }
+};
 
     const handleSave = async () => {
-        if (!formData.depot_id) return alert("Select a Depot");
-        setSubmitLoading(true);
-        try {
-            const payload = { 
-                invoice_no: formData.invoice_no,
-                depot_id: formData.depot_id,
-                date: formData.date 
-            };
-            await transactionsAPI.depotInward.create(payload);
-            window.dispatchEvent(new Event("depotStockUpdated"));
-            setIsModalOpen(false);
-            fetchRecords(); 
-            alert("Stock Inwarded Successfully!");
-        } catch (err) { 
-            alert("Error: " + (err.response?.data?.error || "Check Connection")); 
-        } finally { 
-            setSubmitLoading(false); 
-        }
-    };
+    if (!formData.depot_id || !previewItems.length) return alert("Select Depot and Fetch a valid Invoice");
+    setSubmitLoading(true);
+    try {
+        const payload = { 
+            invoice_no: formData.invoice_no,
+            depot_id: formData.depot_id,
+            date: formData.date 
+        };
+        await transactionsAPI.depotInward.create(payload);
+        
+        setIsModalOpen(false);
+        fetchRecords();
+        alert("Stock Inwarded Successfully!");
+    } catch (err) { 
+        alert("Error: " + (err.response?.data?.error || "Sync failed")); 
+    } finally { 
+        setSubmitLoading(false); 
+    }
+};
 
     const handleRowClick = (item) => {
         if (isSelectionMode) {

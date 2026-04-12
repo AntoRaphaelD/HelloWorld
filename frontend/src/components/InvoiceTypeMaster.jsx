@@ -155,10 +155,9 @@ const InvoiceTypeMaster = () => {
     const fetchRecords = async () => {
         setLoading(true);
         try {
-            const res = await mastersAPI.invoiceTypes.getAll();
-            const rawData = res?.data?.data || res?.data || [];
-            setList(Array.isArray(rawData) ? rawData : []);
-        } catch (err) { setList([]); } finally { setLoading(false); }
+            const data = await mastersAPI.invoiceTypes.getAll();
+            setList(Array.isArray(data.data.data) ? data.data.data : []);
+        } catch (err) { console.error(err); setList([]); } finally { setLoading(false); }
     };
 
     const handleAddNew = () => {
@@ -200,9 +199,39 @@ const InvoiceTypeMaster = () => {
         if (!formData.type_name?.trim()) return alert("Invoice Type name is required");
         setSubmitLoading(true);
         try {
-            const payload = mapUiToDb(formData);
-            if (formData.id) await mastersAPI.invoiceTypes.update(formData.id, payload);
-            else await mastersAPI.invoiceTypes.create(payload);
+            const rawPayload = mapUiToDb(formData);
+            const payload = { ...rawPayload };
+
+            delete payload.id;
+            delete payload.rows;
+            Object.keys(payload).forEach((key) => {
+                if (key.endsWith('_credit') || key === 'assess_credit') {
+                    delete payload[key];
+                }
+            });
+
+            const intFields = ['round_off_digits'];
+            const floatFields = [
+                'charity_value', 'vat_percentage', 'duty_percentage', 'cess_percentage',
+                'hr_sec_cess_percentage', 'tcs_percentage', 'cst_percentage', 'cenvat_percentage',
+                'gst_percentage', 'sgst_percentage', 'cgst_percentage', 'igst_percentage'
+            ];
+            const boolFields = [
+                'is_option_ii', 'account_posting', 'assess_checked', 'charity_checked',
+                'vat_checked', 'duty_checked', 'cess_checked', 'hr_sec_cess_checked',
+                'tcs_checked', 'cst_checked', 'cenvat_checked', 'gst_checked',
+                'sgst_checked', 'cgst_checked', 'igst_checked'
+            ];
+
+            intFields.forEach((k) => { payload[k] = parseInt(payload[k], 10) || 0; });
+            floatFields.forEach((k) => { payload[k] = Number(payload[k]) || 0; });
+            boolFields.forEach((k) => { payload[k] = Boolean(payload[k]); });
+
+            if (formData.id) {
+                await mastersAPI.invoiceTypes.update(formData.id, payload);
+            } else {
+                await mastersAPI.invoiceTypes.create(payload);
+            }
             fetchRecords();
             setIsModalOpen(false);
         } catch (err) { alert("Error saving."); } finally { setSubmitLoading(false); }

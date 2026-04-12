@@ -537,6 +537,7 @@ const InvoicePreparation = () => {
 
         // Total tax percentage (Sum of SGST+CGST or just IGST)
         const taxPercentage = igstPer > 0 ? igstPer : (sgstPer + cgstPer);
+        const hasSplitGst = sgstPer > 0 && cgstPer > 0;
 
         const totalBags = rows.reduce((sum, r) => sum + num(r.packs), 0);
         const freightPerBag = totalBags > 0 ? num(hFreight) / totalBags : 0;
@@ -547,36 +548,47 @@ const InvoicePreparation = () => {
 
         const updatedRows = rows.map((item, idx) => {
             const packs = num(item.packs);
-            const totalKgs = num(item.total_kgs);
+            const bagWt = num(item.avg_content);
+            const existingTotalKgs = num(item.total_kgs);
             const rateInput = num(item.rate);
             const rowFreight = packs * freightPerBag;
+            const productName = String(item.product_description || item.Product?.product_name || '').toLowerCase();
+            const is68Product = productName.includes('68');
 
             // 2. FLOW: rate_after_tax
             const rateAfterTax = rateInput + (rateInput * taxPercentage / 100);
 
-            // 3. FLOW: total_invoice_amount (Inlcusive of Tax)
-            const totalInvoiceAmount = 10 * packs * rateAfterTax;
+            // Keep the existing formula for 68 products; other products use packs x bag weight.
+            const totalKgs = is68Product ? existingTotalKgs : (packs * bagWt);
+
+            // 3. FLOW: total_invoice_amount (Inclusive of Tax)
+            const rawTotalInvoiceAmount = is68Product
+                ? (10 * packs * rateAfterTax)
+                : (totalKgs * rateAfterTax);
+            const totalInvoiceAmount = is68Product ? rawTotalInvoiceAmount : Math.round(rawTotalInvoiceAmount);
 
             // 4. FLOW: charity
             let charity = 0;
             if (formData.sales_type === 'GST SALES') {
                 charity = totalKgs * 3;
             } else {
-                charity = (packs * 10 * rateAfterTax) * (num(config.charity_value || 0) / 100);
+                charity = totalInvoiceAmount * (num(config.charity_value || 0) / 100);
             }
 
             // 5. FLOW: divisor and base_amount (Back-calculating Taxable value)
-            const divisor = 100 + taxPercentage;
-            const baseAmount = (totalInvoiceAmount / divisor) * 100;
+            const taxDivisor = 1 + (taxPercentage / 100);
+            const baseAmount = taxDivisor > 0 ? (totalInvoiceAmount / taxDivisor) : totalInvoiceAmount;
 
             // 6. FLOW: gst_amount
-            const gstAmount = (baseAmount * taxPercentage) / 100;
+            const rawGstAmount = (baseAmount * taxPercentage) / 100;
+            const gstAmount = is68Product ? rawGstAmount : Math.round(rawGstAmount);
 
             // 7. FLOW: TCS Amount (Calculated from Gross Invoice Amount)
             const tcsAmount = (totalInvoiceAmount * tcsPer) / 100;
 
             // 8. FLOW: accessible_value (Stripping components from Total)
-            const accessibleValue = totalInvoiceAmount - rowFreight - charity - gstAmount;
+            const rawAccessibleValue = totalInvoiceAmount - rowFreight - charity - gstAmount;
+            const accessibleValue = is68Product ? rawAccessibleValue : Math.round(rawAccessibleValue);
 
             hTotals.assess += accessibleValue;
             hTotals.charity += charity;
@@ -587,13 +599,14 @@ const InvoicePreparation = () => {
 
             return {
                 ...item,
+                total_kgs: money(totalKgs),
                 charity_amt: money(charity),
                 freight_amt: money(rowFreight),
                 // Handle SGST/CGST split or IGST
                 igst_amt: igstPer > 0 ? money(gstAmount) : 0,
                 sgst_amt: sgstPer > 0 ? money(gstAmount / 2) : 0,
                 cgst_amt: cgstPer > 0 ? money(gstAmount / 2) : 0,
-                gst_amt: igstPer === 0 ? money(gstAmount) : 0,
+                gst_amt: hasSplitGst ? money(gstAmount) : 0,
                 tcs_amt: money(tcsAmount),
                 assessable_value: money(accessibleValue),
                 final_value: money(totalInvoiceAmount)
@@ -603,7 +616,7 @@ const InvoicePreparation = () => {
         // 9. GRAND TOTAL (Net Amount): Gross Invoice Amount MINUS TCS
         const finalGross = hTotals.gross;
         const amountAfterTcs = finalGross - hTotals.tcs;
-        const finalNetAmount = Math.ceil(amountAfterTcs);
+        const finalNetAmount = Math.round(amountAfterTcs);
         const calculatedRoundOff = finalNetAmount - amountAfterTcs;
 
         setFormData(prev => ({
@@ -612,7 +625,7 @@ const InvoicePreparation = () => {
             total_charity: money(hTotals.charity),
             freight_charges: num(hFreight),
             // 🟢 Display full tax in "GST (Gen)" field
-            total_gst: money(hTotals.gst),
+            total_gst: hasSplitGst ? money(hTotals.gst) : 0,
             total_igst: igstPer > 0 ? money(hTotals.gst) : 0,
             total_sgst: sgstPer > 0 ? money(hTotals.gst / 2) : 0,
             total_cgst: cgstPer > 0 ? money(hTotals.gst / 2) : 0,
