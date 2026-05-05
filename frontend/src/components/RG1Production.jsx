@@ -136,7 +136,7 @@ const RG1Production = () => {
         const inv = num(formData.invoice_kgs);
         const stock = num(formData.stock_kgs);
 
-        const nextProductionKgs = (prev - (inv + stock)).toFixed(3);
+        const nextProductionKgs = ((inv + stock) - prev).toFixed(3);
 
         if (formData.production_kgs !== nextProductionKgs) {
             setFormData(prevForm => ({
