@@ -95,17 +95,17 @@ const RG1Production = () => {
     // --- 2. Auto-Calculation Logic ---
     useEffect(() => {
         const product = getProduct(formData.product_id);
-        const hasProductionInput = [formData.stock_bags, formData.stock_loose_kgs]
+        const hasStockInput = [formData.stock_bags, formData.stock_loose_kgs]
             .some(value => value !== undefined && value !== null && value !== '');
 
-        const nextProduction = hasProductionInput
+        const nextStockKgs = hasStockInput
             ? ((num(formData.stock_bags) * num(formData.weight_per_bag)) + (num(formData.stock_loose_kgs) * num(product?.wt_per_cone))).toFixed(3)
             : '';
 
-        if (formData.production_kgs !== nextProduction) {
+        if (formData.stock_kgs !== nextStockKgs) {
             setFormData(prevForm => ({
                 ...prevForm,
-                production_kgs: nextProduction
+                stock_kgs: nextStockKgs
             }));
         }
     }, [formData.stock_bags, formData.stock_loose_kgs, formData.weight_per_bag, formData.product_id, products]);
@@ -121,32 +121,31 @@ const RG1Production = () => {
     }, [formData.product_id, formData.date, invoices, directInvoices]);
 
     useEffect(() => {
-        const hasStockInput = [formData.production_kgs, formData.prev_closing_kgs, formData.invoice_kgs]
+        const hasProductionInput = [formData.prev_closing_kgs, formData.invoice_kgs, formData.stock_kgs]
             .some(value => value !== undefined && value !== null && value !== '');
 
-        if (!hasStockInput) {
+        if (!hasProductionInput) {
             setFormData(prevForm => ({
                 ...prevForm,
-                stock_kgs: ''
+                production_kgs: ''
             }));
             return;
         }
 
-        const prod = num(formData.production_kgs);
         const prev = num(formData.prev_closing_kgs);
         const inv = num(formData.invoice_kgs);
+        const stock = num(formData.stock_kgs);
 
-        const closingKgs = (prev + prod) - inv;
-        const nextStockKgs = closingKgs.toFixed(3);
+        const nextProductionKgs = (prev - (inv + stock)).toFixed(3);
 
-        if (formData.stock_kgs !== nextStockKgs) {
+        if (formData.production_kgs !== nextProductionKgs) {
             setFormData(prevForm => ({
                 ...prevForm,
-                stock_kgs: nextStockKgs
+                production_kgs: nextProductionKgs
             }));
         }
 
-    }, [formData.production_kgs, formData.prev_closing_kgs, formData.invoice_kgs]);
+    }, [formData.prev_closing_kgs, formData.invoice_kgs, formData.stock_kgs]);
 
     // --- 3. Data Fetching ---
     useEffect(() => {
