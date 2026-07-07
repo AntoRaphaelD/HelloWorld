@@ -966,8 +966,20 @@ const InvoicePreparation = () => {
         const avgContent = num(firstValue(row.avg_content, row.bag_wt, product?.pack_nett_wt));
         const totalKgs = num(firstValue(row.total_kgs, row.kgs, row.net_weight)) || (packs * avgContent);
 
+        const {
+            id: sourceDetailId,
+            invoice_id: sourceInvoiceId,
+            direct_invoice_id: sourceDirectInvoiceId,
+            createdAt: sourceCreatedAt,
+            updatedAt: sourceUpdatedAt,
+            Product: sourceProduct,
+            product: sourceProductLower,
+            Header: sourceHeader,
+            ...editableRow
+        } = row;
+
         return {
-            ...row,
+            ...editableRow,
             order_no: orderNo,
             order_type: orderType,
             product_id: firstValue(row.product_id, product?.id),
@@ -1090,7 +1102,7 @@ const InvoicePreparation = () => {
         } catch (e) {
 
             console.error("Save error:", e);
-            alert("Error saving invoice");
+            alert(e.response?.data?.error || "Error saving invoice");
 
         } finally {
 
@@ -1347,7 +1359,7 @@ const InvoicePreparation = () => {
                                         </div>
                                         <div className="grid grid-cols-2 gap-4">
                                             <RowInput label="Removal Time" type="text" value={formData.removal_time} onChange={e => setFormData({ ...formData, removal_time: e.target.value })} />
-                                            <RowSelect label="PayMode" value={formData.pay_mode} options={[{ value: 'CREDIT', label: 'CREDIT' }, { value: 'CASH', label: 'CASH' }]} onChange={e => setFormData({ ...formData, pay_mode: e.target.value })} />
+                                            <RowSelect label="PayMode" value={formData.pay_mode} options={[{ value: 'CREDIT', label: 'CREDIT' }, { value: 'IMMEDIATE', label: 'IMMEDIATE' }]} onChange={e => setFormData({ ...formData, pay_mode: e.target.value })} />
                                         </div>
                                         <div className="grid grid-cols-2 gap-4">
                                             <RowInput label="Prepare Time" type="text" value={formData.prepare_time} onChange={e => setFormData({ ...formData, prepare_time: e.target.value })} />

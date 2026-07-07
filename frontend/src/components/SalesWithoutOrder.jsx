@@ -153,7 +153,7 @@ const SalesWithoutOrder = () => {
                 final_invoice_value: Number(formData.final_invoice_value) || 0,
                 is_depot_inwarded: Boolean(formData.is_depot_inwarded),
                 depot_id: formData.depot_id ? Number(formData.depot_id) : null,
-                DirectInvoiceDetails: gridRows
+                Details: gridRows
                     .filter(r => r.product_id)
                     .map(r => ({
                         product_id: Number(r.product_id),

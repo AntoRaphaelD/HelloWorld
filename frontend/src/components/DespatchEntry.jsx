@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { mastersAPI, transactionsAPI } from '../service/api';
-import { 
-    Plus, Edit, Trash2, X, ChevronLeft, 
-    ChevronRight, RefreshCw, Save, Factory, Search, Filter, 
-    Square, CheckSquare, Clock, Truck
+import {
+    Plus, Edit, Trash2, X, ChevronLeft, ChevronRight, RefreshCw,
+    Save, Search, Square, CheckSquare, Clock, Truck, MapPin,
+    CalendarDays, ShieldCheck, Package, IndianRupee, ArrowRight
 } from 'lucide-react';
 
 const DespatchEntry = () => {
@@ -12,48 +12,44 @@ const DespatchEntry = () => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [loading, setLoading] = useState(false);
     const [submitLoading, setSubmitLoading] = useState(false);
-    
     const [isSelectionMode, setIsSelectionMode] = useState(false);
     const [selectedIds, setSelectedIds] = useState([]);
-    
     const [searchField, setSearchField] = useState('vehicle_no');
     const [searchCondition, setSearchCondition] = useState('Like');
     const [searchValue, setSearchValue] = useState('');
-
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 10;
 
-    const emptyState = { 
+    const emptyState = {
         id: null,
-        load_no: '', 
-        load_date: new Date().toISOString().split('T')[0], 
-        transport_id: '', 
-        lr_no: '', 
-        lr_date: new Date().toISOString().split('T')[0], 
-        vehicle_no: '', 
-        delivery: '',         
-        insurance_no: '',     
+        load_no: '',
+        load_date: new Date().toISOString().split('T')[0],
+        transport_id: '',
+        lr_no: '',
+        lr_date: new Date().toISOString().split('T')[0],
+        vehicle_no: '',
+        delivery: '',
+        insurance_no: '',
         in_hh: '12', in_mm: '00', in_period: 'PM',
         out_hh: '12', out_mm: '00', out_period: 'PM',
-        no_of_bags: 0, 
-        freight: 0, 
-        freight_per_bag: 0    
+        no_of_bags: 0,
+        freight: 0,
+        freight_per_bag: 0
     };
 
     const [formData, setFormData] = useState(emptyState);
-
     const hours = Array.from({ length: 12 }, (_, i) => (i + 1).toString().padStart(2, '0'));
     const minutes = Array.from({ length: 60 }, (_, i) => i.toString().padStart(2, '0'));
 
     const calculatedFreightPerBag = useMemo(() => {
         const bags = parseFloat(formData.no_of_bags) || 0;
         const total = parseFloat(formData.freight) || 0;
-        return bags > 0 ? (total / bags).toFixed(2) : "0.00";
+        return bags > 0 ? (total / bags).toFixed(2) : '0.00';
     }, [formData.no_of_bags, formData.freight]);
 
-    useEffect(() => { 
-        fetchRecords(); 
-        fetchTransports(); 
+    useEffect(() => {
+        fetchRecords();
+        fetchTransports();
     }, []);
 
     const fetchRecords = async () => {
@@ -61,15 +57,21 @@ const DespatchEntry = () => {
         try {
             const data = await transactionsAPI.despatch.getAll();
             setList(data.data.data || []);
-        } catch (err) { console.error(err); setList([]); } 
-        finally { setLoading(false); }
+        } catch (err) {
+            console.error(err);
+            setList([]);
+        } finally {
+            setLoading(false);
+        }
     };
 
     const fetchTransports = async () => {
         try {
             const data = await mastersAPI.transports.getAll();
             setTransports(data.data.data || []);
-        } catch (err) { console.error(err); }
+        } catch (err) {
+            console.error(err);
+        }
     };
 
     const handleAddNew = () => {
@@ -88,12 +90,10 @@ const DespatchEntry = () => {
                 const [hh, mm] = time.split(':');
                 return { hh, mm, period };
             };
-
             const inT = parseTime(item.in_time);
             const outT = parseTime(item.out_time);
-
-            setFormData({ 
-                ...item, 
+            setFormData({
+                ...item,
                 transport_id: item.transport_id?.toString() || '',
                 in_hh: inT.hh, in_mm: inT.mm, in_period: inT.period,
                 out_hh: outT.hh, out_mm: outT.mm, out_period: outT.period
@@ -110,22 +110,22 @@ const DespatchEntry = () => {
                 setSelectedIds([]);
                 setIsSelectionMode(false);
                 fetchRecords();
-            } catch (err) { alert("Delete failed."); }
+            } catch (err) {
+                alert('Delete failed.');
+            }
         }
     };
 
     const handleSave = async (e) => {
         e.preventDefault();
         setSubmitLoading(true);
-        
         const finalIn = `${formData.in_hh}:${formData.in_mm} ${formData.in_period}`;
         const finalOut = `${formData.out_hh}:${formData.out_mm} ${formData.out_period}`;
-        
-        const payload = { 
-            ...formData, 
+        const payload = {
+            ...formData,
             in_time: finalIn,
             out_time: finalOut,
-            freight_per_bag: parseFloat(calculatedFreightPerBag) 
+            freight_per_bag: parseFloat(calculatedFreightPerBag)
         };
 
         try {
@@ -144,7 +144,6 @@ const DespatchEntry = () => {
                 freight: Number(payload.freight) || 0,
                 freight_per_bag: Number(calculatedFreightPerBag) || 0
             };
-
             if (formData.id) {
                 await transactionsAPI.despatch.update(formData.id, input);
             } else {
@@ -152,8 +151,11 @@ const DespatchEntry = () => {
             }
             fetchRecords();
             setIsModalOpen(false);
-        } catch (err) { alert("Error saving."); } 
-        finally { setSubmitLoading(false); }
+        } catch (err) {
+            alert('Error saving.');
+        } finally {
+            setSubmitLoading(false);
+        }
     };
 
     const filteredData = useMemo(() => {
@@ -169,248 +171,149 @@ const DespatchEntry = () => {
 
     const currentItems = filteredData.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
     const totalPages = Math.ceil(filteredData.length / itemsPerPage) || 1;
+    const fieldClass = 'w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm font-medium text-slate-900 outline-none transition placeholder:text-slate-400 hover:border-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10';
+    const labelClass = 'mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500';
 
-    const FormLabel = ({ children }) => (
-        <label className="text-right text-base text-black pr-4 font-semibold self-center whitespace-nowrap">
-            {children}
-        </label>
+    const TimePicker = ({ type }) => {
+        const isIn = type === 'in';
+        const hhKey = isIn ? 'in_hh' : 'out_hh';
+        const mmKey = isIn ? 'in_mm' : 'out_mm';
+        const periodKey = isIn ? 'in_period' : 'out_period';
+        return (
+            <div className="grid grid-cols-[1fr_1fr_1.1fr] overflow-hidden rounded-lg border border-slate-300 bg-white focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/10">
+                <select className="border-r border-slate-200 bg-transparent px-2 py-2.5 text-center text-sm font-semibold outline-none" value={formData[hhKey]} onChange={e => setFormData({ ...formData, [hhKey]: e.target.value })}>{hours.map(h => <option key={h} value={h}>{h}</option>)}</select>
+                <select className="border-r border-slate-200 bg-transparent px-2 py-2.5 text-center text-sm font-semibold outline-none" value={formData[mmKey]} onChange={e => setFormData({ ...formData, [mmKey]: e.target.value })}>{minutes.map(m => <option key={m} value={m}>{m}</option>)}</select>
+                <select className="bg-transparent px-2 py-2.5 text-center text-sm font-bold text-blue-700 outline-none" value={formData[periodKey]} onChange={e => setFormData({ ...formData, [periodKey]: e.target.value })}><option value="AM">AM</option><option value="PM">PM</option></select>
+            </div>
+        );
+    };
+
+    const SectionTitle = ({ icon: Icon, children }) => (
+        <div className="mb-5 flex items-center gap-2 border-b border-slate-100 pb-3">
+            <Icon size={17} className="text-blue-600" />
+            <h3 className="text-sm font-bold text-slate-900">{children}</h3>
+        </div>
     );
 
     return (
-        <div className="min-h-screen bg-slate-100 p-6 font-sans">
-            
-            {/* Header */}
-            <div className="flex justify-between items-center mb-6">
-                <h1 className="text-2xl font-bold text-black flex items-center gap-2">
-                    <Truck className="text-blue-700" /> Despatch Entry Registry
-                </h1>
-                <div className="flex gap-2">
-                    <button onClick={handleAddNew} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg font-bold text-sm uppercase shadow-md transition-all flex items-center gap-1">
-                        <Plus size={18} /> New Entry
-                    </button>
-                    <button onClick={fetchRecords} className="p-2 border border-slate-300 rounded-lg bg-white">
-                        <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
-                    </button>
-                </div>
-            </div>
-
-            {/* Search Bar */}
-            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm mb-6 flex flex-wrap items-end gap-4">
-                <div className="flex-1 min-w-[180px]">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Search Field</label>
-                    <select value={searchField} onChange={e => setSearchField(e.target.value)} className="w-full border border-slate-300 p-2.5 rounded-lg text-base outline-none focus:ring-2 focus:ring-blue-400">
-                        <option value="vehicle_no">Vehicle No</option>
-                        <option value="load_no">Load No</option>
-                    </select>
-                </div>
-                <div className="flex-1 min-w-[150px]">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Condition</label>
-                    <select value={searchCondition} onChange={e => setSearchCondition(e.target.value)} className="w-full border border-slate-300 p-2.5 rounded-lg text-base outline-none focus:ring-2 focus:ring-blue-400">
-                        <option value="Like">Like</option>
-                        <option value="Equal">Equal</option>
-                    </select>
-                </div>
-                <div className="flex-[2] min-w-[280px]">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Value</label>
-                    <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                        <input 
-                            type="text" 
-                            value={searchValue} 
-                            onChange={e => setSearchValue(e.target.value)} 
-                            className="w-full border border-slate-300 pl-10 pr-4 py-2.5 rounded-lg text-base outline-none focus:ring-2 focus:ring-blue-400" 
-                            placeholder="Search..." 
-                        />
+        <div className="min-h-screen bg-[#f4f7fb] px-4 py-6 font-sans text-slate-900 sm:px-6 lg:px-8">
+            <div className="mx-auto max-w-[1500px]">
+                <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-4">
+                        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-900 text-white shadow-sm"><Truck size={24} /></div>
+                        <div>
+                            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-blue-600">Logistics</p>
+                            <h1 className="text-2xl font-bold tracking-tight text-slate-950">Despatch Registry</h1>
+                            <p className="mt-0.5 text-sm text-slate-500">Manage vehicle movements, freight and delivery records.</p>
+                        </div>
                     </div>
-                </div>
-
-                {!isSelectionMode ? (
-                    <button onClick={() => setIsSelectionMode(true)} className="border border-blue-300 bg-blue-50 text-blue-700 px-8 py-2.5 rounded-lg text-base font-semibold hover:bg-blue-100 transition-all shadow-sm">
-                        Select
-                    </button>
-                ) : (
-                    <div className="flex gap-3">
-                        <button onClick={() => { setIsSelectionMode(false); setSelectedIds([]); }} className="border border-slate-300 px-6 py-2.5 rounded-lg text-base font-semibold text-black hover:bg-slate-50 shadow-sm">
-                            Clear
-                        </button>
-                        <button onClick={handleBulkDelete} disabled={selectedIds.length === 0} className="bg-red-600 hover:bg-red-700 text-white px-6 py-2.5 rounded-lg text-base font-semibold shadow-md disabled:opacity-50 flex items-center gap-2">
-                            <Trash2 size={18} /> Delete ({selectedIds.length})
-                        </button>
+                    <div className="flex items-center gap-2">
+                        <button onClick={fetchRecords} title="Refresh records" className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-600 shadow-sm transition hover:bg-slate-50"><RefreshCw size={17} className={loading ? 'animate-spin' : ''} /></button>
+                        <button onClick={handleAddNew} className="inline-flex h-10 items-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"><Plus size={17} /> New despatch</button>
                     </div>
-                )}
-            </div>
+                </header>
 
-            {/* Main Table – All text now BLACK */}
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                <table className="w-full text-left">
-                    <thead className="bg-blue-700 border-b text-white text-base font-bold uppercase tracking-wider">
-                        <tr>
-                            {isSelectionMode && <th className="p-4 w-12 text-center">#</th>}
-                            <th className="p-4">Load No</th>
-                            <th className="p-4">Load Date</th>
-                            <th className="p-4">Transport Name</th>
-                            <th className="p-4 text-right pr-10">Bags</th>
-                            <th className="p-4 text-right pr-10">Freight (₹)</th>
-                            {!isSelectionMode && <th className="p-4 w-10"></th>}
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200">
-                        {loading ? (
-                            <tr><td colSpan={6} className="p-12 text-center text-black font-medium text-lg">Loading despatch records...</td></tr>
-                        ) : currentItems.length > 0 ? currentItems.map(item => (
-                            <tr 
-                                key={item.id} 
-                                className={`hover:bg-blue-50 cursor-pointer ${selectedIds.includes(item.id) ? 'bg-blue-100/50' : ''}`} 
-                                onClick={() => handleRowClick(item)}
-                            >
-                                {isSelectionMode && (
-                                    <td className="p-4 text-center">
-                                        {selectedIds.includes(item.id) ? <CheckSquare size={20} className="text-blue-600 mx-auto"/> : <Square size={20} className="text-slate-300 mx-auto"/>}
-                                    </td>
-                                )}
-                                <td className="p-4 text-base font-bold text-black font-mono">L-{item.load_no}</td>
-                                <td className="p-4 text-base text-black">{item.load_date || '—'}</td>
-                                <td className="p-4 text-base font-semibold text-black uppercase">{item.Transport?.transport_name || 'DIRECT'}</td>
-                                <td className="p-4 text-right pr-10 text-base font-bold text-black">{item.no_of_bags || 0}</td>
-                                <td className="p-4 text-right pr-10 text-base font-bold text-black">₹{parseFloat(item.freight || 0).toLocaleString()}</td>
-                                {!isSelectionMode && <td className="p-4 text-slate-400"><Edit size={18} /></td>}
-                            </tr>
-                        )) : (
-                            <tr><td colSpan={6} className="p-12 text-center text-black font-medium text-lg">No despatch records found</td></tr>
+                <section className="mb-5 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="flex flex-wrap items-end gap-4">
+                        <div className="grid flex-1 auto-cols-auto grid-flow-col gap-4">
+                            <div><label className={labelClass}>Search field</label><select value={searchField} onChange={e => setSearchField(e.target.value)} className={fieldClass}><option value="vehicle_no">Vehicle No</option><option value="load_no">Load No</option></select></div>
+                            <div><label className={labelClass}>Condition</label><select value={searchCondition} onChange={e => setSearchCondition(e.target.value)} className={fieldClass}><option value="Like">Like</option><option value="Equal">Equal</option></select></div>
+                            <div className="min-w-[250px]"><label className={labelClass}>Search value</label><div className="relative"><Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={17} /><input type="text" value={searchValue} onChange={e => setSearchValue(e.target.value)} className={`${fieldClass} pl-10`} placeholder="Search despatch records" /></div></div>
+                        </div>
+                        {!isSelectionMode ? (
+                            <button onClick={() => setIsSelectionMode(true)} className="h-[42px] rounded-lg border border-blue-500 bg-blue-500 px-5 py-2 text-sm font-semibold text-white transition-colors duration-200 hover:bg-blue-800 hover:border-blue-700 hover:text-white">Select records</button>
+                        ) : (
+                            <div className="flex gap-2"><button onClick={() => { setIsSelectionMode(false); setSelectedIds([]); }} className="h-[42px] rounded-lg border border-slate-300 px-4 text-sm font-semibold text-slate-700">Clear</button><button onClick={handleBulkDelete} disabled={selectedIds.length === 0} className="inline-flex h-[42px] items-center gap-2 rounded-lg bg-red-600 px-4 text-sm font-semibold text-white disabled:opacity-40"><Trash2 size={16} /> Delete ({selectedIds.length})</button></div>
                         )}
-                    </tbody>
-                </table>
+                    </div>
+                </section>
 
-                <div className="p-4 bg-slate-50 border-t flex items-center justify-between text-base">
-                    <span className="text-black font-medium">Page {currentPage} of {totalPages}</span>
-                    <div className="flex gap-2">
-                        <button disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)} className="p-2 border rounded bg-white disabled:opacity-50"><ChevronLeft size={20}/></button>
-                        <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)} className="p-2 border rounded bg-white disabled:opacity-50"><ChevronRight size={20}/></button>
+                <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                    <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+                        <div><h2 className="text-sm font-semibold text-slate-900">Despatch records</h2><p className="mt-0.5 text-xs text-slate-500">{filteredData.length} record{filteredData.length === 1 ? '' : 's'} found</p></div>
+                        {isSelectionMode && <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">{selectedIds.length} selected</span>}
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="w-full min-w-[850px] text-left">
+                            <thead className="border-b border-slate-200 bg-slate-50"><tr className="text-[11px] font-bold uppercase tracking-wider text-slate-500">{isSelectionMode && <th className="w-14 px-5 py-3 text-center">Select</th>}<th className="px-5 py-3">Load number</th><th className="px-5 py-3">Load date</th><th className="px-5 py-3">Transport</th><th className="px-5 py-3 text-right">Bags</th><th className="px-5 py-3 text-right">Freight</th>{!isSelectionMode && <th className="w-16 px-5 py-3"><span className="sr-only">Edit</span></th>}</tr></thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {loading ? (
+                                    <tr><td colSpan={7} className="px-5 py-16 text-center text-sm text-slate-500"><RefreshCw size={20} className="mx-auto mb-3 animate-spin text-blue-600" />Loading despatch records...</td></tr>
+                                ) : currentItems.length > 0 ? currentItems.map(item => (
+                                    <tr key={item.id} onClick={() => handleRowClick(item)} className={`group cursor-pointer transition hover:bg-blue-50/60 ${selectedIds.includes(item.id) ? 'bg-blue-50' : ''}`}>
+                                        {isSelectionMode && <td className="px-5 py-4 text-center">{selectedIds.includes(item.id) ? <CheckSquare size={19} className="mx-auto text-blue-600" /> : <Square size={19} className="mx-auto text-slate-300" />}</td>}
+                                        <td className="px-5 py-4"><span className="inline-flex rounded-md bg-slate-100 px-2.5 py-1 font-mono text-sm font-bold text-slate-800">L-{item.load_no}</span></td>
+                                        <td className="px-5 py-4 text-sm text-slate-600">{item.load_date || '—'}</td>
+                                        <td className="px-5 py-4 text-sm font-semibold uppercase text-slate-800">{item.Transport?.transport_name || 'DIRECT'}</td>
+                                        <td className="px-5 py-4 text-right text-sm font-semibold tabular-nums">{item.no_of_bags || 0}</td>
+                                        <td className="px-5 py-4 text-right text-sm font-semibold tabular-nums">₹{parseFloat(item.freight || 0).toLocaleString('en-IN')}</td>
+                                        {!isSelectionMode && <td className="px-5 py-4 text-right"><span className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 group-hover:bg-white group-hover:text-blue-600"><Edit size={16} /></span></td>}
+                                    </tr>
+                                )) : (
+                                    <tr><td colSpan={7} className="px-5 py-16 text-center"><Truck size={28} className="mx-auto mb-3 text-slate-300" /><p className="text-sm font-semibold text-slate-700">No despatch records found</p><p className="mt-1 text-xs text-slate-400">Try changing your search or create a new despatch.</p></td></tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50/70 px-5 py-3"><span className="text-xs font-medium text-slate-500">Page <strong className="text-slate-800">{currentPage}</strong> of {totalPages}</span><div className="flex gap-1.5"><button disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)} className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-300 bg-white disabled:opacity-40"><ChevronLeft size={17} /></button><button disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)} className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-300 bg-white disabled:opacity-40"><ChevronRight size={17} /></button></div></div>
+                </section>
+            </div>
+
+            {isModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-3 backdrop-blur-sm sm:p-6">
+                    <div className="flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-white/20 bg-white shadow-2xl animate-in zoom-in-95 duration-200">
+                        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4 sm:px-7">
+                            <div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white"><Truck size={20} /></div><div><h2 className="text-lg font-bold text-slate-950">{formData.id ? 'Edit despatch' : 'New despatch'}</h2><p className="text-xs text-slate-500">Load {formData.load_no || 'NEW'} · Vehicle and freight information</p></div></div>
+                            <button type="button" onClick={() => setIsModalOpen(false)} className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"><X size={20} /></button>
+                        </div>
+
+                        <form onSubmit={handleSave} className="flex min-h-0 flex-1 flex-col">
+                            <div className="flex-1 overflow-y-auto bg-slate-50/60 p-5 sm:p-7">
+                                <div className="grid gap-5 lg:grid-cols-2">
+                                    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                                        <SectionTitle icon={CalendarDays}>Load information</SectionTitle>
+                                        <div className="grid gap-4 sm:grid-cols-2">
+                                            <div><label className={labelClass}>Load number</label><input type="text" readOnly className={`${fieldClass} cursor-default bg-slate-100 font-mono font-bold`} value={formData.load_no || 'NEW'} /></div>
+                                            <div><label className={labelClass}>Load date</label><input type="date" className={fieldClass} value={formData.load_date || ''} onChange={e => setFormData({ ...formData, load_date: e.target.value })} /></div>
+                                            <div className="sm:col-span-2"><label className={labelClass}>Transport</label><select className={`${fieldClass} uppercase`} value={formData.transport_id || ''} onChange={e => setFormData({ ...formData, transport_id: e.target.value })}><option value="">— Select agency —</option>{transports.map(t => <option key={t.id} value={t.id}>{t.transport_name}</option>)}</select></div>
+                                            <div><label className={labelClass}>LR number</label><input type="text" className={`${fieldClass} uppercase`} value={formData.lr_no || ''} onChange={e => setFormData({ ...formData, lr_no: e.target.value.toUpperCase() })} placeholder="Enter LR number" /></div>
+                                            <div><label className={labelClass}>LR date</label><input type="date" className={fieldClass} value={formData.lr_date || ''} onChange={e => setFormData({ ...formData, lr_date: e.target.value })} /></div>
+                                        </div>
+                                    </section>
+
+                                    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                                        <SectionTitle icon={MapPin}>Vehicle & destination</SectionTitle>
+                                        <div className="grid gap-4">
+                                            <div><label className={labelClass}>Vehicle number</label><input type="text" required className={`${fieldClass} border-slate-400 font-mono font-bold uppercase tracking-wide`} value={formData.vehicle_no || ''} onChange={e => setFormData({ ...formData, vehicle_no: e.target.value.toUpperCase() })} placeholder="TN 37 AB 1234" /></div>
+                                            <div><label className={labelClass}>Delivery to</label><input type="text" className={`${fieldClass} uppercase`} value={formData.delivery || ''} onChange={e => setFormData({ ...formData, delivery: e.target.value.toUpperCase() })} placeholder="Location / party" /></div>
+                                            <div><label className={labelClass}>Insurance number</label><div className="relative"><ShieldCheck className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={17} /><input type="text" className={`${fieldClass} pl-10`} value={formData.insurance_no || ''} onChange={e => setFormData({ ...formData, insurance_no: e.target.value })} placeholder="Policy number" /></div></div>
+                                        </div>
+                                    </section>
+
+                                    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                                        <SectionTitle icon={Clock}>Gate timing</SectionTitle>
+                                        <div className="flex flex-col gap-3 sm:flex-row sm:items-end"><div className="flex-1"><label className={labelClass}>Time in</label><TimePicker type="in" /></div><div className="hidden h-[42px] items-center text-slate-300 sm:flex"><ArrowRight size={18} /></div><div className="flex-1"><label className={labelClass}>Time out</label><TimePicker type="out" /></div></div>
+                                    </section>
+
+                                    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                                        <SectionTitle icon={IndianRupee}>Freight details</SectionTitle>
+                                        <div className="grid gap-4 sm:grid-cols-2">
+                                            <div><label className={labelClass}>Number of bags</label><div className="relative"><Package className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={17} /><input type="number" className={`${fieldClass} pl-10 text-right font-semibold tabular-nums`} value={formData.no_of_bags ?? ''} onChange={e => setFormData({ ...formData, no_of_bags: Number(e.target.value) })} placeholder="0" /></div></div>
+                                            <div><label className={labelClass}>Total freight</label><div className="relative"><span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-semibold text-slate-400">₹</span><input type="number" className={`${fieldClass} pl-8 text-right font-semibold tabular-nums`} value={formData.freight ?? ''} onChange={e => setFormData({ ...formData, freight: Number(e.target.value) })} placeholder="0.00" /></div></div>
+                                            <div className="sm:col-span-2 flex items-center justify-between rounded-lg border border-blue-100 bg-blue-50 px-4 py-3"><div><p className="text-[11px] font-bold uppercase tracking-wider text-blue-600">Freight per bag</p><p className="mt-0.5 text-xs text-blue-600/70">Calculated automatically</p></div><input type="text" readOnly className="w-36 border-0 bg-transparent text-right text-xl font-bold tabular-nums text-blue-800 outline-none" value={`₹ ${calculatedFreightPerBag}`} /></div>
+                                        </div>
+                                    </section>
+                                </div>
+                            </div>
+
+                            <div className="flex flex-col-reverse gap-2 border-t border-slate-200 bg-white px-6 py-4 sm:flex-row sm:justify-end sm:px-7">
+                                <button type="button" onClick={() => setIsModalOpen(false)} className="h-10 rounded-lg border border-slate-300 bg-white px-5 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancel</button>
+                                <button type="submit" disabled={submitLoading} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-blue-600 px-6 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300">{submitLoading ? <><RefreshCw size={16} className="animate-spin" /> Saving...</> : <><Save size={16} /> Save record</>}</button>
+                            </div>
+                        </form>
                     </div>
                 </div>
-            </div>
-
-            {/* Modal */}
-            {isModalOpen && (
-  <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-4 font-sans">
-    <div className="relative bg-white w-full max-w-xl rounded-xl shadow-2xl overflow-hidden border-2 border-slate-950 animate-in zoom-in-95 duration-200 flex flex-col max-h-[94vh]">
-      
-      {/* Header */}
-      <div className="bg-slate-950 px-6 py-4 flex justify-between items-center text-white">
-        <div className="flex items-center gap-3">
-          <Truck size={24} className="text-blue-400" />
-          <h2 className="text-xl font-black uppercase tracking-tight">Despatch Entry</h2>
-        </div>
-        <button onClick={() => setIsModalOpen(false)} className="bg-red-600 p-2 rounded-lg">
-          <X size={24} strokeWidth={3} />
-        </button>
-      </div>
-
-      {/* Body */}
-      <div className="p-5 overflow-y-auto flex-1 bg-white">
-        <form onSubmit={handleSave} className="space-y-3">
-          
-          {/* Load Info */}
-          <div className="grid grid-cols-12 items-center gap-4">
-            <label className="col-span-4 text-right text-sm font-black text-slate-950 uppercase">Load Info</label>
-            <div className="col-span-8 flex gap-2">
-              <input type="text" readOnly className="w-24 p-2 bg-slate-100 border border-slate-400 text-slate-950 font-black text-lg rounded text-center" value={formData.load_no || 'NEW'} />
-              <input type="date" className="flex-1 p-2 border-2 border-slate-300 rounded text-lg font-black text-slate-950 outline-none focus:border-blue-600" value={formData.load_date || ''} onChange={e => setFormData({ ...formData, load_date: e.target.value })} />
-            </div>
-          </div>
-
-          {/* Transport */}
-          <div className="grid grid-cols-12 items-center gap-4">
-            <label className="col-span-4 text-right text-sm font-black text-slate-950 uppercase">Transport</label>
-            <select className="col-span-8 p-2 border-2 border-slate-300 rounded uppercase text-lg font-black text-slate-950 outline-none focus:border-blue-600" value={formData.transport_id || ''} onChange={e => setFormData({ ...formData, transport_id: e.target.value })}>
-              <option value="">— SELECT AGENCY —</option>
-              {transports.map(t => <option key={t.id} value={t.id}>{t.transport_name}</option>)}
-            </select>
-          </div>
-
-          {/* LR Details */}
-          <div className="grid grid-cols-12 items-center gap-4">
-            <label className="col-span-4 text-right text-sm font-black text-slate-950 uppercase">LR No/Date</label>
-            <div className="col-span-8 flex gap-2">
-              <input type="text" className="flex-1 p-2 border-2 border-slate-300 rounded text-lg font-black text-slate-950 uppercase outline-none focus:border-blue-600" value={formData.lr_no || ''} onChange={e => setFormData({ ...formData, lr_no: e.target.value.toUpperCase() })} placeholder="LR NO" />
-              <input type="date" className="flex-1 p-2 border-2 border-slate-300 rounded text-lg font-black text-slate-950 outline-none" value={formData.lr_date || ''} onChange={e => setFormData({ ...formData, lr_date: e.target.value })} />
-            </div>
-          </div>
-
-          {/* Vehicle No */}
-          <div className="grid grid-cols-12 items-center gap-4">
-            <label className="col-span-4 text-right text-sm font-black text-slate-950 uppercase">Vehicle No</label>
-            <input type="text" required className="col-span-8 p-2 border-2 border-slate-950 bg-white text-lg font-black text-slate-950 uppercase outline-none focus:bg-yellow-50" value={formData.vehicle_no || ''} onChange={e => setFormData({ ...formData, vehicle_no: e.target.value.toUpperCase() })} placeholder="TN 37 AB 1234" />
-          </div>
-
-          {/* Delivery */}
-          <div className="grid grid-cols-12 items-center gap-4">
-            <label className="col-span-4 text-right text-sm font-black text-slate-950 uppercase">Delivery To</label>
-            <input type="text" className="col-span-8 p-2 border-2 border-slate-300 rounded text-lg font-black text-slate-950 uppercase outline-none" value={formData.delivery || ''} onChange={e => setFormData({ ...formData, delivery: e.target.value.toUpperCase() })} placeholder="LOCATION / PARTY" />
-          </div>
-
-          {/* Insurance */}
-          <div className="grid grid-cols-12 items-center gap-4">
-            <label className="col-span-4 text-right text-sm font-black text-slate-950 uppercase">Insurance</label>
-            <input type="text" className="col-span-8 p-2 border-2 border-slate-300 rounded text-lg font-bold text-slate-950 outline-none" value={formData.insurance_no || ''} onChange={e => setFormData({ ...formData, insurance_no: e.target.value })} placeholder="POLICY NUMBER" />
-          </div>
-
-          {/* Time */}
-          <div className="grid grid-cols-12 items-center gap-4">
-            <label className="col-span-4 text-right text-sm font-black text-slate-950 uppercase">Time In/Out</label>
-            <div className="col-span-8 flex items-center gap-2">
-              <div className="flex bg-slate-100 border border-slate-400 p-1 rounded font-black text-slate-950">
-                <select className="bg-transparent" value={formData.in_hh} onChange={e => setFormData({ ...formData, in_hh: e.target.value })}>{hours.map(h => <option key={h} value={h}>{h}</option>)}</select>
-                <span>:</span>
-                <select className="bg-transparent" value={formData.in_mm} onChange={e => setFormData({ ...formData, in_mm: e.target.value })}>{minutes.map(m => <option key={m} value={m}>{m}</option>)}</select>
-                <select className="bg-transparent text-blue-700" value={formData.in_period} onChange={e => setFormData({ ...formData, in_period: e.target.value })}><option value="AM">AM</option><option value="PM">PM</option></select>
-              </div>
-              <span className="font-bold">→</span>
-              <div className="flex bg-slate-100 border border-slate-400 p-1 rounded font-black text-slate-950">
-                <select className="bg-transparent" value={formData.out_hh} onChange={e => setFormData({ ...formData, out_hh: e.target.value })}>{hours.map(h => <option key={h} value={h}>{h}</option>)}</select>
-                <span>:</span>
-                <select className="bg-transparent" value={formData.out_mm} onChange={e => setFormData({ ...formData, out_mm: e.target.value })}>{minutes.map(m => <option key={m} value={m}>{m}</option>)}</select>
-                <select className="bg-transparent text-red-700" value={formData.out_period} onChange={e => setFormData({ ...formData, out_period: e.target.value })}><option value="AM">AM</option><option value="PM">PM</option></select>
-              </div>
-            </div>
-          </div>
-
-          {/* SEPARATE BOX FOR NO. OF BAGS */}
-          <div className="grid grid-cols-12 items-center gap-4">
-            <label className="col-span-4 text-right text-sm font-black text-slate-950 uppercase">No. of Bags</label>
-            <div className="col-span-8">
-              <input type="number" className="w-40 p-2 border-2 border-slate-400 rounded text-xl font-black text-slate-950 text-right outline-none focus:border-blue-600" value={formData.no_of_bags ?? ''} onChange={e => setFormData({ ...formData, no_of_bags: Number(e.target.value) })} placeholder="0" />
-            </div>
-          </div>
-
-          {/* SEPARATE BOX FOR FREIGHT */}
-          <div className="grid grid-cols-12 items-center gap-4">
-            <label className="col-span-4 text-right text-sm font-black text-slate-950 uppercase">Total Freight</label>
-            <div className="col-span-8">
-              <input type="number" className="w-full p-2 border-2 border-slate-400 rounded text-xl font-black text-slate-950 text-right outline-none focus:border-blue-600" value={formData.freight ?? ''} onChange={e => setFormData({ ...formData, freight: Number(e.target.value) })} placeholder="ENTER AMOUNT (₹)" />
-            </div>
-          </div>
-
-          {/* SEPARATE BOX FOR CALCULATION */}
-          <div className="grid grid-cols-12 items-center gap-4">
-            <label className="col-span-4 text-right text-sm font-black text-slate-500 uppercase">Freight Per Bag</label>
-            <div className="col-span-8">
-              <input type="text" readOnly className="w-40 p-2 bg-blue-50 border-2 border-blue-200 rounded text-xl font-black text-blue-700 text-right cursor-default" value={`₹ ${calculatedFreightPerBag}`} />
-            </div>
-          </div>
-
-          {/* Footer */}
-          <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
-            <button type="button" onClick={() => setIsModalOpen(false)} className="px-6 py-2 border-2 border-slate-950 rounded font-black text-slate-950 uppercase">Cancel</button>
-            <button type="submit" disabled={submitLoading} className={`px-12 py-2 rounded font-black text-lg shadow-lg uppercase transition-all active:scale-95 ${submitLoading ? 'bg-slate-300 text-slate-500' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>
-              {submitLoading ? 'Saving...' : 'Save Record'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  </div>
-)}
+            )}
         </div>
     );
 };

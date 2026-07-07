@@ -41,6 +41,7 @@
     // Orders
     router.post('/orders', validate(ctrl.order.create));
     router.get('/orders', validate(ctrl.order.getAll));
+    router.get('/orders/:id', validate(ctrl.order.getOne));
     router.put('/orders/:id', validate(ctrl.order.update));
     router.delete('/orders/:id', validate(ctrl.order.delete));
     router.post('/orders/bulk-delete', validate(ctrl.order.bulkDelete));
@@ -65,6 +66,7 @@
     // Direct Invoices (Sales WITHOUT Order)
     router.post('/direct-invoices', validate(ctrl.directInvoice.create));
     router.get('/direct-invoices', validate(ctrl.directInvoice.getAll));
+    router.get('/direct-invoices/:id', validate(ctrl.directInvoice.getOne));
     router.put('/direct-invoices/:id', validate(ctrl.directInvoice.update));
     router.delete('/direct-invoices/:id', validate(ctrl.directInvoice.delete));
 

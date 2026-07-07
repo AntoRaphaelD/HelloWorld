@@ -63,8 +63,6 @@ const RG1Production = () => {
         return `${yyyy}-${mm}-${dd}`;
     };
 
-    const getProduct = (productId) => products.find(p => p.id === parseInt(productId));
-
     const getPreviousDayInvoiceKgs = (productId, dateValue) => {
         const previousDate = getPreviousDate(dateValue);
         if (!productId || !previousDate) return '';
@@ -177,6 +175,8 @@ const RG1Production = () => {
         finally { setLoading(false); }
     };
 
+    const getProduct = (productId) => products.find(p => p.id === parseInt(productId));
+
     // --- 4. Action Handlers ---
   const handleAddNew = () => {
     setFormData({ ...emptyState }); // Reset to initial empty strings
@@ -235,19 +235,18 @@ const RG1Production = () => {
             await transactionsAPI.production.update(formData.id, formData);
         } else {
             const payload = {
- date: formData.date,
- product_id: formData.product_id,
- packing_type_id: formData.packing_type_id,
- weight_per_bag: formData.weight_per_bag,
- prev_closing_kgs: formData.prev_closing_kgs,
- production_kgs: formData.production_kgs,
- invoice_kgs: formData.invoice_kgs,
- stock_kgs: formData.stock_kgs,
- stock_bags: formData.stock_bags,
- stock_loose_kgs: formData.stock_loose_kgs
-};
-
-await transactionsAPI.production.create(payload);
+                date: formData.date,
+                product_id: formData.product_id,
+                packing_type_id: formData.packing_type_id,
+                weight_per_bag: formData.weight_per_bag,
+                prev_closing_kgs: formData.prev_closing_kgs,
+                production_kgs: formData.production_kgs,
+                invoice_kgs: formData.invoice_kgs,
+                stock_kgs: formData.stock_kgs,
+                stock_bags: formData.stock_bags,
+                stock_loose_kgs: formData.stock_loose_kgs
+            };
+            await transactionsAPI.production.create(payload);
         }
 
         // 🟢 CRITICAL: Re-fetch Product Masters to get the NEW mill_stock
@@ -598,3 +597,4 @@ await transactionsAPI.production.create(payload);
 };
 
 export default RG1Production;
+ 
