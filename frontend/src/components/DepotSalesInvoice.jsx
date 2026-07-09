@@ -201,12 +201,12 @@ const DepotSalesInvoice = () => {
             const rawTotalInvoiceAmount = is68Product ? (10 * packs * rateInput) : (totalKgs * rateInput);
             const totalInvoiceAmount = is68Product ? rawTotalInvoiceAmount : Math.round(rawTotalInvoiceAmount);
 
-            const charityPerBale = salesType === 'GST SALES' ? 3 : num(item.charity_per_bale || config.charity_value || 0);
+            const charityPerBale = salesType === 'GST SALES' || salesType === "DEPOT SALES" ? 3 : num(item.charity_per_bale || config.charity_value || 0);
             let charity = 0;
-            if (salesType === 'GST SALES') {
+            if (salesType === 'GST SALES' || salesType === "DEPOT SALES" ) {
                 charity = totalKgs * charityPerBale;
             } else {
-                charity = totalInvoiceAmount * (charityPerBale / 100);
+                charity = 0;
             }
 
             const taxDivisor = 1 + (taxPercentage / 100);

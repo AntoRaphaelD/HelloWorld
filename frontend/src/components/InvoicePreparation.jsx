@@ -322,218 +322,435 @@ const InvoicePreparation = () => {
     }, [currentPage, totalPages]);
 
     // =====================================================
-    // PROFESSIONAL EXPORT TO PDF - MATCHES PRINT VIEW 100%
+    // EXPORT PDF - COMPACT TAX INVOICE FORMAT
     // =====================================================
     const getHSN = (productId) => {
         const prod = listData.products.find(p => p.id === productId);
         return prod?.printing_tariff_sub_head_no || '';
     };
     const exportToPDF = () => {
+        {
+            const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+            const data = formData;
+            const pageWidth = doc.internal.pageSize.getWidth();
+            const pageHeight = doc.internal.pageSize.getHeight();
+            const margin = 7;
+            const right = pageWidth - margin;
+            const contentWidth = pageWidth - (margin * 2);
+            const midX = margin + 115;
+
+            const fmt = (v, digits = 2) => num(v).toLocaleString('en-IN', {
+                minimumFractionDigits: digits,
+                maximumFractionDigits: digits
+            });
+            const fmtDate = (value) => {
+                if (!value) return '';
+                const date = new Date(value);
+                if (Number.isNaN(date.getTime())) return String(value);
+                return date.toLocaleDateString('en-GB');
+            };
+            const safe = (value, fallback = '') => {
+                const text = value === null || value === undefined ? '' : String(value).trim();
+                return text || fallback;
+            };
+            const party = listData.parties.find(p => String(p.id) === String(data.party_id)) || data.Party || {};
+            const transport = listData.transports.find(t => String(t.id) === String(data.transport_id)) || data.Transport || {};
+            const firstRow = gridRows[0] || {};
+            const hsnCodes = [...new Set(gridRows.map(row => getHSN(row.product_id)).filter(Boolean))];
+            const totalGst = num(data.total_gst) + num(data.total_sgst) + num(data.total_cgst) + num(data.total_igst);
+            const lineRows = gridRows.length ? gridRows : [{}];
+            const ratePerKg = (item) => {
+                const netWeight = num(item.total_kgs);
+                return netWeight ? num(item.assessable_value) / netWeight : 0;
+            };
+
+            const labelValue = (label, value, x, y, labelW = 28) => {
+                doc.setFont("helvetica", "bold");
+                doc.text(label, x, y);
+                doc.text(":", x + labelW, y);
+                doc.text(safe(value, "-"), x + labelW + 5, y);
+            };
+            const checkbox = (label, x, y) => {
+                doc.rect(x, y - 3, 3.5, 3.5);
+                doc.setFont("helvetica", "bold");
+                doc.text(label, x + 5, y);
+            };
+
+            doc.setTextColor(0);
+            doc.setDrawColor(0);
+            doc.setLineWidth(0.25);
+            doc.setFont("helvetica", "bold");
+
+            doc.setFontSize(6.5);
+            checkbox("ORIGINAL FOR BUYER", 145, 10);
+            checkbox("DUPLICATE FOR TRANSPORTER", 145, 15);
+            checkbox("TRIPLICATE FOR FILE COPY", 145, 20);
+            checkbox("EXTRA COPY", 145, 25);
+
+            doc.setFontSize(11);
+            doc.text("TAX INVOICE", pageWidth / 2, 22, { align: "center" });
+
+            let y = 36;
+            const headerHeight = 52;
+            doc.rect(margin, y, contentWidth, headerHeight);
+
+            doc.setFontSize(10);
+            doc.text("KAYAAR EXPORTS PRIVATE LIMITED", margin + 62, y + 8);
+            doc.setFontSize(8);
+            doc.text("D.No: 43/5, Railway Feeder Road,", margin + 71, y + 13);
+            doc.text("K.R. Nagar - 628 503, Kovilpatti - Taluk", margin + 65, y + 18);
+            doc.text("Tuticorin Dist., Tamilnadu, India", margin + 72, y + 23);
+            doc.text("(04632) - 248258, 9443238761", margin + 75, y + 29);
+            doc.text("E-Mail : ttnkrgroup@gmail.com", margin + 74, y + 34);
+            doc.text("GSTIN : 33AAACK4468M1ZA", margin + 78, y + 40);
+
+            const certX = right - 48;
+            doc.rect(certX, y + 4, 41, 34);
+            doc.setFontSize(7);
+            doc.text("OEKO-TEX", certX + 20.5, y + 10, { align: "center" });
+            doc.setFontSize(5.5);
+            doc.text("CONFIDENCE IN TEXTILES", certX + 20.5, y + 14, { align: "center" });
+            doc.setFontSize(7);
+            doc.text("STANDARD 100", certX + 20.5, y + 19, { align: "center" });
+            doc.setFontSize(6);
+            doc.text("18.HIN.60427 HOHENSTEIN HTTI", certX + 20.5, y + 25, { align: "center" });
+            doc.setFontSize(5.2);
+            doc.text("Tested for harmful substances", certX + 20.5, y + 31, { align: "center" });
+            doc.text("www.oeko-tex.com/standard100", certX + 20.5, y + 35, { align: "center" });
+
+            doc.setFontSize(7);
+            doc.text("PAN : AAACK4468M", margin + 3, y + 49);
+            doc.text("CIN : U51101TN1991PTC020933", right - 64, y + 49);
+
+            y += headerHeight;
+            const detailsHeight = 45;
+            doc.rect(margin, y, contentWidth, detailsHeight);
+            doc.line(midX, y, midX, y + detailsHeight);
+
+            doc.setFontSize(8);
+            doc.text("Party Name & Address", margin + 3, y + 6);
+            doc.setFontSize(9);
+            doc.text(safe(party.account_name, safe(data.party_name, "N/A")).toUpperCase(), margin + 8, y + 13);
+            doc.setFontSize(7);
+            const addressLines = [data.addr1, data.addr2, data.addr3].filter(Boolean);
+            (addressLines.length ? addressLines : [""]).slice(0, 4).forEach((line, index) => {
+                doc.text(safe(line).toUpperCase(), margin + 8, y + 20 + (index * 5));
+            });
+            doc.text(`GST No: ${safe(party.gst_no || data.gst_no, "N/A")}`, margin + 8, y + 39);
+
+            const infoX = midX + 7;
+            doc.setFontSize(8);
+            labelValue("Invoice No", data.invoice_no, infoX, y + 8);
+            labelValue("Invoice Dt", fmtDate(data.date), infoX, y + 15);
+            labelValue("E-Way Bill No", data.ebill_no, infoX, y + 22);
+            labelValue("Vehicle No", data.vehicle_no, infoX, y + 29);
+            labelValue("Delivery At", data.delivery, infoX, y + 36);
+            if (transport.transport_name) labelValue("Transport", transport.transport_name, infoX, y + 43);
+
+            y += detailsHeight;
+            doc.rect(margin, y, contentWidth, 9);
+            doc.setFontSize(8);
+            doc.text("DESCRIPTION OF GOODS", pageWidth / 2, y + 6, { align: "center" });
+            y += 9;
+
+            autoTable(doc, {
+                startY: y,
+                margin: { left: margin, right: margin },
+                tableWidth: contentWidth,
+                head: [["No of Bags", "Net Weight", "S.L No", "Rate Per Kgs", "Assessable Value"]],
+                body: lineRows.map(item => [
+                    fmt(item.packs, 0),
+                    fmt(item.total_kgs, 2),
+                    [safe(item.from_no), safe(item.to_no)].filter(Boolean).join(" - "),
+                    fmt(ratePerKg(item), 2),
+                    fmt(item.assessable_value, 2)
+                ]),
+                theme: "grid",
+                styles: {
+                    font: "helvetica",
+                    fontSize: 8,
+                    textColor: 0,
+                    lineColor: 0,
+                    lineWidth: 0.25,
+                    cellPadding: 2,
+                    minCellHeight: 9,
+                    valign: "middle"
+                },
+                headStyles: {
+                    fillColor: [255, 255, 255],
+                    textColor: 0,
+                    fontStyle: "bold",
+                    halign: "center",
+                    fontSize: 7.5
+                },
+                bodyStyles: {
+                    halign: "center",
+                    fontStyle: "bold"
+                },
+                columnStyles: {
+                    0: { cellWidth: 30 },
+                    1: { cellWidth: 38 },
+                    2: { cellWidth: 58 },
+                    3: { cellWidth: 34, halign: "right" },
+                    4: { cellWidth: contentWidth - 160, halign: "right" }
+                }
+            });
+
+            y = doc.lastAutoTable.finalY;
+            const summaryTop = y;
+            const taxLabelX = midX + 4;
+            const taxValueX = right - 5;
+            const taxRows = [
+                ["CHARITY", data.total_charity],
+                ["FREIGHT", data.freight_charges],
+                ["GST", totalGst],
+                ["ROUND OFF", data.round_off]
+            ].filter(([label, value]) => label === "CHARITY" || label === "FREIGHT" || num(value) !== 0);
+            const summaryHeight = Math.max(38, 14 + (taxRows.length * 6));
+            doc.rect(margin, summaryTop, contentWidth, summaryHeight);
+            doc.line(midX, summaryTop, midX, summaryTop + summaryHeight);
+
+            doc.setFontSize(10);
+            doc.text(safe(firstRow.product_description, "DESCRIPTION").toUpperCase(), margin + 3, summaryTop + 9);
+            doc.setFontSize(8);
+            doc.text(`HSN CODE: ${hsnCodes.join(", ") || "N/A"}`, margin + 3, summaryTop + 34);
+
+            doc.setFontSize(8);
+            taxRows.forEach(([label, value], index) => {
+                const rowY = summaryTop + 9 + (index * 6);
+                doc.setFont("helvetica", label === "GST" ? "bold" : "normal");
+                doc.text(label, taxLabelX, rowY);
+                doc.text(fmt(value, 2), taxValueX, rowY, { align: "right" });
+            });
+
+            y = summaryTop + summaryHeight;
+            doc.rect(margin, y, contentWidth, 30);
+            doc.setFontSize(8);
+            doc.setFont("helvetica", "bold");
+            doc.text("Amount Chargeable (in words)", margin + 3, y + 7);
+            doc.setFont("helvetica", "normal");
+            doc.text(doc.splitTextToSize(numberToWords(num(data.net_amount)), 105), margin + 3, y + 13);
+            doc.setFont("helvetica", "bold");
+            doc.text("Grand Total", right - 48, y + 11);
+            doc.setFontSize(10);
+            doc.text(fmt(data.net_amount, 2), right - 3, y + 11, { align: "right" });
+
+            y += 30;
+            doc.rect(margin, y, contentWidth, 24);
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(7);
+            doc.text("For KAYAAR EXPORTS PRIVATE LIMITED", right - 5, y + 9, { align: "right" });
+            doc.text("Authorised Signatory", right - 5, y + 21, { align: "right" });
+
+            doc.setFontSize(6.5);
+            doc.setFont("helvetica", "normal");
+            doc.text(`Generated on ${new Date().toLocaleString('en-GB')} | Subject to Kovilpatti jurisdiction`, pageWidth / 2, pageHeight - 7, { align: "center" });
+
+            doc.save(`Kayaar_TAX_INVOICE_${data.invoice_no || 'draft'}.pdf`);
+            return;
+        }
         const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
         const data = formData;
-        const rows = gridRows;
         const pageWidth = doc.internal.pageSize.getWidth();
-        const pageHeight = doc.internal.pageSize.getHeight();
-        const left = 14;
-        const right = pageWidth - 14;
-        const top = 8;
-        const contentWidth = right - left;
-        const fmt = (v, digits = 2) => num(v).toLocaleString('en-IN', {
-            minimumFractionDigits: digits,
-            maximumFractionDigits: digits
-        });
-        const text = (value) => String(value || '');
-        const party = listData.parties.find(p => String(p.id) === String(data.party_id)) || data.Party || {};
-        const cgstPer = rows.find(r => num(r.cgst_per) > 0)?.cgst_per || 0;
-        const sgstPer = rows.find(r => num(r.sgst_per) > 0)?.sgst_per || 0;
-        const igstPer = rows.find(r => num(r.igst_per) > 0)?.igst_per || 0;
+        const margin = 12;
+        const contentWidth = pageWidth - (margin * 2);
+        let y = margin + 10;
 
+        const fmt = (v, digits = 2) => num(v).toFixed(digits);
+ 
         doc.setTextColor(0);
-        doc.setDrawColor(0);
-        doc.setLineWidth(0.25);
-        doc.rect(left, top, contentWidth, pageHeight - 16);
+        doc.setFont("helvetica");
 
+ 
+        // 1. HEADER
+        doc.setFontSize(36);
         doc.setFont("helvetica", "bold");
-        doc.setFontSize(10);
-        doc.text("TAX INVOICE", pageWidth / 2, 28, { align: "center" });
+        doc.setTextColor("#1d4ed8"); // Blue-700
+        doc.text("TAX INVOICE", margin, y);
+        doc.setTextColor(0);
+        doc.setFontSize(8);
+        doc.text("Original for Buyer", margin, y + 5);
+        y += 15;
 
-        let copyY = 18;
-        ["ORIGINAL FOR BUYER", "DUPLICATE FOR TRANSPORTER", "TRIPLICATE FOR FILE COPY", "EXTRA COPY"].forEach(label => {
-            doc.rect(right - 58, copyY - 3.5, 4, 4);
-            doc.setFontSize(6.5);
-            doc.text(label, right - 52, copyY);
-            copyY += 5;
-        });
-
-        const companyTop = 40;
-        const companyHeight = 57;
-        const certX = right - 45;
-        doc.rect(left + 6, companyTop, contentWidth - 12, companyHeight);
-        doc.line(certX, companyTop, certX, companyTop + companyHeight - 9);
-        doc.line(left + 6, companyTop + companyHeight - 9, right - 6, companyTop + companyHeight - 9);
-
+ 
+        // 2. COMPANY & PARTY DETAILS
+        doc.setFontSize(14);
         doc.setFont("helvetica", "bold");
+        doc.text("KAYAAR EXPORTS PRIVATE LIMITED", margin, y);
         doc.setFontSize(9);
-        doc.text("KAYAAR EXPORTS PRIVATE LIMITED", (left + certX) / 2, companyTop + 7, { align: "center" });
-        doc.setFontSize(7.2);
-        [
-            "D.No: 43/5, Railway Feeder Road,",
-            "K.R. Nagar - 628 503, Kovilpatti - Taluk",
-            "Tuticorin Dist., Tamilnadu, India",
-            "(04632) - 248258, 9443238761",
-            "E-Mail : ttnkrgroup@gmail.com",
-            "GSTIN : 33AAACK4468M1ZA"
-        ].forEach((line, idx) => {
-            doc.text(line, (left + certX) / 2, companyTop + 13 + (idx * 5), { align: "center" });
-        });
-
-        doc.setFontSize(6.2);
-        doc.text("OEKO-TEX (R)", certX + 22, companyTop + 6, { align: "center" });
-        doc.text("CONFIDENCE IN TEXTILES", certX + 22, companyTop + 10, { align: "center" });
-        doc.setFontSize(8);
-        doc.text("STANDARD 100", certX + 22, companyTop + 17, { align: "center" });
-        doc.setFontSize(6.2);
-        doc.text("18.HIN.60427 HOHENSTEIN HTTI", certX + 22, companyTop + 22, { align: "center" });
-        doc.setFontSize(5.8);
-        doc.text("Tested for harmful substances", certX + 22, companyTop + 34, { align: "center" });
-        doc.text("www.oeko-tex.com/standard100", certX + 22, companyTop + 38, { align: "center" });
-
-        doc.setFontSize(6.7);
-        doc.text("PAN : AAACK4468M", left + 9, companyTop + companyHeight - 3);
-        doc.text("CIN : U51101TN1991PTC020933", right - 9, companyTop + companyHeight - 3, { align: "right" });
-
-        const partyTop = companyTop + companyHeight;
-        const partyHeight = 55;
-        const midX = left + contentWidth * 0.58;
-        doc.rect(left + 6, partyTop, contentWidth - 12, partyHeight);
-        doc.line(midX, partyTop, midX, partyTop + partyHeight);
-
-        doc.setFontSize(7.2);
-        doc.setFont("helvetica", "bold");
-        doc.text("Party Name & Address", left + 9, partyTop + 8);
-        doc.setFontSize(8);
-        doc.text(text(party.account_name || data.party_name).toUpperCase(), left + 14, partyTop + 17);
         doc.setFont("helvetica", "normal");
-        doc.setFontSize(7);
-        const addressLines = [data.addr1, data.addr2, data.addr3].filter(Boolean);
-        addressLines.forEach((line, idx) => doc.text(text(line).toUpperCase(), left + 14, partyTop + 25 + (idx * 6)));
+        y += 5;
+        doc.text("D.No: 43/5, Railway Feeder Road, K.R. Nagar – 628503", margin, y);
+        y += 4;
+        doc.text("Kovilpatti – Taluk, Tuticorin Dist, Tamilnadu, India", margin, y);
+        y += 4;
+        doc.text("Phone: 04632 – 248258, 9443238761 | Email: ttnkrgroup@gmail.com", margin, y);
+        y += 6;
         doc.setFont("helvetica", "bold");
-        doc.text(`GST No: ${party.gst_no || data.gst_no || 'N/A'}`, left + 14, partyTop + 47);
+        doc.text("GSTIN: 33AAACK4468M1ZA", margin, y);
+        y += 10;
 
-        const infoRows = [
-            ["Invoice No", data.invoice_no],
-            ["Invoice Dt", data.date],
-            ["E-Way Bill No", data.ebill_no || "PENDING"],
-            ["Vehicle No", data.vehicle_no || "N/A"],
-            ["Delivery At", data.delivery || "MUMBAI"]
-        ];
-        infoRows.forEach(([label, value], idx) => {
-            const y = partyTop + 12 + (idx * 8);
-            doc.setFont("helvetica", "bold");
-            doc.text(label, midX + 8, y);
-            doc.text(":", midX + 35, y);
-            doc.text(text(value).toUpperCase(), midX + 44, y);
-        });
+ 
+        // 3. INVOICE & BILLING INFO
+        doc.setDrawColor(203, 213, 225); // slate-300
+        doc.setLineWidth(0.5);
+        doc.line(margin, y, pageWidth - margin, y);
+        y += 8;
 
-        const tableStartY = partyTop + partyHeight;
+ 
+        const party = listData.parties.find(p => String(p.id) === String(data.party_id)) || data.Party || {};
+        doc.setFontSize(8);
+        doc.setTextColor(100, 116, 139); // slate-500
+        doc.text("BILL TO:", margin, y);
+        doc.setFontSize(12);
+        doc.setTextColor(0);
+        doc.setFont("helvetica", "bold");
+        doc.text(party.account_name || "N/A", margin, y + 5);
+        doc.setFontSize(9);
+        doc.setFont("helvetica", "normal");
+        const address = [data.addr1, data.addr2, data.addr3].filter(Boolean).join(', ');
+        doc.text(address, margin, y + 10);
+        doc.setFont("helvetica", "bold");
+        doc.text(`GST No: ${party.gst_no || 'N/A'}`, margin, y + 15);
+
+ 
+        const infoX = pageWidth / 2 + 10;
+        doc.setFontSize(8);
+        doc.setTextColor(100, 116, 139);
+        doc.text("INVOICE NO:", infoX, y);
+        doc.text("INVOICE DATE:", infoX, y + 7);
+        doc.text("E-WAY BILL NO:", infoX, y + 14);
+        doc.text("VEHICLE NO:", infoX, y + 21);
+
+ 
+        doc.setFontSize(10);
+        doc.setTextColor(0);
+        doc.setFont("helvetica", "bold");
+        doc.text(data.invoice_no, infoX + 35, y);
+        doc.text(data.date, infoX + 35, y + 7);
+        doc.text(data.ebill_no || 'PENDING', infoX + 35, y + 14);
+        doc.text(data.vehicle_no || 'N/A', infoX + 35, y + 21);
+
+ 
+        y += 30;
+        doc.line(margin, y, pageWidth - margin, y);
+
+ 
+        // 4. PRODUCT TABLE
         autoTable(doc, {
-            startY: tableStartY,
-            margin: { left: left + 6, right: left + 6 },
-            tableWidth: contentWidth - 12,
+            startY: y + 2,
+            margin: { left: margin, right: margin },
             head: [
-                [{ content: "DESCRIPTION OF GOODS", colSpan: 6, styles: { halign: "center", fontStyle: "bold" } }],
-                ["No of Bags", "Net Weight", "S.L No", "Rate Per Kgs", "Assessable Value"]
+                ["Description of Goods", "No of Bags", "Net Weight", "S.L No", "Rate Per Kgs", "Assessable Value"]
             ],
-            body: rows.map(r => [
-                fmt(r.packs, 0),
-                fmt(r.total_kgs, 2),
-                `${text(r.from_no)} - ${text(r.to_no)}`.trim(),
-                fmt(r.rate, 2),
-                fmt(r.assessable_value, 2)
+            body: gridRows.map(item => [
+                { content: `${item.product_description}\nHSN: ${getHSN(item.product_id)}`, styles: { fontStyle: 'bold' } },
+                { content: num(item.packs).toLocaleString('en-IN'), styles: { halign: 'center' } },
+                { content: num(item.total_kgs).toLocaleString('en-IN', { minimumFractionDigits: 2 }), styles: { halign: 'center', fontStyle: 'bold' } },
+                { content: fmt(item.packs, 0), styles: { halign: 'center' } },
+                { content: fmt(item.total_kgs, 2), styles: { halign: 'center', fontStyle: 'bold' } },
+                { content: `${item.from_no || ''} - ${item.to_no || ''}`, styles: { halign: 'center' } },
+                { content: `₹${num(item.rate).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, styles: { halign: 'right' } },
+                { content: num(item.assessable_value).toLocaleString('en-IN', { minimumFractionDigits: 2 }), styles: { halign: 'right', fontStyle: 'bold' } },
+                { content: `Rs. ${fmt(item.rate, 2)}`, styles: { halign: 'right' } },
+                { content: fmt(item.assessable_value, 2), styles: { halign: 'right', fontStyle: 'bold' } }
             ]),
             theme: "grid",
             styles: {
                 font: "helvetica",
-                fontSize: 7,
+                fontSize: 8,
                 textColor: 0,
                 lineColor: 0,
+                lineColor: [203, 213, 225],
                 lineWidth: 0.2,
                 cellPadding: 2,
                 valign: "middle"
             },
             headStyles: {
-                fillColor: [255, 255, 255],
+                fillColor: [241, 245, 249], // slate-100
+                textColor: 29,
                 textColor: 0,
-                lineColor: 0,
-                lineWidth: 0.2,
-                fontSize: 7,
+                fontSize: 8,
                 fontStyle: "bold"
             },
             columnStyles: {
-                0: { cellWidth: 24, halign: "center" },
-                1: { cellWidth: 28, halign: "center" },
-                2: { cellWidth: 54, halign: "center" },
-                3: { cellWidth: 34, halign: "right" },
-                4: { cellWidth: 30, halign: "right" }
+                0: { cellWidth: 60 },
+                1: { halign: 'center' },
+                2: { halign: 'center' },
+                3: { halign: 'center' },
+                4: { halign: 'right' },
+                5: { halign: 'right' }
             }
         });
 
-        let y = doc.lastAutoTable.finalY;
-        const detailHeight = Math.max(44, 22 + (rows.length * 8));
-        const footerTop = Math.min(y, 245);
-        doc.rect(left + 6, footerTop, contentWidth - 12, detailHeight);
-        doc.line(midX, footerTop, midX, footerTop + detailHeight);
-        doc.line(right - 44, footerTop, right - 44, footerTop + detailHeight);
+ 
+        y = doc.lastAutoTable.finalY + 10;
 
-        const description = rows.map(r => text(r.product_description).toUpperCase()).filter(Boolean).join(", ");
-        const hsnCodes = [...new Set(rows.map(r => getHSN(r.product_id)).filter(Boolean))].join(", ");
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(7.5);
-        doc.text(doc.splitTextToSize(description || "GOODS", midX - left - 17), left + 9, footerTop + 8);
-        doc.text(`HSN CODE: ${hsnCodes || "-"}`, left + 9, footerTop + 31);
-        doc.text("-", left + 9, footerTop + 38);
+ 
+        // 5. TOTALS & AMOUNT IN WORDS
+        const totalsX = pageWidth / 2;
+        const totalsY = y;
+        const totalLabelX = totalsX;
+        const totalValueX = pageWidth - margin;
 
-        const totalLines = [
-            ["CHARITY", fmt(data.total_charity, 2)],
-            ["FREIGHT", fmt(data.freight_charges, 2)],
-            [`C.G.S.T    ${fmt(cgstPer, 2)} %`, fmt(data.total_cgst, 2)],
-            [`S.G.S.T    ${fmt(sgstPer, 2)} %`, fmt(data.total_sgst, 2)],
-            [`I.G.S.T    ${fmt(igstPer, 2)} %`, fmt(data.total_igst, 2)],
-            ["TCS", fmt(data.total_tcs, 2)],
-            ["ROUND OFF", fmt(data.round_off, 2)]
-        ].filter(([, value], idx) => idx < 2 || num(value.replace(/,/g, '')) !== 0);
+ 
+        const totalRows = [
+            ["Assessable Value", data.total_assessable],
+            ["Charity", data.total_charity],
+            ["Freight Charges", data.freight_charges],
+            ["GST Total", num(data.total_gst) + num(data.total_sgst) + num(data.total_cgst) + num(data.total_igst)],
+        ];
 
-        totalLines.forEach(([label, value], idx) => {
-            const lineY = footerTop + 8 + (idx * 6);
+ 
+        doc.setFontSize(10);
+        totalRows.forEach(([label, value], i) => {
             doc.setFont("helvetica", "normal");
-            doc.setFontSize(7);
-            doc.text(label, midX + 5, lineY);
+            doc.text(label, totalLabelX, totalsY + (i * 7));
             doc.setFont("helvetica", "bold");
-            doc.text(value, right - 9, lineY, { align: "right" });
+            doc.text(`₹${num(value).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, totalValueX, totalsY + (i * 7), { align: 'right' });
+            doc.text(`Rs. ${fmt(value, 2)}`, totalValueX, totalsY + (i * 7), { align: 'right' });
         });
 
-        const amountTop = footerTop + detailHeight;
-        doc.rect(left + 6, amountTop, contentWidth - 12, 20);
-        doc.line(right - 60, amountTop, right - 60, amountTop + 20);
+ 
+        doc.setDrawColor(203, 213, 225);
+        doc.setLineWidth(0.3);
+        doc.line(totalsX, totalsY + (totalRows.length * 7) - 2, totalValueX, totalsY + (totalRows.length * 7) - 2);
+
+ 
+        const grandTotalY = totalsY + (totalRows.length * 7) + 5;
+        doc.setFontSize(14);
         doc.setFont("helvetica", "bold");
+        doc.text("GRAND TOTAL", totalLabelX, grandTotalY);
+        doc.setFontSize(18);
+        doc.text(`₹${num(data.net_amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, totalValueX, grandTotalY, { align: 'right' });
+
+        doc.text(`Rs. ${fmt(data.net_amount, 2)}`, totalValueX, grandTotalY, { align: 'right' });
+ 
+        const amountInWordsY = grandTotalY + 15;
         doc.setFontSize(8);
-        doc.text("Amount Chargeable (in words)", left + 9, amountTop + 6);
-        doc.setFontSize(7);
-        doc.text(doc.splitTextToSize(numberToWords(num(data.net_amount)), 115), left + 9, amountTop + 13);
-        doc.setFontSize(9);
-        doc.text("NET AMOUNT", right - 57, amountTop + 8);
-        doc.setFontSize(11);
-        doc.text(fmt(data.net_amount, 2), right - 9, amountTop + 15, { align: "right" });
-
-        const signTop = amountTop + 20;
-        doc.rect(left + 6, signTop, contentWidth - 12, 30);
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(6.5);
-        doc.text("We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.", left + 9, signTop + 7);
         doc.setFont("helvetica", "bold");
-        doc.text("For KAYAAR EXPORTS PRIVATE LIMITED", right - 9, signTop + 9, { align: "right" });
-        doc.text("Authorised Signatory", right - 9, signTop + 25, { align: "right" });
+        doc.text("Amount Chargeable (in words):", margin, amountInWordsY);
+        doc.setFontSize(10);
+        doc.setTextColor("#1d4ed8");
+        doc.text(numberToWords(num(data.net_amount)), margin, amountInWordsY + 5);
+        doc.setTextColor(0);
 
+ 
+        // 6. FOOTER
+        const footerY = doc.internal.pageSize.getHeight() - 35;
+        doc.setFontSize(8);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(100, 116, 139);
+        doc.text("We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.", margin, footerY);
+
+ 
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(0);
+        doc.text("For KAYAAR EXPORTS PRIVATE LIMITED", pageWidth - margin, footerY + 15, { align: 'right' });
+        doc.text("Authorised Signatory", pageWidth - margin, footerY + 20, { align: 'right' });
+
+ 
         doc.save(`Kayaar_TAX_INVOICE_${data.invoice_no}.pdf`);
     };
     const exportToJSON = () => {
@@ -653,13 +870,13 @@ const InvoicePreparation = () => {
 
             // 4. FLOW: charity
             let charity = 0;
-            const charityPerBale = salesType === 'GST SALES'
+            const charityPerBale = (salesType === 'GST SALES' || salesType === "DEPOT SALES")
                 ? 3
                 : num(item.charity_per_bale || config.charity_value || 0);
-            if (salesType === 'GST SALES') {
+            if (salesType === 'GST SALES' || salesType === "DEPOT SALES") {
                 charity = totalKgs * charityPerBale;
             } else {
-                charity = totalInvoiceAmount * (charityPerBale / 100);
+                charity = 0
             }
 
             // 5. FLOW: divisor and base_amount (Back-calculating Taxable value)
@@ -771,7 +988,7 @@ const InvoicePreparation = () => {
     }, [listData.types, formData.freight_charges, formData.sales_type]);
 
     useEffect(() => {
-        if (!formData.invoice_type_id || gridRows.length === 0) return;
+        if (gridRows.length === 0) return;
         setGridRows(prev => runCalculations(prev, formData.invoice_type_id, formData.freight_charges, formData.sales_type));
     }, [formData.invoice_type_id, formData.sales_type, formData.freight_charges, runCalculations]);
 
@@ -991,7 +1208,7 @@ const InvoicePreparation = () => {
             rate: num(firstValue(row.rate, row.rate_cr, row.rate_imm)),
             rate_per: firstValue(row.rate_per, product?.rate_per, 'KG'),
             identification_mark: firstValue(row.identification_mark, ''),
-            charity_per_bale: num(firstValue(row.charity_per_bale, formData.sales_type === 'GST SALES' ? 3 : config.charity_value)),
+            charity_per_bale: num(firstValue(row.charity_per_bale, formData.sales_type === 'GST SALES' || formData.sales_type === "DEPOT SALES" ? 3 : config.charity_value)),
             broker_code: firstValue(row.broker_code, row.broker_code1, broker?.broker_code),
             broker_code1: firstValue(row.broker_code1, row.broker_code, broker?.broker_code),
             broker_code2: firstValue(row.broker_code2, ''),
