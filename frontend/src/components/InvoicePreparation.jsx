@@ -10,6 +10,7 @@ import {
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { evaluate } from "mathjs"
+import logoImage from '../assets/logo.jpeg';
 
 // =====================================================
 // SAFE NUMBER HELPERS (PREVENT NaN + DECIMAL ISSUES)
@@ -20,6 +21,17 @@ const num = (v) => {
 };
 
 const money = (v) => Number(num(v).toFixed(2));
+
+const imageUrlToDataUrl = async (url) => {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+    });
+};
 // =====================================================
 // INDIAN RUPEES TO WORDS (Professional GST Requirement)
 // =====================================================
@@ -328,7 +340,7 @@ const InvoicePreparation = () => {
         const prod = listData.products.find(p => p.id === productId);
         return prod?.printing_tariff_sub_head_no || '';
     };
-    const exportToPDF = () => {
+    const exportToPDF = async () => {
         {
             const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
             const data = formData;
@@ -380,6 +392,12 @@ const InvoicePreparation = () => {
             doc.setDrawColor(0);
             doc.setLineWidth(0.25);
             doc.setFont("helvetica", "bold");
+            let logoDataUrl = '';
+            try {
+                logoDataUrl = await imageUrlToDataUrl(logoImage);
+            } catch (error) {
+                console.warn("Invoice logo could not be loaded:", error);
+            }
 
             doc.setFontSize(6.5);
             checkbox("ORIGINAL FOR BUYER", 145, 10);
@@ -393,6 +411,9 @@ const InvoicePreparation = () => {
             let y = 36;
             const headerHeight = 52;
             doc.rect(margin, y, contentWidth, headerHeight);
+            if (logoDataUrl) {
+                doc.addImage(logoDataUrl, "JPEG", margin + 12, y + 8, 38, 38);
+            }
 
             doc.setFontSize(10);
             doc.text("KAYAAR EXPORTS PRIVATE LIMITED", margin + 62, y + 8);
