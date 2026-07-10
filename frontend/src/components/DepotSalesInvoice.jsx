@@ -32,6 +32,14 @@ const evaluateFormula = (formula, ctx) => {
 // ==========================================
 const num = (v) => isNaN(parseFloat(v)) ? 0 : parseFloat(v);
 const money = (v) => num(v).toFixed(2);
+const toNullableDateTime = (value) => {
+    if (!value || value === 'Invalid date') return null;
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+
+    return value;
+};
 const imageUrlToDataUrl = async (url) => {
     const response = await fetch(url);
     const blob = await response.blob();
@@ -165,14 +173,14 @@ const DepotSalesInvoice = () => {
         if (!formData.invoice_type_id) return;
 
         setGridRows(prev =>
-            runCalculations(prev, formData.invoice_type_id)
+            runCalculations(prev, formData.invoice_type_id, formData)
         );
 
     }, [formData.invoice_type_id]);
     useEffect(() => {
 
         if (gridRows.length === 0) return;
-
+        // This effect might be redundant if the one above handles it.
         setGridRows(prev =>
             runCalculations(prev, formData.invoice_type_id)
         );
@@ -181,7 +189,7 @@ const DepotSalesInvoice = () => {
     // ==========================================
     // 2. MATH ENGINE - FREIGHT NOW SYNCED FROM DETAILS
     // ==========================================
-    const runCalculations = useCallback((rows, typeId, hFreight = formData.freight, salesType = formData.sales_type) => {
+    const runCalculations = useCallback((rows, typeId, currentFormData) => {
         if (!typeId) return rows;
         const config = listData.types.find(t => t.id === parseInt(typeId));
         if (!config) return rows;
@@ -199,6 +207,8 @@ const DepotSalesInvoice = () => {
         const splitGstPer = sgstPer + cgstPer;
         const taxPercentage = igstPer > 0 ? igstPer : (splitGstPer > 0 ? splitGstPer : gstPer);
 
+        const salesType = currentFormData.sales_type;
+
         const updatedRows = rows.map((item) => {
             const product = listData.products.find(p => p.id === parseInt(item.product_id));
             const productName = String(item.product_description || product?.product_name || '').toLowerCase();
@@ -214,7 +224,7 @@ const DepotSalesInvoice = () => {
 
             const charityPerBale = salesType === 'GST SALES' || salesType === "DEPOT SALES" ? 3 : num(item.charity_per_bale || config.charity_value || 0);
             let charity = 0;
-            if (salesType === 'GST SALES' || salesType === "DEPOT SALES" ) {
+            if (salesType === 'GST SALES' || salesType === "DEPOT SALES") {
                 charity = totalKgs * charityPerBale;
             } else {
                 charity = 0;
@@ -258,7 +268,7 @@ const DepotSalesInvoice = () => {
             };
         });
 
-        const finalRawTotal = hTotals.gross + num(formData.pf_amount);
+        const finalRawTotal = hTotals.gross + num(currentFormData.pf_amount);
         const finalNetTotal = Math.round(finalRawTotal);
 
         setFormData(prev => ({
@@ -281,8 +291,8 @@ const DepotSalesInvoice = () => {
             final_invoice_value: finalNetTotal
         }));
 
-        return updatedRows;
-    }, [listData.types, listData.products, formData.pf_amount, formData.freight, formData.sales_type]);
+        return updatedRows; // Return the updated rows
+    }, [listData.types, listData.products]);
     // ==========================================
     // 3. EXPORT TO PDF - COMPACT TAX INVOICE FORMAT
     // ==========================================
@@ -630,15 +640,7 @@ const DepotSalesInvoice = () => {
 
         setFormData(prev => ({
             ...prev,
-
-            party_id: party.id || '',
-            broker_id: broker.id || '',
-            addr1: party.addr1 || '',
-            addr2: party.addr2 || '',
-            addr3: party.addr3 || '',
-
             header_locked: true
-
         }));
 
         // 🔵 CREATE GRID ROWS
@@ -672,7 +674,7 @@ const DepotSalesInvoice = () => {
         });
 
         setGridRows(
-            runCalculations([...gridRows, ...newRows], formData.invoice_type_id)
+            runCalculations([...gridRows, ...newRows], formData.invoice_type_id, formData)
         );
 
         e.target.value = "";
@@ -681,7 +683,7 @@ const DepotSalesInvoice = () => {
         setGridRows(prev => {
             const updated = [...prev];
             updated[idx] = { ...updated[idx], [field]: val };
-            return runCalculations(updated, formData.invoice_type_id);
+            return runCalculations(updated, formData.invoice_type_id, formData);
         });
     };
     const handleSave = async () => {
@@ -695,6 +697,7 @@ const DepotSalesInvoice = () => {
             const payload = {
                 ...header,
                 invoice_type_id: header.invoice_type_id ? Number(header.invoice_type_id) : null,
+                removal_time: toNullableDateTime(header.removal_time),
                 depot_id: header.depot_id ? Number(header.depot_id) : null,
                 party_id: header.party_id ? Number(header.party_id) : null,
                 broker_id: header.broker_id ? Number(header.broker_id) : null,
@@ -995,7 +998,7 @@ const DepotSalesInvoice = () => {
                                             <div />
                                         </div>
 
-                                        <RowSelect label="Agent Name" value={formData.broker_id} disabled={formData.header_locked} options={listData.brokers.map(b => ({ value: b.id, label: b.broker_name }))} onChange={e => setFormData({ ...formData, broker_id: e.target.value })} />
+                                        <RowSelect label="Agent Name" value={formData.broker_id} options={listData.brokers.map(b => ({ value: b.id, label: b.broker_name }))} onChange={e => setFormData({ ...formData, broker_id: e.target.value })} />
                                         <div className="grid grid-cols-2 gap-4 pt-2 border-t">
 
                                             <RowSelect
