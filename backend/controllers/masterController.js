@@ -399,6 +399,23 @@ invoiceCtrl.create = async (req, res) => {
             await Product.decrement('mill_stock', { by: row.total_kgs, where: { id: row.product_id }, transaction: t });
         }
 
+        // --- NEW DESPATCH REDUCTION ---
+        if (header.load_id) {
+            const despatch = await DespatchEntry.findByPk(header.load_id, { transaction: t });
+            if (despatch) {
+                const invoice_bags = processedRows.reduce((sum, r) => sum + num(r.packs), 0);
+                const freight_per_bag = num(despatch.freight_per_bag) > 0 
+                    ? num(despatch.freight_per_bag) 
+                    : (num(despatch.no_of_bags) > 0 ? num(despatch.freight) / num(despatch.no_of_bags) : 0);
+                const new_bags = num(despatch.no_of_bags) - invoice_bags;
+                const new_freight = new_bags * freight_per_bag;
+                await despatch.update({
+                    no_of_bags: new_bags,
+                    freight: new_freight
+                }, { transaction: t });
+            }
+        }
+
         await t.commit();
         res.status(201).json({ success: true, data: header });
     } catch (err) {
@@ -415,6 +432,15 @@ invoiceCtrl.update = async (req, res) => {
         const { Details, invoice_type_id, freight_charges, sales_type, ...headerData } = req.body;
         const config = await InvoiceType.findByPk(invoice_type_id, { transaction: t });
         if (!config) throw new Error("Invoice type not found");
+
+        const oldInvoice = await InvoiceHeader.findByPk(id, {
+            include: [{ model: InvoiceDetail }],
+            transaction: t
+        });
+        if (!oldInvoice) throw new Error("Invoice not found");
+
+        const old_load_id = oldInvoice.load_id;
+        const old_invoice_bags = (oldInvoice.InvoiceDetails || []).reduce((sum, r) => sum + num(r.packs), 0);
 
         const existingDetails = await InvoiceDetail.findAll({
             where: { invoice_id: id },
@@ -476,6 +502,58 @@ invoiceCtrl.update = async (req, res) => {
             });
         }
 
+        // --- NEW DESPATCH REDUCTION/ADJUSTMENT ---
+        const new_load_id = sanitizeData(headerData).load_id;
+        const new_invoice_bags = processedRows.reduce((sum, r) => sum + num(r.packs), 0);
+
+        if (old_load_id === new_load_id) {
+            if (new_load_id) {
+                const despatch = await DespatchEntry.findByPk(new_load_id, { transaction: t });
+                if (despatch) {
+                    const freight_per_bag = num(despatch.freight_per_bag) > 0 
+                        ? num(despatch.freight_per_bag) 
+                        : (num(despatch.no_of_bags) > 0 ? num(despatch.freight) / num(despatch.no_of_bags) : 0);
+                    const change_in_bags = new_invoice_bags - old_invoice_bags;
+                    const new_bags = num(despatch.no_of_bags) - change_in_bags;
+                    const new_freight = new_bags * freight_per_bag;
+                    await despatch.update({
+                        no_of_bags: new_bags,
+                        freight: new_freight
+                    }, { transaction: t });
+                }
+            }
+        } else {
+            // Load changed
+            if (old_load_id) {
+                const oldDespatch = await DespatchEntry.findByPk(old_load_id, { transaction: t });
+                if (oldDespatch) {
+                    const freight_per_bag = num(oldDespatch.freight_per_bag) > 0 
+                        ? num(oldDespatch.freight_per_bag) 
+                        : (num(oldDespatch.no_of_bags) > 0 ? num(oldDespatch.freight) / num(oldDespatch.no_of_bags) : 0);
+                    const new_bags = num(oldDespatch.no_of_bags) + old_invoice_bags;
+                    const new_freight = new_bags * freight_per_bag;
+                    await oldDespatch.update({
+                        no_of_bags: new_bags,
+                        freight: new_freight
+                    }, { transaction: t });
+                }
+            }
+            if (new_load_id) {
+                const newDespatch = await DespatchEntry.findByPk(new_load_id, { transaction: t });
+                if (newDespatch) {
+                    const freight_per_bag = num(newDespatch.freight_per_bag) > 0 
+                        ? num(newDespatch.freight_per_bag) 
+                        : (num(newDespatch.no_of_bags) > 0 ? num(newDespatch.freight) / num(newDespatch.no_of_bags) : 0);
+                    const new_bags = num(newDespatch.no_of_bags) - new_invoice_bags;
+                    const new_freight = new_bags * freight_per_bag;
+                    await newDespatch.update({
+                        no_of_bags: new_bags,
+                        freight: new_freight
+                    }, { transaction: t });
+                }
+            }
+        }
+
         await t.commit();
         res.json({ success: true });
     } catch (err) {
@@ -484,7 +562,40 @@ invoiceCtrl.update = async (req, res) => {
         res.status(500).json({ success: false, error: err.message });
     }
 };
-// Add these to make sure approve/reject are not undefined
+
+invoiceCtrl.delete = async (req, res) => {
+    const t = await sequelize.transaction();
+    try {
+        const { id } = req.params;
+        const invoice = await InvoiceHeader.findByPk(id, { transaction: t });
+        const details = await InvoiceDetail.findAll({ where: { invoice_id: id }, transaction: t });
+        for (const item of details) {
+            await Product.increment('mill_stock', { by: item.total_kgs, where: { id: item.product_id }, transaction: t });
+        }
+        if (invoice && invoice.load_id) {
+            const despatch = await DespatchEntry.findByPk(invoice.load_id, { transaction: t });
+            if (despatch) {
+                const invoice_bags = details.reduce((sum, r) => sum + num(r.packs), 0);
+                const freight_per_bag = num(despatch.freight_per_bag) > 0 
+                    ? num(despatch.freight_per_bag) 
+                    : (num(despatch.no_of_bags) > 0 ? num(despatch.freight) / num(despatch.no_of_bags) : 0);
+                const new_bags = num(despatch.no_of_bags) + invoice_bags;
+                const new_freight = new_bags * freight_per_bag;
+                await despatch.update({
+                    no_of_bags: new_bags,
+                    freight: new_freight
+                }, { transaction: t });
+            }
+        }
+        await InvoiceHeader.destroy({ where: { id }, transaction: t });
+        await t.commit();
+        res.json({ success: true });
+    } catch (err) {
+        if (t) await t.rollback();
+        res.status(500).json({ success: false, error: err.message });
+    }
+};
+
 invoiceCtrl.approve = async (req, res) => {
     try {
         await InvoiceHeader.update({ is_approved: true }, { where: { id: req.params.id } });
@@ -495,11 +606,28 @@ invoiceCtrl.approve = async (req, res) => {
 invoiceCtrl.reject = async (req, res) => {
     const t = await sequelize.transaction();
     try {
-        const details = await InvoiceDetail.findAll({ where: { invoice_id: req.params.id } });
+        const { id } = req.params;
+        const invoice = await InvoiceHeader.findByPk(id, { transaction: t });
+        const details = await InvoiceDetail.findAll({ where: { invoice_id: id }, transaction: t });
         for (const item of details) {
             await Product.increment('mill_stock', { by: item.total_kgs, where: { id: item.product_id }, transaction: t });
         }
-        await InvoiceHeader.destroy({ where: { id: req.params.id }, transaction: t });
+        if (invoice && invoice.load_id) {
+            const despatch = await DespatchEntry.findByPk(invoice.load_id, { transaction: t });
+            if (despatch) {
+                const invoice_bags = details.reduce((sum, r) => sum + num(r.packs), 0);
+                const freight_per_bag = num(despatch.freight_per_bag) > 0 
+                    ? num(despatch.freight_per_bag) 
+                    : (num(despatch.no_of_bags) > 0 ? num(despatch.freight) / num(despatch.no_of_bags) : 0);
+                const new_bags = num(despatch.no_of_bags) + invoice_bags;
+                const new_freight = new_bags * freight_per_bag;
+                await despatch.update({
+                    no_of_bags: new_bags,
+                    freight: new_freight
+                }, { transaction: t });
+            }
+        }
+        await InvoiceHeader.destroy({ where: { id }, transaction: t });
         await t.commit();
         res.json({ success: true });
     } catch (err) { if (t) await t.rollback(); res.status(500).json({ error: err.message }); }

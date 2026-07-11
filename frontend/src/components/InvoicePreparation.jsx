@@ -859,7 +859,15 @@ const InvoicePreparation = () => {
         const displayGstPer = splitGstPer > 0 ? splitGstPer : gstPer;
 
         const totalBags = rows.reduce((sum, r) => sum + num(r.packs), 0);
-        const freightPerBag = totalBags > 0 ? num(hFreight) / totalBags : 0;
+        const load = formData.load_id ? listData.loads.find(l => l.id === parseInt(formData.load_id)) : null;
+        let freightPerBag = 0;
+        if (load) {
+            freightPerBag = num(load.freight_per_bag) > 0 
+                ? num(load.freight_per_bag) 
+                : (num(load.no_of_bags) > 0 ? num(load.freight) / num(load.no_of_bags) : 0);
+        } else {
+            freightPerBag = totalBags > 0 ? num(hFreight) / totalBags : 0;
+        }
 
         console.log(`%c >>> CALCULATION START [Tax: ${taxPercentage}%, TCS: ${tcsPer}%] <<< `, "background: #000; color: #fff;");
 
@@ -985,7 +993,7 @@ const InvoicePreparation = () => {
             ...prev,
             total_assessable: money(hTotals.assess),
             total_charity: money(hTotals.charity),
-            freight_charges: num(hFreight),
+            freight_charges: load ? money(hTotals.freight) : num(hFreight),
             // Display full GST amount as the combined CGST + SGST value.
             total_gst: igstPer > 0 ? 0 : money(hTotals.gst),
             total_igst: igstPer > 0 ? money(hTotals.gst) : 0,
@@ -1006,7 +1014,7 @@ const InvoicePreparation = () => {
 
 
         return updatedRows;
-    }, [listData.types, formData.freight_charges, formData.sales_type]);
+    }, [listData.types, listData.loads, formData.freight_charges, formData.sales_type, formData.load_id]);
 
     useEffect(() => {
         if (gridRows.length === 0) return;
@@ -1193,14 +1201,14 @@ const InvoicePreparation = () => {
     );
 
     const normalizeInvoiceRow = (row, options = {}) => {
-        const { order = {}, source = '', config = {}, load = null } = options;
+        const { order = {}, source = '', config = {}, load = null, isEditHydration = false } = options;
         const product = findProductForRow(row);
         const broker = listData.brokers.find(b => String(b.id) === String(order.broker_id));
         const orderNo = firstValue(row.order_no, order.order_no);
         const orderType = firstValue(row.order_type, source === 'WITH' ? 'WITH_ORDER' : source === 'WITHOUT' ? 'WITHOUT_ORDER' : '');
-        const packs = num(load?.no_of_bags) > 0
-            ? num(load.no_of_bags)
-            : (num(firstValue(row.packs, row.qty, row.quantity)) || 0);
+        const packs = isEditHydration
+            ? (num(firstValue(row.packs, row.qty, row.quantity)) || 0)
+            : (num(load?.no_of_bags) > 0 ? num(load.no_of_bags) : (num(firstValue(row.packs, row.qty, row.quantity)) || 0));
         const avgContent = num(firstValue(row.avg_content, row.bag_wt, product?.pack_nett_wt));
         const totalKgs = num(firstValue(row.total_kgs, row.kgs, row.net_weight)) || (packs * avgContent);
 
@@ -1288,7 +1296,7 @@ const InvoicePreparation = () => {
             invoice.Details ||
             invoice.details ||
             []
-        ).map(row => normalizeInvoiceRow(row, { config: invoiceType, load }));
+        ).map(row => normalizeInvoiceRow(row, { config: invoiceType, load, isEditHydration: true }));
 
         return { header, details };
     };
@@ -1671,7 +1679,7 @@ const InvoicePreparation = () => {
                                                     <th className="p-3 border-r w-10"></th>
                                                     <th className="p-3 border-r w-32 text-center">OrderNo</th>
                                                     <th className="p-3 border-r w-80 text-center">Product Description</th>
-                                                    <th className="p-3 border-r w-24 text-center">Packs</th>
+                                                    <th className="p-3 border-r w-24 text-center">No of Bags</th>
                                                     <th className="p-3 border-r w-32 text-center">Packing Type</th>
                                                     <th className="p-3 border-r w-32 text-center">Total Kgs</th>
                                                     <th className="p-3 border-r w-32 text-center">Avg Content</th>
