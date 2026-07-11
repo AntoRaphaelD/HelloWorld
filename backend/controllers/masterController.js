@@ -547,6 +547,86 @@ productionCtrl.create = async (req, res) => {
     } catch (err) { if (t) await t.rollback(); res.status(500).json({ error: err.message }); }
 };
 
+productionCtrl.update = async (req, res) => {
+    const t = await sequelize.transaction();
+    try {
+        const toNumber = (value, fallback = 0) => {
+            if (value === undefined || value === null || value === '') return fallback;
+            const parsed = parseFloat(value);
+            return Number.isNaN(parsed) ? fallback : parsed;
+        };
+
+        const data = sanitizeData(req.body);
+        const { product_id, stock_kgs } = data;
+
+        await RG1Production.update(data, { where: { id: req.params.id }, transaction: t });
+
+        if (product_id) {
+            await Product.update(
+                { mill_stock: toNumber(stock_kgs) },
+                { where: { id: product_id }, transaction: t }
+            );
+        }
+
+        await t.commit();
+        res.status(200).json({ success: true });
+    } catch (err) {
+        if (t) await t.rollback();
+        res.status(500).json({ success: false, error: err.message });
+    }
+};
+
+productionCtrl.delete = async (req, res) => {
+    const t = await sequelize.transaction();
+    try {
+        const { id } = req.params;
+        const prod = await RG1Production.findByPk(id, { transaction: t });
+        if (!prod) {
+            return res.status(404).json({ success: false, message: "Production log not found" });
+        }
+
+        await RG1Production.destroy({ where: { id }, transaction: t });
+
+        await Product.update(
+            { mill_stock: prod.prev_closing_kgs },
+            { where: { id: prod.product_id }, transaction: t }
+        );
+
+        await t.commit();
+        res.status(200).json({ success: true });
+    } catch (err) {
+        if (t) await t.rollback();
+        res.status(500).json({ success: false, error: err.message });
+    }
+};
+
+productionCtrl.bulkDelete = async (req, res) => {
+    const t = await sequelize.transaction();
+    try {
+        const { ids } = req.body;
+        if (!ids || !ids.length) {
+            return res.status(400).json({ success: false, message: "No IDs provided" });
+        }
+
+        for (const id of ids) {
+            const prod = await RG1Production.findByPk(id, { transaction: t });
+            if (prod) {
+                await RG1Production.destroy({ where: { id }, transaction: t });
+                await Product.update(
+                    { mill_stock: prod.prev_closing_kgs },
+                    { where: { id: prod.product_id }, transaction: t }
+                );
+            }
+        }
+
+        await t.commit();
+        res.status(200).json({ success: true });
+    } catch (err) {
+        if (t) await t.rollback();
+        res.status(500).json({ success: false, error: err.message });
+    }
+};
+
 // --- 4. DEPOT STORAGE LOGIC ---
 const getDepotInventory = async (req, res) => {
     try {

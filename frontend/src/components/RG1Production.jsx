@@ -46,6 +46,7 @@ const RG1Production = () => {
     };
 
     const [formData, setFormData] = useState(emptyState);
+    const [originalRecord, setOriginalRecord] = useState(null);
 
     const num = (value) => {
         const parsed = parseFloat(value);
@@ -92,6 +93,15 @@ const RG1Production = () => {
 
     // --- 2. Auto-Calculation Logic ---
     useEffect(() => {
+        // If it's an existing record and inputs haven't changed from original, don't recalculate stock_kgs
+        if (formData.id && originalRecord &&
+            formData.stock_bags === originalRecord.stock_bags &&
+            formData.stock_loose_kgs === originalRecord.stock_loose_kgs &&
+            formData.weight_per_bag === originalRecord.weight_per_bag &&
+            formData.product_id === originalRecord.product_id) {
+            return;
+        }
+
         const product = getProduct(formData.product_id);
         const hasStockInput = [formData.stock_bags, formData.stock_loose_kgs]
             .some(value => value !== undefined && value !== null && value !== '');
@@ -106,9 +116,16 @@ const RG1Production = () => {
                 stock_kgs: nextStockKgs
             }));
         }
-    }, [formData.stock_bags, formData.stock_loose_kgs, formData.weight_per_bag, formData.product_id, products]);
+    }, [formData.stock_bags, formData.stock_loose_kgs, formData.weight_per_bag, formData.product_id, products, originalRecord]);
 
     useEffect(() => {
+        // If it's an existing record and product/date hasn't changed from original, don't recalculate invoice_kgs
+        if (formData.id && originalRecord && 
+            formData.product_id === originalRecord.product_id && 
+            formData.date === originalRecord.date) {
+            return;
+        }
+
         const nextInvoiceKgs = getPreviousDayInvoiceKgs(formData.product_id, formData.date);
         if (nextInvoiceKgs !== '' && formData.invoice_kgs !== nextInvoiceKgs) {
             setFormData(prevForm => ({
@@ -116,9 +133,17 @@ const RG1Production = () => {
                 invoice_kgs: nextInvoiceKgs
             }));
         }
-    }, [formData.product_id, formData.date, invoices, directInvoices]);
+    }, [formData.product_id, formData.date, invoices, directInvoices, originalRecord]);
 
     useEffect(() => {
+        // If it's an existing record and inputs haven't changed from original, don't recalculate production_kgs
+        if (formData.id && originalRecord &&
+            formData.prev_closing_kgs === originalRecord.prev_closing_kgs &&
+            formData.invoice_kgs === originalRecord.invoice_kgs &&
+            formData.stock_kgs === originalRecord.stock_kgs) {
+            return;
+        }
+
         const hasProductionInput = [formData.prev_closing_kgs, formData.invoice_kgs, formData.stock_kgs]
             .some(value => value !== undefined && value !== null && value !== '');
 
@@ -143,7 +168,7 @@ const RG1Production = () => {
             }));
         }
 
-    }, [formData.prev_closing_kgs, formData.invoice_kgs, formData.stock_kgs]);
+    }, [formData.prev_closing_kgs, formData.invoice_kgs, formData.stock_kgs, originalRecord]);
 
     // --- 3. Data Fetching ---
     useEffect(() => {
@@ -180,6 +205,7 @@ const RG1Production = () => {
     // --- 4. Action Handlers ---
   const handleAddNew = () => {
     setFormData({ ...emptyState }); // Reset to initial empty strings
+    setOriginalRecord(null);
     setIsModalOpen(true);
 };
 
@@ -204,11 +230,13 @@ const RG1Production = () => {
         if (isSelectionMode) {
             setSelectedIds(prev => prev.includes(item.id) ? prev.filter(id => id !== item.id) : [...prev, item.id]);
         } else {
-            setFormData({
+            const formattedItem = {
                 ...item,
                 product_id: item.product_id?.toString() || '',
                 packing_type_id: item.packing_type_id?.toString() || ''
-            });
+            };
+            setFormData(formattedItem);
+            setOriginalRecord(formattedItem);
             setIsModalOpen(true);
         }
     };
@@ -217,7 +245,7 @@ const RG1Production = () => {
         if (selectedIds.length === 0) return;
         if (window.confirm(`Permanently delete ${selectedIds.length} logs?`)) {
             try {
-                await Promise.all(selectedIds.map(id => transactionsAPI.production.delete(id)));
+                await transactionsAPI.production.bulkDelete(selectedIds);
                 setSelectedIds([]);
                 setIsSelectionMode(false);
                 fetchRecords();
@@ -258,6 +286,7 @@ const RG1Production = () => {
         setIsModalOpen(false);
         // Clear form for next entry
         setFormData(emptyState); 
+        setOriginalRecord(null); 
     } catch (err) { 
         alert("Error saving production log."); 
     } finally { 
