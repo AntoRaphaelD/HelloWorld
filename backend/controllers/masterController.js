@@ -411,7 +411,8 @@ invoiceCtrl.create = async (req, res) => {
                 const new_freight = new_bags * freight_per_bag;
                 await despatch.update({
                     no_of_bags: new_bags,
-                    freight: new_freight
+                    freight: new_freight,
+                    freight_per_bag: freight_per_bag
                 }, { transaction: t });
             }
         }
@@ -518,7 +519,8 @@ invoiceCtrl.update = async (req, res) => {
                     const new_freight = new_bags * freight_per_bag;
                     await despatch.update({
                         no_of_bags: new_bags,
-                        freight: new_freight
+                        freight: new_freight,
+                        freight_per_bag: freight_per_bag
                     }, { transaction: t });
                 }
             }
@@ -534,7 +536,8 @@ invoiceCtrl.update = async (req, res) => {
                     const new_freight = new_bags * freight_per_bag;
                     await oldDespatch.update({
                         no_of_bags: new_bags,
-                        freight: new_freight
+                        freight: new_freight,
+                        freight_per_bag: freight_per_bag
                     }, { transaction: t });
                 }
             }
@@ -548,7 +551,8 @@ invoiceCtrl.update = async (req, res) => {
                     const new_freight = new_bags * freight_per_bag;
                     await newDespatch.update({
                         no_of_bags: new_bags,
-                        freight: new_freight
+                        freight: new_freight,
+                        freight_per_bag: freight_per_bag
                     }, { transaction: t });
                 }
             }
@@ -583,11 +587,57 @@ invoiceCtrl.delete = async (req, res) => {
                 const new_freight = new_bags * freight_per_bag;
                 await despatch.update({
                     no_of_bags: new_bags,
-                    freight: new_freight
+                    freight: new_freight,
+                    freight_per_bag: freight_per_bag
                 }, { transaction: t });
             }
         }
+        await InvoiceDetail.destroy({ where: { invoice_id: id }, transaction: t });
         await InvoiceHeader.destroy({ where: { id }, transaction: t });
+        await t.commit();
+        res.json({ success: true });
+    } catch (err) {
+        if (t) await t.rollback();
+        res.status(500).json({ success: false, error: err.message });
+    }
+};
+
+invoiceCtrl.bulkDelete = async (req, res) => {
+    const t = await sequelize.transaction();
+    try {
+        const { ids } = req.body;
+        if (!ids || !ids.length) throw new Error("No IDs provided");
+
+        for (const id of ids) {
+            const invoice = await InvoiceHeader.findByPk(id, { transaction: t });
+            if (!invoice) continue;
+
+            const details = await InvoiceDetail.findAll({ where: { invoice_id: id }, transaction: t });
+            for (const item of details) {
+                await Product.increment('mill_stock', { by: item.total_kgs, where: { id: item.product_id }, transaction: t });
+            }
+
+            if (invoice.load_id) {
+                const despatch = await DespatchEntry.findByPk(invoice.load_id, { transaction: t });
+                if (despatch) {
+                    const invoice_bags = details.reduce((sum, r) => sum + num(r.packs), 0);
+                    const freight_per_bag = num(despatch.freight_per_bag) > 0 
+                        ? num(despatch.freight_per_bag) 
+                        : (num(despatch.no_of_bags) > 0 ? num(despatch.freight) / num(despatch.no_of_bags) : 0);
+                    const new_bags = num(despatch.no_of_bags) + invoice_bags;
+                    const new_freight = new_bags * freight_per_bag;
+                    await despatch.update({
+                        no_of_bags: new_bags,
+                        freight: new_freight,
+                        freight_per_bag: freight_per_bag
+                    }, { transaction: t });
+                }
+            }
+
+            await InvoiceDetail.destroy({ where: { invoice_id: id }, transaction: t });
+            await InvoiceHeader.destroy({ where: { id }, transaction: t });
+        }
+
         await t.commit();
         res.json({ success: true });
     } catch (err) {
@@ -623,10 +673,12 @@ invoiceCtrl.reject = async (req, res) => {
                 const new_freight = new_bags * freight_per_bag;
                 await despatch.update({
                     no_of_bags: new_bags,
-                    freight: new_freight
+                    freight: new_freight,
+                    freight_per_bag: freight_per_bag
                 }, { transaction: t });
             }
         }
+        await InvoiceDetail.destroy({ where: { invoice_id: id }, transaction: t });
         await InvoiceHeader.destroy({ where: { id }, transaction: t });
         await t.commit();
         res.json({ success: true });
@@ -1102,6 +1154,50 @@ depotSalesCtrl.getAll = async (req, res) => {
             error: err.message,
             stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
         });
+    }
+};
+
+depotSalesCtrl.delete = async (req, res) => {
+    const t = await sequelize.transaction();
+    try {
+        const { id } = req.params;
+        const header = await DepotSalesHeader.findByPk(id, { transaction: t });
+        if (header) {
+            await DepotSalesDetail.destroy({ where: { depot_sales_id: id }, transaction: t });
+            if (header.sales_type === 'DEPOT TRANSFER') {
+                await DepotReceived.destroy({ where: { invoice_no: header.invoice_no }, transaction: t });
+            }
+            await DepotSalesHeader.destroy({ where: { id }, transaction: t });
+        }
+        await t.commit();
+        res.json({ success: true });
+    } catch (err) {
+        if (t) await t.rollback();
+        res.status(500).json({ success: false, error: err.message });
+    }
+};
+
+depotSalesCtrl.bulkDelete = async (req, res) => {
+    const t = await sequelize.transaction();
+    try {
+        const { ids } = req.body;
+        if (!ids || !ids.length) throw new Error("No IDs provided");
+
+        for (const id of ids) {
+            const header = await DepotSalesHeader.findByPk(id, { transaction: t });
+            if (header) {
+                await DepotSalesDetail.destroy({ where: { depot_sales_id: id }, transaction: t });
+                if (header.sales_type === 'DEPOT TRANSFER') {
+                    await DepotReceived.destroy({ where: { invoice_no: header.invoice_no }, transaction: t });
+                }
+                await DepotSalesHeader.destroy({ where: { id }, transaction: t });
+            }
+        }
+        await t.commit();
+        res.json({ success: true });
+    } catch (err) {
+        if (t) await t.rollback();
+        res.status(500).json({ success: false, error: err.message });
     }
 };
 // --- 5. EXPORTS ---

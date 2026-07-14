@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { mastersAPI, transactionsAPI } from '../service/api';
+import { getNextInvoiceSequence, getPrefixForParty } from '../service/utils';
 import {
     Save, FileText, Calculator, RefreshCw, X, Plus,
     Database, MinusCircle, Box, Layers, Activity, Lock,
     ShoppingCart, ChevronDown, Clock, Truck, User,
     Search, Hash, Info, MapPin, Printer, FileJson,
-    ChevronLeft, ChevronRight
+    ChevronLeft, ChevronRight, Trash2, Square, CheckSquare
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -32,6 +33,8 @@ const imageUrlToDataUrl = async (url) => {
         reader.readAsDataURL(blob);
     });
 };
+
+
 // =====================================================
 // INDIAN RUPEES TO WORDS (Professional GST Requirement)
 // =====================================================
@@ -263,6 +266,8 @@ const InvoicePreparation = () => {
     const [printData, setPrintData] = useState(null);
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 10;
+    const [isSelectionMode, setIsSelectionMode] = useState(false);
+    const [selectedIds, setSelectedIds] = useState([]);
     // ==========================================
     // SEARCH FILTER ENGINE
     // ==========================================
@@ -567,7 +572,7 @@ const InvoicePreparation = () => {
             doc.setFont("helvetica", "normal");
             doc.text(`Generated on ${new Date().toLocaleString('en-GB')} | Subject to Kovilpatti jurisdiction`, pageWidth / 2, pageHeight - 7, { align: "center" });
 
-            doc.save(`Kayaar_TAX_INVOICE_${data.invoice_no || 'draft'}.pdf`);
+            doc.save(`${data.invoice_no || 'draft'}.pdf`);
             return;
         }
         const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -578,11 +583,11 @@ const InvoicePreparation = () => {
         let y = margin + 10;
 
         const fmt = (v, digits = 2) => num(v).toFixed(digits);
- 
+
         doc.setTextColor(0);
         doc.setFont("helvetica");
 
- 
+
         // 1. HEADER
         doc.setFontSize(36);
         doc.setFont("helvetica", "bold");
@@ -593,7 +598,7 @@ const InvoicePreparation = () => {
         doc.text("Original for Buyer", margin, y + 5);
         y += 15;
 
- 
+
         // 2. COMPANY & PARTY DETAILS
         doc.setFontSize(14);
         doc.setFont("helvetica", "bold");
@@ -611,14 +616,14 @@ const InvoicePreparation = () => {
         doc.text("GSTIN: 33AAACK4468M1ZA", margin, y);
         y += 10;
 
- 
+
         // 3. INVOICE & BILLING INFO
         doc.setDrawColor(203, 213, 225); // slate-300
         doc.setLineWidth(0.5);
         doc.line(margin, y, pageWidth - margin, y);
         y += 8;
 
- 
+
         const party = listData.parties.find(p => String(p.id) === String(data.party_id)) || data.Party || {};
         doc.setFontSize(8);
         doc.setTextColor(100, 116, 139); // slate-500
@@ -634,7 +639,7 @@ const InvoicePreparation = () => {
         doc.setFont("helvetica", "bold");
         doc.text(`GST No: ${party.gst_no || 'N/A'}`, margin, y + 15);
 
- 
+
         const infoX = pageWidth / 2 + 10;
         doc.setFontSize(8);
         doc.setTextColor(100, 116, 139);
@@ -643,7 +648,7 @@ const InvoicePreparation = () => {
         doc.text("E-WAY BILL NO:", infoX, y + 14);
         doc.text("VEHICLE NO:", infoX, y + 21);
 
- 
+
         doc.setFontSize(10);
         doc.setTextColor(0);
         doc.setFont("helvetica", "bold");
@@ -652,11 +657,11 @@ const InvoicePreparation = () => {
         doc.text(data.ebill_no || 'PENDING', infoX + 35, y + 14);
         doc.text(data.vehicle_no || 'N/A', infoX + 35, y + 21);
 
- 
+
         y += 30;
         doc.line(margin, y, pageWidth - margin, y);
 
- 
+
         // 4. PRODUCT TABLE
         autoTable(doc, {
             startY: y + 2,
@@ -704,17 +709,17 @@ const InvoicePreparation = () => {
             }
         });
 
- 
+
         y = doc.lastAutoTable.finalY + 10;
 
- 
+
         // 5. TOTALS & AMOUNT IN WORDS
         const totalsX = pageWidth / 2;
         const totalsY = y;
         const totalLabelX = totalsX;
         const totalValueX = pageWidth - margin;
 
- 
+
         const totalRows = [
             ["Assessable Value", data.total_assessable],
             ["Charity", data.total_charity],
@@ -722,7 +727,7 @@ const InvoicePreparation = () => {
             ["GST Total", num(data.total_gst) + num(data.total_sgst) + num(data.total_cgst) + num(data.total_igst)],
         ];
 
- 
+
         doc.setFontSize(10);
         totalRows.forEach(([label, value], i) => {
             doc.setFont("helvetica", "normal");
@@ -732,12 +737,12 @@ const InvoicePreparation = () => {
             doc.text(`Rs. ${fmt(value, 2)}`, totalValueX, totalsY + (i * 7), { align: 'right' });
         });
 
- 
+
         doc.setDrawColor(203, 213, 225);
         doc.setLineWidth(0.3);
         doc.line(totalsX, totalsY + (totalRows.length * 7) - 2, totalValueX, totalsY + (totalRows.length * 7) - 2);
 
- 
+
         const grandTotalY = totalsY + (totalRows.length * 7) + 5;
         doc.setFontSize(14);
         doc.setFont("helvetica", "bold");
@@ -746,7 +751,7 @@ const InvoicePreparation = () => {
         doc.text(`₹${num(data.net_amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, totalValueX, grandTotalY, { align: 'right' });
 
         doc.text(`Rs. ${fmt(data.net_amount, 2)}`, totalValueX, grandTotalY, { align: 'right' });
- 
+
         const amountInWordsY = grandTotalY + 15;
         doc.setFontSize(8);
         doc.setFont("helvetica", "bold");
@@ -756,7 +761,7 @@ const InvoicePreparation = () => {
         doc.text(numberToWords(num(data.net_amount)), margin, amountInWordsY + 5);
         doc.setTextColor(0);
 
- 
+
         // 6. FOOTER
         const footerY = doc.internal.pageSize.getHeight() - 35;
         doc.setFontSize(8);
@@ -764,15 +769,15 @@ const InvoicePreparation = () => {
         doc.setTextColor(100, 116, 139);
         doc.text("We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.", margin, footerY);
 
- 
+
         doc.setFontSize(10);
         doc.setFont("helvetica", "bold");
         doc.setTextColor(0);
         doc.text("For KAYAAR EXPORTS PRIVATE LIMITED", pageWidth - margin, footerY + 15, { align: 'right' });
         doc.text("Authorised Signatory", pageWidth - margin, footerY + 20, { align: 'right' });
 
- 
-        doc.save(`Kayaar_TAX_INVOICE_${data.invoice_no}.pdf`);
+
+        doc.save(`${data.invoice_no}.pdf`);
     };
     const exportToJSON = () => {
         // 1. Prepare the data object
@@ -862,8 +867,8 @@ const InvoicePreparation = () => {
         const load = formData.load_id ? listData.loads.find(l => l.id === parseInt(formData.load_id)) : null;
         let freightPerBag = 0;
         if (load) {
-            freightPerBag = num(load.freight_per_bag) > 0 
-                ? num(load.freight_per_bag) 
+            freightPerBag = num(load.freight_per_bag) > 0
+                ? num(load.freight_per_bag)
                 : (num(load.no_of_bags) > 0 ? num(load.freight) / num(load.no_of_bags) : 0);
         } else {
             freightPerBag = totalBags > 0 ? num(hFreight) / totalBags : 0;
@@ -1052,8 +1057,8 @@ const InvoicePreparation = () => {
                 brokers: brokers.data.data || []
             });
 
-            const maxNo = historyData.reduce((max, item) => Math.max(max, parseInt(item.invoice_no) || 0), 0);
-            setFormData(prev => ({ ...prev, invoice_no: (maxNo + 1).toString() }));
+            const seq = getNextInvoiceSequence(historyData, '');
+            setFormData(prev => ({ ...prev, invoice_no: seq.toString() }));
         } catch (e) { console.error(e); } finally { setLoading(false); }
     };
 
@@ -1069,13 +1074,22 @@ const InvoicePreparation = () => {
         const acc = listData.parties.find(a => a.id === partyId);
         if (!acc) return;
 
-        setFormData(prev => ({
-            ...prev,
-            party_id: partyId,
-            addr1: acc.addr1 || '',
-            addr2: acc.addr2 || '',
-            addr3: acc.addr3 || ''
-        }));
+        setFormData(prev => {
+            let updatedInvNo = prev.invoice_no;
+            if (!prev.id) {
+                const prefix = getPrefixForParty(acc.account_name);
+                const seq = getNextInvoiceSequence(listData.history, prefix);
+                updatedInvNo = prefix ? `${prefix}${seq}` : seq.toString();
+            }
+            return {
+                ...prev,
+                party_id: partyId,
+                addr1: acc.addr1 || '',
+                addr2: acc.addr2 || '',
+                addr3: acc.addr3 || '',
+                invoice_no: updatedInvNo
+            };
+        });
     };
     const handleLoadSync = (loadId) => {
         const load = listData.loads.find(l => l.id === parseInt(loadId));
@@ -1357,6 +1371,80 @@ const InvoicePreparation = () => {
         }
     };
 
+    const handleDelete = async () => {
+        if (!formData.id) return;
+        if (!window.confirm("Are you sure you want to permanently delete this invoice? This action will restore product stocks and despatch counts, and cannot be undone.")) {
+            return;
+        }
+
+        setSubmitLoading(true);
+        try {
+            await transactionsAPI.invoices.delete(formData.id);
+            setIsModalOpen(false);
+            await init();
+            setGridRows([]);
+        } catch (e) {
+            console.error("Delete error:", e);
+            alert(e.response?.data?.error || "Error deleting invoice");
+        } finally {
+            setSubmitLoading(false);
+        }
+    };
+
+    const loadInvoice = async (id) => {
+        try {
+            const res = await transactionsAPI.invoices.getById(id);
+            const invoice = res.data.data;
+            const { header, details } = hydrateInvoiceForEdit(invoice);
+
+            setGridRows(
+                runCalculations(
+                    details,
+                    header.invoice_type_id,
+                    header.freight_charges,
+                    header.sales_type
+                )
+            );
+            setFormData(header);
+            setActiveTab('detail');
+            setIsModalOpen(true);
+        } catch (err) {
+            console.error("Error loading invoice:", err);
+        }
+    };
+
+    const handleRowClick = (item) => {
+        if (isSelectionMode) {
+            setSelectedIds(prev =>
+                prev.includes(item.id)
+                    ? prev.filter(id => id !== item.id)
+                    : [...prev, item.id]
+            );
+        } else {
+            loadInvoice(item.id);
+        }
+    };
+
+    const handleBulkDelete = async () => {
+        if (selectedIds.length === 0) return;
+        if (!window.confirm(`Are you sure you want to permanently delete the ${selectedIds.length} selected invoices? This action will restore product stocks and despatch counts, and cannot be undone.`)) {
+            return;
+        }
+
+        setSubmitLoading(true);
+        try {
+            await transactionsAPI.invoices.bulkDelete(selectedIds);
+            setSelectedIds([]);
+            setIsSelectionMode(false);
+            await init();
+        } catch (e) {
+            console.error("Bulk delete error:", e);
+            alert(e.response?.data?.error || "Error performing bulk delete");
+        } finally {
+            setSubmitLoading(false);
+        }
+    };
+
     // Cleanup after print
     useEffect(() => {
         const afterPrint = () => setPrintData(null);
@@ -1369,7 +1457,33 @@ const InvoicePreparation = () => {
             {/* Dashboard View */}
             <div className="flex justify-between items-center mb-6">
                 <h1 className="text-2xl font-black uppercase tracking-tighter flex items-center gap-3"><FileText className="text-blue-600" /> Dashboard</h1>
-                <button onClick={() => { setFormData({ ...emptyInvoice, invoice_no: (listData.history.length + 1).toString() }); setGridRows([]); setActiveTab('head'); setIsModalOpen(true); }} className="bg-blue-600 text-white px-8 py-2 rounded-xl font-bold shadow-lg hover:bg-blue-700 transition-all uppercase text-xs flex items-center gap-2"><Plus size={18} /> New Invoice</button>
+                <div className="flex items-center gap-2">
+                    {!isSelectionMode ? (
+                        <button
+                            onClick={() => setIsSelectionMode(true)}
+                            className="bg-white border border-slate-300 text-slate-700 px-6 py-2 rounded-xl font-bold hover:bg-slate-50 transition-all uppercase text-xs flex items-center gap-2"
+                        >
+                            Select Multiple
+                        </button>
+                    ) : (
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => { setIsSelectionMode(false); setSelectedIds([]); }}
+                                className="bg-white border border-slate-300 text-slate-700 px-6 py-2 rounded-xl font-bold hover:bg-slate-50 transition-all uppercase text-xs flex items-center gap-2"
+                            >
+                                Clear Selection
+                            </button>
+                            <button
+                                onClick={handleBulkDelete}
+                                disabled={selectedIds.length === 0}
+                                className="bg-red-600 text-white px-6 py-2 rounded-xl font-bold shadow-md hover:bg-red-700 transition-all uppercase text-xs flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                <Trash2 size={16} /> Delete Selected ({selectedIds.length})
+                            </button>
+                        </div>
+                    )}
+                    <button onClick={() => { setFormData({ ...emptyInvoice, invoice_no: getNextInvoiceSequence(listData.history, '').toString() }); setGridRows([]); setActiveTab('head'); setIsModalOpen(true); }} className="bg-blue-600 text-white px-8 py-2 rounded-xl font-bold shadow-lg hover:bg-blue-700 transition-all uppercase text-xs flex items-center gap-2"><Plus size={18} /> New Invoice</button>
+                </div>
             </div>
             {/* SEARCH FILTER BAR */}
             <div className="bg-white p-4 rounded-xl border border-slate-300 shadow-sm mb-4">
@@ -1440,37 +1554,29 @@ const InvoicePreparation = () => {
             <div className="bg-white rounded-2xl border border-slate-300 shadow-sm overflow-hidden">
                 <table className="w-full text-left">
                     <thead className="bg-blue-700 text-white text-[10px] uppercase font-black tracking-widest">
-                        <tr><th className="p-6">InvoiceNo</th><th className="p-6">Date</th><th className="p-6">Party</th></tr>
+                        <tr>
+                            {isSelectionMode && <th className="p-6 w-12 text-center">Select</th>}
+                            <th className="p-6">InvoiceNo</th>
+                            <th className="p-6">Date</th>
+                            <th className="p-6">Party</th>
+                        </tr>
                     </thead>
                     <tbody className="divide-y text-sm font-mono">
                         {currentItems.map(item => (
                             <tr
                                 key={item.id}
-                                className="hover:bg-blue-50 cursor-pointer"
-                                onClick={async () => {
-                                    try {
-                                        const res = await transactionsAPI.invoices.getById(item.id);
-                                        const invoice = res.data.data;
-                                        const { header, details } = hydrateInvoiceForEdit(invoice);
-
-                                        setGridRows(
-                                            runCalculations(
-                                                details,
-                                                header.invoice_type_id,
-                                                header.freight_charges,
-                                                header.sales_type
-                                            )
-                                        );
-                                        setFormData(header);
-                                        setActiveTab('detail');
-
-                                        setIsModalOpen(true);
-
-                                    } catch (err) {
-                                        console.error("Error loading invoice:", err);
-                                    }
-                                }}
+                                className={`hover:bg-blue-50 cursor-pointer ${selectedIds.includes(item.id) ? 'bg-blue-100/50' : ''}`}
+                                onClick={() => handleRowClick(item)}
                             >
+                                {isSelectionMode && (
+                                    <td className="p-6 text-center" onClick={(e) => e.stopPropagation()}>
+                                        {selectedIds.includes(item.id) ? (
+                                            <CheckSquare size={18} className="text-blue-600 mx-auto" />
+                                        ) : (
+                                            <Square size={18} className="text-slate-300 mx-auto" />
+                                        )}
+                                    </td>
+                                )}
                                 <td className="p-6 font-bold text-blue-600">
                                     {item.invoice_no}
                                 </td>
@@ -1843,6 +1949,16 @@ const InvoicePreparation = () => {
                                 </button>
                             </div>
                             <div className="flex gap-3">
+                                {formData.id && (
+                                    <button
+                                        onClick={handleDelete}
+                                        disabled={submitLoading}
+                                        className="bg-red-600 hover:bg-red-700 text-white border border-red-700 px-6 py-2 text-[11px] font-black rounded flex items-center gap-2 shadow-md transition-all active:scale-95 mr-6"
+                                    >
+                                        <Trash2 size={16} />
+                                        DELETE INVOICE
+                                    </button>
+                                )}
 
                                 {/* EXPORT PDF BUTTON */}
                                 <button

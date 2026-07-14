@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { mastersAPI, transactionsAPI } from '../service/api';
+import { getNextInvoiceSequence, getPrefixForParty } from '../service/utils';
 import {
     Save, FileText, Calculator, Plus, MinusCircle,
     Layers, Activity, Search, Hash, Printer,
-    Warehouse, X, Database, CheckCircle
+    Warehouse, X, Database, CheckCircle, Trash2, Square, CheckSquare
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -71,6 +72,9 @@ const numberToWords = (amount) => {
     if (hundred) str += convert(hundred);
     return str.trim() + " Rupees Only";
 };
+
+
+
 const DepotSalesInvoice = () => {
     // ==========================================
     // 1. INITIAL STATES
@@ -157,6 +161,8 @@ const DepotSalesInvoice = () => {
     // Pagination (registry)
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(10);
+    const [isSelectionMode, setIsSelectionMode] = useState(false);
+    const [selectedIds, setSelectedIds] = useState([]);
 
     // Add this near your other useMemo/useEffect hooks
     const filteredInvoiceTypes = useMemo(() => {
@@ -526,7 +532,7 @@ const DepotSalesInvoice = () => {
         doc.setFont("helvetica", "normal");
         doc.text(`Generated on ${new Date().toLocaleString('en-GB')} | Subject to Kovilpatti jurisdiction`, pageWidth / 2, pageHeight - 7, { align: "center" });
 
-        doc.save(`Depot_Invoice_${data.invoice_no || 'draft'}.pdf`);
+        doc.save(`${data.invoice_no || 'draft'}.pdf`);
     };
     const exportToJSON = () => {
         // 1. Find the Depot Name from the list based on selection
@@ -543,7 +549,7 @@ const DepotSalesInvoice = () => {
 
         // 3. Construct Filename: [Initials]-[InvoiceNo].json
         const invNo = formData.invoice_no || '000';
-        const fileName = `${shortName}-${invNo}.json`;
+        const fileName = formData.invoice_no ? `${formData.invoice_no}.json` : 'depot_invoice.json';
 
         // 4. Data Preparation
         const exportData = {
@@ -779,6 +785,69 @@ const DepotSalesInvoice = () => {
             setSubmitLoading(false);
         }
     };
+
+    const loadInvoice = async (id) => {
+        try {
+            setSubmitLoading(true);
+            const data = await transactionsAPI.depotSales.getOne(id);
+            const full = data.data.data;
+            if (!full) return;
+
+            const formatted = {
+                ...full,
+                removal_time: full.removal_time
+                    ? String(full.removal_time).replace(' ', 'T').slice(0, 16)
+                    : '',
+                addr1: full.addr1 || full.Party?.addr1 || '',
+                addr2: full.addr2 || full.Party?.addr2 || '',
+                addr3: full.addr3 || full.Party?.addr3 || ''
+            };
+
+            setFormData(formatted);
+            const rows = full.DepotSalesDetails || [];
+            const recalculated = runCalculations(rows, full.invoice_type_id, full);
+            setGridRows(recalculated);
+            setIsModalOpen(true);
+        } catch (err) {
+            console.error("Error loading depot sales invoice:", err);
+            alert("Failed to load invoice details");
+        } finally {
+            setSubmitLoading(false);
+        }
+    };
+
+    const handleRowClick = (item) => {
+        if (isSelectionMode) {
+            setSelectedIds(prev =>
+                prev.includes(item.id)
+                    ? prev.filter(id => id !== item.id)
+                    : [...prev, item.id]
+            );
+        } else {
+            loadInvoice(item.id);
+        }
+    };
+
+    const handleBulkDelete = async () => {
+        if (selectedIds.length === 0) return;
+        if (!window.confirm(`Are you sure you want to permanently delete the ${selectedIds.length} selected depot invoices? This action cannot be undone.`)) {
+            return;
+        }
+
+        setSubmitLoading(true);
+        try {
+            await transactionsAPI.depotSales.bulkDelete(selectedIds);
+            setSelectedIds([]);
+            setIsSelectionMode(false);
+            await init();
+        } catch (e) {
+            console.error("Bulk delete error:", e);
+            alert("Error performing bulk delete");
+        } finally {
+            setSubmitLoading(false);
+        }
+    };
+
     const filteredHistory = useMemo(() => {
         const history = Array.isArray(listData.history) ? listData.history : [];
         const term = searchValue.toLowerCase().trim();
@@ -818,15 +887,42 @@ const DepotSalesInvoice = () => {
                 <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
                     <Warehouse className="text-blue-600" /> Depot Sales Registry
                 </h1>
-                <button
-                    onClick={() => {
-                        setFormData({ ...emptyInvoice, invoice_no: (listData.history.length + 1).toString(), header_locked: false });
-                        setGridRows([]); setIsModalOpen(true);
-                    }}
-                    className="bg-blue-600 text-white px-5 py-2 rounded-lg font-bold uppercase text-xs flex items-center gap-2 shadow-md hover:bg-blue-700"
-                >
-                    <Plus size={16} /> New Depot Invoice
-                </button>
+                <div className="flex items-center gap-2">
+                    {!isSelectionMode ? (
+                        <button
+                            onClick={() => setIsSelectionMode(true)}
+                            className="bg-white border border-slate-300 text-slate-700 px-5 py-2 rounded-lg font-bold uppercase text-xs flex items-center gap-2 hover:bg-slate-50 transition-all shadow-sm"
+                        >
+                            Select Multiple
+                        </button>
+                    ) : (
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => { setIsSelectionMode(false); setSelectedIds([]); }}
+                                className="bg-white border border-slate-300 text-slate-700 px-5 py-2 rounded-lg font-bold uppercase text-xs flex items-center gap-2 hover:bg-slate-50 transition-all shadow-sm"
+                            >
+                                Clear Selection
+                            </button>
+                            <button
+                                onClick={handleBulkDelete}
+                                disabled={selectedIds.length === 0}
+                                className="bg-red-600 text-white px-5 py-2 rounded-lg font-bold uppercase text-xs flex items-center gap-2 shadow-md hover:bg-red-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                <Trash2 size={16} /> Delete Selected ({selectedIds.length})
+                            </button>
+                        </div>
+                    )}
+                    <button
+                        onClick={() => {
+                            const seq = getNextInvoiceSequence(listData.history, '');
+                            setFormData({ ...emptyInvoice, invoice_no: seq.toString(), header_locked: false });
+                            setGridRows([]); setIsModalOpen(true);
+                        }}
+                        className="bg-blue-600 text-white px-5 py-2 rounded-lg font-bold uppercase text-xs flex items-center gap-2 shadow-md hover:bg-blue-700"
+                    >
+                        <Plus size={16} /> New Depot Invoice
+                    </button>
+                </div>
             </div>
             <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-6 flex gap-4 items-end">
                 <div className="flex-1">
@@ -847,41 +943,28 @@ const DepotSalesInvoice = () => {
                 <div className="flex flex-col">
                     <table className="w-full text-left">
                         <thead className="bg-slate-900 text-white text-[10px] uppercase font-bold tracking-wider">
-                            <tr><th className="p-3">Inv #</th><th className="p-3">Date</th><th className="p-3">Depot</th><th className="p-3">Party</th><th className="p-3 text-right">Net Value</th></tr>
+                            <tr>
+                                {isSelectionMode && <th className="p-3 w-12 text-center">Select</th>}
+                                <th className="p-3">Inv #</th>
+                                <th className="p-3">Date</th>
+                                <th className="p-3">Depot</th>
+                                <th className="p-3">Party</th>
+                                <th className="p-3 text-right">Net Value</th>
+                            </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 text-sm">
 
                             {pagedHistory.map(item => (
-                                <tr key={item.id} className="hover:bg-blue-50 cursor-pointer" onClick={async () => {
-
-                                    try {
-                                        setSubmitLoading(true);
-                                        const data = await transactionsAPI.depotSales.getOne(item.id);
-                                        const full = data.data.data;
-                                        if (!full) return;
-
-                                        const formatted = {
-                                            ...full,
-                                            removal_time: full.removal_time
-                                                ? String(full.removal_time).replace(' ', 'T').slice(0, 16)
-                                                : '',
-                                            addr1: full.addr1 || full.Party?.addr1 || '',
-                                            addr2: full.addr2 || full.Party?.addr2 || '',
-                                            addr3: full.addr3 || full.Party?.addr3 || ''
-                                        };
-
-                                        setFormData(formatted);
-                                        const rows = full.DepotSalesDetails || [];
-                                        const recalculated = runCalculations(rows, full.invoice_type_id, full.sales_type);
-                                        setGridRows(recalculated);
-                                        setIsModalOpen(true);
-                                    } catch (err) {
-                                        console.error("Error loading depot sales invoice:", err);
-                                        alert("Failed to load invoice details");
-                                    } finally {
-                                        setSubmitLoading(false);
-                                    }
-                                }}>
+                                <tr key={item.id} className={`hover:bg-blue-50 cursor-pointer ${selectedIds.includes(item.id) ? 'bg-blue-100/50' : ''}`} onClick={() => handleRowClick(item)}>
+                                    {isSelectionMode && (
+                                        <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
+                                            {selectedIds.includes(item.id) ? (
+                                                <CheckSquare size={18} className="text-blue-600 mx-auto" />
+                                            ) : (
+                                                <Square size={18} className="text-slate-300 mx-auto" />
+                                            )}
+                                        </td>
+                                    )}
                                     <td className="p-3 font-bold text-blue-600 font-mono">{item.invoice_no}</td>
                                     <td className="p-3 text-slate-500 font-sans">{item.date}</td>
                                     <td className="p-3 uppercase text-xs font-semibold">{item.Depot?.account_name}</td>
@@ -978,12 +1061,21 @@ const DepotSalesInvoice = () => {
                                                 const acc = listData.parties.find(a => a.id === partyId);
                                                 console.log("Selected Party:", acc);
                                                 if (!acc) return;
+
+                                                let updatedInvNo = formData.invoice_no;
+                                                if (!formData.id) {
+                                                    const prefix = getPrefixForParty(acc.account_name);
+                                                    const seq = getNextInvoiceSequence(listData.history, prefix);
+                                                    updatedInvNo = prefix ? `${prefix}${seq}` : seq.toString();
+                                                }
+
                                                 setFormData(prev => ({
                                                     ...prev,
                                                     party_id: partyId,
                                                     addr1: acc.addr1 ?? '',
                                                     addr2: acc.addr2 ?? '',
-                                                    addr3: acc.addr3 ?? ''
+                                                    addr3: acc.addr3 ?? '',
+                                                    invoice_no: updatedInvNo
                                                 }));
                                             }}
                                         />
