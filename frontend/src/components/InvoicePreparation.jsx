@@ -1654,7 +1654,7 @@ const InvoicePreparation = () => {
                                             value={formData.sales_type}
                                             options={[
                                                 { value: 'GST SALES', label: 'GST SALES' },
-                                                { value: 'DEPOT SALES', label: 'DEPOT SALES' },
+                                                // { value: 'DEPOT SALES', label: 'DEPOT SALES' },
                                                 { value: 'DIRECT SALES', label: 'DIRECT SALES' },
                                             ]}
                                             onChange={e => setFormData({

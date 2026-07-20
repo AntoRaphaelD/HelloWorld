@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { mastersAPI, transactionsAPI } from '../service/api';
-import { getNextInvoiceSequence, getPrefixForParty } from '../service/utils';
+import { getNextInvoiceSequence, getPrefixForParty, getNextDepotInvoiceSequence } from '../service/utils';
 import {
     Save, FileText, Calculator, Plus, MinusCircle,
     Layers, Activity, Search, Hash, Printer,
@@ -914,7 +914,7 @@ const DepotSalesInvoice = () => {
                     )}
                     <button
                         onClick={() => {
-                            const seq = getNextInvoiceSequence(listData.history, '');
+                            const seq = getNextDepotInvoiceSequence(listData.history, '', '');
                             setFormData({ ...emptyInvoice, invoice_no: seq.toString(), header_locked: false });
                             setGridRows([]); setIsModalOpen(true);
                         }}
@@ -1043,9 +1043,9 @@ const DepotSalesInvoice = () => {
                                             label="Sales Type"
                                             value={formData.sales_type}
                                             options={[
-                                                { value: 'GST SALES', label: 'GST SALES' },
+                                                // { value: 'GST SALES', label: 'GST SALES' },
                                                 { value: 'DEPOT SALES', label: 'DEPOT SALES' },
-                                                { value: 'DIRECT SALES', label: 'DIRECT SALES' }
+                                                // { value: 'DIRECT SALES', label: 'DIRECT SALES' }
                                             ]}
                                             onChange={e => setFormData({
                                                 ...formData,
@@ -1054,7 +1054,29 @@ const DepotSalesInvoice = () => {
                                             })}
                                         />
                                         <RowSelect label="Invoice Type" value={formData.invoice_type_id} options={filteredInvoiceTypes.map(t => ({ value: t.id, label: t.type_name }))} onChange={e => setFormData({ ...formData, invoice_type_id: e.target.value })} />
-                                        <RowSelect label="Depot Name" value={formData.depot_id} options={listData.depots.map(d => ({ value: d.id, label: d.account_name }))} onChange={e => setFormData({ ...formData, depot_id: e.target.value })} />
+                                        <RowSelect label="Depot Name" value={formData.depot_id} options={listData.depots.map(d => ({ value: d.id, label: d.account_name }))}
+                                            onChange={e => {
+                                                const depotId = parseInt(e.target.value);
+                                                const depotAcc = listData.depots.find(d => d.id === depotId);
+                                                const partyAcc = listData.parties.find(p => p.id === parseInt(formData.party_id));
+
+                                                let updatedInvNo = formData.invoice_no;
+                                                if (!formData.id) {
+                                                    const seq = getNextDepotInvoiceSequence(
+                                                        listData.history,
+                                                        depotAcc?.account_name || '',
+                                                        partyAcc?.account_name || ''
+                                                    );
+                                                    updatedInvNo = seq.toString();
+                                                }
+
+                                                setFormData(prev => ({
+                                                    ...prev,
+                                                    depot_id: e.target.value,
+                                                    invoice_no: updatedInvNo
+                                                }));
+                                            }}
+                                        />
                                         <RowSelect label="Party Name" value={formData.party_id} disabled={formData.header_locked} options={listData.parties.map(p => ({ value: p.id, label: p.account_name }))}
                                             onChange={e => {
                                                 const partyId = parseInt(e.target.value);
@@ -1062,11 +1084,16 @@ const DepotSalesInvoice = () => {
                                                 console.log("Selected Party:", acc);
                                                 if (!acc) return;
 
+                                                const depotAcc = listData.depots.find(d => d.id === parseInt(formData.depot_id));
+
                                                 let updatedInvNo = formData.invoice_no;
                                                 if (!formData.id) {
-                                                    const prefix = getPrefixForParty(acc.account_name);
-                                                    const seq = getNextInvoiceSequence(listData.history, prefix);
-                                                    updatedInvNo = prefix ? `${prefix}${seq}` : seq.toString();
+                                                    const seq = getNextDepotInvoiceSequence(
+                                                        listData.history,
+                                                        depotAcc?.account_name || '',
+                                                        acc.account_name || ''
+                                                    );
+                                                    updatedInvNo = seq.toString();
                                                 }
 
                                                 setFormData(prev => ({

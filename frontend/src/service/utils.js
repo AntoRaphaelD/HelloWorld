@@ -25,11 +25,50 @@ export const getNextInvoiceSequence = (history, prefix) => {
 };
 
 export const getPrefixForParty = (partyName) => {
-    const name = String(partyName || '').toUpperCase();
-    if (name.includes('BHIWANDI')) {
+    const name = String(partyName || '').toUpperCase().trim();
+    if (name === 'DEPOT - MUMBAI') {
         return 'DM-';
-    } else if (name.includes('ICHAL')) {
+    } else if (name.includes('KAYAAR EXPORTS PRIVATE LIMITED')) {
         return 'DI-';
     }
     return '';
 };
+
+export const getNextDepotInvoiceSequence = (history, depotName, partyName) => {
+    const currentDepot = String(depotName || '').toUpperCase().trim();
+    const currentParty = String(partyName || '').toUpperCase().trim();
+
+    const isCurrentMumbai = currentDepot === 'DEPOT - MUMBAI';
+    const isCurrentKayaar = currentParty.includes('KAYAAR EXPORTS PRIVATE LIMITED');
+
+    const maxNo = history.reduce((max, item) => {
+        const invNo = String(item.invoice_no || '').trim();
+        const cleanNo = invNo.replace(/\D/g, '');
+        const numVal = parseInt(cleanNo, 10);
+        if (isNaN(numVal)) return max;
+
+        const itemDepot = String(item.Depot?.account_name || '').toUpperCase().trim();
+        const itemParty = String(item.Party?.account_name || '').toUpperCase().trim();
+
+        const itemIsMumbai = itemDepot === 'DEPOT - MUMBAI';
+        const itemIsKayaar = itemParty.includes('KAYAAR EXPORTS PRIVATE LIMITED');
+
+        if (isCurrentMumbai) {
+            if (itemIsMumbai) {
+                return Math.max(max, numVal);
+            }
+        } else if (isCurrentKayaar) {
+            if (itemIsKayaar) {
+                return Math.max(max, numVal);
+            }
+        } else {
+            if (!itemIsMumbai && !itemIsKayaar) {
+                return Math.max(max, numVal);
+            }
+        }
+        return max;
+    }, 0);
+
+    return maxNo + 1;
+};
+
