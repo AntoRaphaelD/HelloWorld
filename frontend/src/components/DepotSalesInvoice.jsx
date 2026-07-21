@@ -145,7 +145,8 @@ const DepotSalesInvoice = () => {
     };
     const [listData, setListData] = useState({
         types: [], parties: [], depots: [], transports: [],
-        products: [], orders: [], history: [], brokers: []
+        products: [], orders: [], history: [], brokers: [],
+        invoices: [], loads: [], directInvoices: []
     });
     const [formData, setFormData] = useState(emptyInvoice);
     const [gridRows, setGridRows] = useState([]);
@@ -312,10 +313,13 @@ const DepotSalesInvoice = () => {
         const contentWidth = pageWidth - (margin * 2);
         const midX = margin + 115;
 
-        const fmt = (v, digits = 2) => num(v).toLocaleString('en-IN', {
-            minimumFractionDigits: digits,
-            maximumFractionDigits: digits
-        });
+        const fmt = (v, digits = 0) => {
+            const rounded = digits === 0 ? Math.round(num(v)) : num(v);
+            return rounded.toLocaleString('en-IN', {
+                minimumFractionDigits: digits,
+                maximumFractionDigits: digits
+            });
+        };
         const fmtDate = (value) => {
             if (!value) return '';
             const date = new Date(value);
@@ -335,6 +339,32 @@ const DepotSalesInvoice = () => {
             const product = listData.products.find(p => String(p.id) === String(productId));
             return product?.printing_tariff_sub_head_no || '';
         };
+        const getProductShortDesc = (productId) => {
+            const product = listData.products.find(p => String(p.id) === String(productId));
+            return product?.short_description || '';
+        };
+        const gridOrderNos = gridRows.map(row => String(row.order_no || '').trim().toUpperCase()).filter(Boolean);
+        const matchedInvoice = listData.invoices?.find(inv => 
+            (inv.invoice_no && gridOrderNos.includes(String(inv.invoice_no).trim().toUpperCase())) ||
+            (inv.lr_no && data.lr_no && String(inv.lr_no).trim().toUpperCase() === String(data.lr_no).trim().toUpperCase()) ||
+            (inv.vehicle_no && data.vehicle_no && String(inv.vehicle_no).trim().toUpperCase() === String(data.vehicle_no).trim().toUpperCase())
+        );
+        const matchedDirectInvoice = listData.directInvoices?.find(inv => 
+            (inv.invoice_no && gridOrderNos.includes(String(inv.invoice_no).trim().toUpperCase())) ||
+            (inv.lr_no && data.lr_no && String(inv.lr_no).trim().toUpperCase() === String(data.lr_no).trim().toUpperCase()) ||
+            (inv.vehicle_no && data.vehicle_no && String(inv.vehicle_no).trim().toUpperCase() === String(data.vehicle_no).trim().toUpperCase())
+        );
+        const matchedLoad = listData.loads?.find(l => 
+            (l.lr_no && data.lr_no && String(l.lr_no).trim().toUpperCase() === String(data.lr_no).trim().toUpperCase()) ||
+            (l.vehicle_no && data.vehicle_no && String(l.vehicle_no).trim().toUpperCase() === String(data.vehicle_no).trim().toUpperCase())
+        );
+        const deliveryLocation = matchedInvoice?.delivery 
+            || matchedDirectInvoice?.delivery 
+            || matchedLoad?.delivery 
+            || data.delivery 
+            || depot.account_name 
+            || data.country 
+            || '';
         const hsnCodes = [...new Set(gridRows.map(row => getHSN(row.product_id)).filter(Boolean))];
         const totalGst = num(data.total_gst) + num(data.total_sgst) + num(data.total_cgst) + num(data.total_igst);
         const ratePerKg = (item) => {
@@ -430,8 +460,7 @@ const DepotSalesInvoice = () => {
         labelValue("Invoice No", data.invoice_no, infoX, y + 8);
         labelValue("Invoice Dt", fmtDate(data.date), infoX, y + 15);
         labelValue("Vehicle No", data.vehicle_no, infoX, y + 22);
-        labelValue("Delivery At", depot.account_name || data.delivery || data.country, infoX, y + 29);
-        if (transport.transport_name) labelValue("Transport", transport.transport_name, infoX, y + 36);
+        labelValue("Delivery At", deliveryLocation, infoX, y + 29);
 
         y += detailsHeight;
         doc.rect(margin, y, contentWidth, 9);
@@ -443,13 +472,14 @@ const DepotSalesInvoice = () => {
             startY: y,
             margin: { left: margin, right: margin },
             tableWidth: contentWidth,
-            head: [["No of Bags", "Net Weight", "S.L No", "Rate Per Kgs", "Assessable Value"]],
+            head: [["Product", "No of Bags", "Net Weight", "S.L No", "Rate Per Kgs", "Assessable Value"]],
             body: lineRows.map(item => [
+                getProductShortDesc(item.product_id),
                 fmt(item.packs, 0),
                 fmt(item.total_kgs, 2),
                 [safe(item.from_no), safe(item.to_no)].filter(Boolean).join(" - "),
                 fmt(ratePerKg(item), 2),
-                fmt(item.assessable_value, 2)
+                fmt(item.assessable_value, 0)
             ]),
             theme: "grid",
             styles: {
@@ -474,22 +504,61 @@ const DepotSalesInvoice = () => {
                 fontStyle: "bold"
             },
             columnStyles: {
-                0: { cellWidth: 30 },
-                1: { cellWidth: 38 },
-                2: { cellWidth: 58 },
-                3: { cellWidth: 34, halign: "right" },
-                4: { cellWidth: contentWidth - 160, halign: "right" }
+                0: { cellWidth: 55, halign: "left" },
+                1: { cellWidth: 22 },
+                2: { cellWidth: 26 },
+                3: { cellWidth: 40 },
+                4: { cellWidth: 23, halign: "right" },
+                5: { cellWidth: contentWidth - 166, halign: "right" }
             }
         });
 
         y = doc.lastAutoTable.finalY;
         const summaryTop = y;
-        const taxRows = [
-            ["CHARITY", data.total_charity],
-            ["FREIGHT", data.freight],
-            ["GST", totalGst],
-            ["ROUND OFF", data.round_off]
-        ].filter(([label, value]) => label === "CHARITY" || label === "FREIGHT" || num(value) !== 0);
+
+        const config = listData.types.find(t => String(t.id) === String(data.invoice_type_id)) || {};
+        const cgstPer = num(config.cgst_percentage);
+        const sgstPer = num(config.sgst_percentage);
+        const igstPer = num(config.igst_percentage);
+        const tcsPer = num(config.tcs_percentage);
+
+        const taxRows = [];
+        if (num(data.total_charity) > 0) {
+            taxRows.push(["Charity", data.total_charity]);
+        }
+        if (num(data.freight) > 0) {
+            taxRows.push(["Freight", data.freight]);
+        }
+        taxRows.push([`CGST @ ${(cgstPer || 0).toFixed(2)}%`, data.total_cgst || 0]);
+        taxRows.push([`SGST @ ${(sgstPer || 0).toFixed(2)}%`, data.total_sgst || 0]);
+        taxRows.push([`IGST @ ${(igstPer || 0).toFixed(2)}%`, data.total_igst || 0]);
+        if (num(data.total_vat) > 0) {
+            taxRows.push(["VAT", data.total_vat]);
+        }
+        if (num(data.total_cenvat) > 0) {
+            taxRows.push(["CENVAT", data.total_cenvat]);
+        }
+        if (num(data.total_duty) > 0) {
+            taxRows.push(["DUTY", data.total_duty]);
+        }
+        if (num(data.total_cess) > 0) {
+            taxRows.push(["CESS", data.total_cess]);
+        }
+        if (num(data.total_hr_sec_cess) > 0) {
+            taxRows.push(["HECESS", data.total_hr_sec_cess]);
+        }
+        if (num(data.total_other) > 0) {
+            taxRows.push(["Other Charges", data.total_other]);
+        }
+        
+        // Total before TCS
+        taxRows.push(["Total", data.sub_total]);
+        
+        taxRows.push([`TCS @ ${(tcsPer || 0).toFixed(2)}%`, data.total_tcs || 0]);
+        if (num(data.round_off) !== 0) {
+            taxRows.push(["Round Off", data.round_off]);
+        }
+
         const summaryHeight = Math.max(38, 14 + (taxRows.length * 6));
         doc.rect(margin, summaryTop, contentWidth, summaryHeight);
         doc.line(midX, summaryTop, midX, summaryTop + summaryHeight);
@@ -504,7 +573,13 @@ const DepotSalesInvoice = () => {
         doc.setFontSize(8);
         taxRows.forEach(([label, value], index) => {
             const rowY = summaryTop + 9 + (index * 6);
-            doc.setFont("helvetica", label === "GST" ? "bold" : "normal");
+            
+            // Draw a dividing line before Total and before TCS
+            if (label === "Total" || label.startsWith("TCS")) {
+                doc.line(midX, rowY - 4, right, rowY - 4);
+            }
+
+            doc.setFont("helvetica", ["CGST", "SGST", "IGST", "Total", "TCS"].some(k => label.includes(k)) ? "bold" : "normal");
             doc.text(label, taxLabelX, rowY);
             doc.text(fmt(value, 2), taxValueX, rowY, { align: "right" });
         });
@@ -515,7 +590,7 @@ const DepotSalesInvoice = () => {
         doc.setFont("helvetica", "bold");
         doc.text("Amount Chargeable (in words)", margin + 3, y + 7);
         doc.setFont("helvetica", "normal");
-        doc.text(doc.splitTextToSize(numberToWords(num(data.final_invoice_value)), 105), margin + 3, y + 13);
+        doc.text(doc.splitTextToSize(numberToWords(Math.round(num(data.final_invoice_value))), 105), margin + 3, y + 13);
         doc.setFont("helvetica", "bold");
         doc.text("Grand Total", right - 48, y + 11);
         doc.setFontSize(10);
@@ -523,6 +598,14 @@ const DepotSalesInvoice = () => {
 
         y += 30;
         doc.rect(margin, y, contentWidth, 24);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(7);
+        doc.text("Declaration:", margin + 3, y + 6);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(6.5);
+        const declarationText = "We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.";
+        doc.text(doc.splitTextToSize(declarationText, 110), margin + 3, y + 11);
+
         doc.setFont("helvetica", "bold");
         doc.setFontSize(7);
         doc.text("For KAYAAR EXPORTS PRIVATE LIMITED", right - 5, y + 9, { align: "right" });
@@ -584,7 +667,10 @@ const DepotSalesInvoice = () => {
                 productsRes,
                 brokersRes,
                 ordersRes,
-                depotSalesRes
+                depotSalesRes,
+                invoicesRes,
+                despatchRes,
+                directInvoicesRes
             ] = await Promise.all([
                 mastersAPI.invoiceTypes.getAll(),
                 mastersAPI.accounts.getAll(),
@@ -592,7 +678,10 @@ const DepotSalesInvoice = () => {
                 mastersAPI.products.getAll(),
                 mastersAPI.brokers.getAll(),
                 transactionsAPI.orders.getAll(),
-                transactionsAPI.depotSales.getAll()
+                transactionsAPI.depotSales.getAll(),
+                transactionsAPI.invoices.getAll(),
+                transactionsAPI.despatch.getAll(),
+                transactionsAPI.directInvoices.getAll()
             ]);
             const accs = accountsRes.data.data || [];
 
@@ -604,7 +693,10 @@ const DepotSalesInvoice = () => {
                 products: productsRes.data.data || [],
                 orders: ordersRes.data.data || [],
                 history: depotSalesRes.data.data || [],
-                brokers: brokersRes.data.data || []
+                brokers: brokersRes.data.data || [],
+                invoices: invoicesRes.data.data || [],
+                loads: despatchRes.data.data || [],
+                directInvoices: directInvoicesRes.data.data || []
             });
         } catch (e) {
             console.error("REST Init Error:", e);

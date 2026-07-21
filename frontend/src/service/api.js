@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 // 1. BASE URL CONFIGURATION
-const BASE_URL = 'http://localhost:5000';
+const BASE_URL = 'http://localhost:5002';
 
 // REST API Instance (Existing)
 const api = axios.create({ 

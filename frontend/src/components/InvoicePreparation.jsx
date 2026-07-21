@@ -285,6 +285,7 @@ const InvoicePreparation = () => {
     const filteredInvoices = useMemo(() => {
 
         let result = [...listData.history];
+        result.sort((a, b) => b.id - a.id);
 
         if (searchValue.trim()) {
 
@@ -345,6 +346,10 @@ const InvoicePreparation = () => {
         const prod = listData.products.find(p => p.id === productId);
         return prod?.printing_tariff_sub_head_no || '';
     };
+    const getProductShortDesc = (productId) => {
+        const prod = listData.products.find(p => String(p.id) === String(productId));
+        return prod?.short_description || '';
+    };
     const exportToPDF = async () => {
         {
             const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -356,10 +361,13 @@ const InvoicePreparation = () => {
             const contentWidth = pageWidth - (margin * 2);
             const midX = margin + 115;
 
-            const fmt = (v, digits = 2) => num(v).toLocaleString('en-IN', {
-                minimumFractionDigits: digits,
-                maximumFractionDigits: digits
-            });
+            const fmt = (v, digits = 0) => {
+                const rounded = digits === 0 ? Math.round(num(v)) : num(v);
+                return rounded.toLocaleString('en-IN', {
+                    minimumFractionDigits: digits,
+                    maximumFractionDigits: digits
+                });
+            };
             const fmtDate = (value) => {
                 if (!value) return '';
                 const date = new Date(value);
@@ -471,7 +479,6 @@ const InvoicePreparation = () => {
             labelValue("E-Way Bill No", data.ebill_no, infoX, y + 22);
             labelValue("Vehicle No", data.vehicle_no, infoX, y + 29);
             labelValue("Delivery At", data.delivery, infoX, y + 36);
-            if (transport.transport_name) labelValue("Transport", transport.transport_name, infoX, y + 43);
 
             y += detailsHeight;
             doc.rect(margin, y, contentWidth, 9);
@@ -483,13 +490,14 @@ const InvoicePreparation = () => {
                 startY: y,
                 margin: { left: margin, right: margin },
                 tableWidth: contentWidth,
-                head: [["No of Bags", "Net Weight", "S.L No", "Rate Per Kgs", "Assessable Value"]],
+                head: [["Product", "No of Bags", "Net Weight", "S.L No", "Rate Per Kgs", "Assessable Value"]],
                 body: lineRows.map(item => [
+                    getProductShortDesc(item.product_id),
                     fmt(item.packs, 0),
                     fmt(item.total_kgs, 2),
                     [safe(item.from_no), safe(item.to_no)].filter(Boolean).join(" - "),
                     fmt(ratePerKg(item), 2),
-                    fmt(item.assessable_value, 2)
+                    fmt(item.assessable_value, 0)
                 ]),
                 theme: "grid",
                 styles: {
@@ -514,11 +522,12 @@ const InvoicePreparation = () => {
                     fontStyle: "bold"
                 },
                 columnStyles: {
-                    0: { cellWidth: 30 },
-                    1: { cellWidth: 38 },
-                    2: { cellWidth: 58 },
-                    3: { cellWidth: 34, halign: "right" },
-                    4: { cellWidth: contentWidth - 160, halign: "right" }
+                    0: { cellWidth: 55, halign: "left" },
+                    1: { cellWidth: 22 },
+                    2: { cellWidth: 26 },
+                    3: { cellWidth: 40 },
+                    4: { cellWidth: 23, halign: "right" },
+                    5: { cellWidth: contentWidth - 166, halign: "right" }
                 }
             });
 
@@ -526,12 +535,50 @@ const InvoicePreparation = () => {
             const summaryTop = y;
             const taxLabelX = midX + 4;
             const taxValueX = right - 5;
-            const taxRows = [
-                ["CHARITY", data.total_charity],
-                ["FREIGHT", data.freight_charges],
-                ["GST", totalGst],
-                ["ROUND OFF", data.round_off]
-            ].filter(([label, value]) => label === "CHARITY" || label === "FREIGHT" || num(value) !== 0);
+
+            const config = listData.types.find(t => String(t.id) === String(data.invoice_type_id)) || {};
+            const cgstPer = num(config.cgst_percentage);
+            const sgstPer = num(config.sgst_percentage);
+            const igstPer = num(config.igst_percentage);
+            const tcsPer = num(config.tcs_percentage);
+
+            const taxRows = [];
+            if (num(data.total_charity) > 0) {
+                taxRows.push(["Charity", data.total_charity]);
+            }
+            if (num(data.freight_charges) > 0) {
+                taxRows.push(["Freight Charges", data.freight_charges]);
+            }
+            taxRows.push([`CGST @ ${(cgstPer || 0).toFixed(2)}%`, data.total_cgst || 0]);
+            taxRows.push([`SGST @ ${(sgstPer || 0).toFixed(2)}%`, data.total_sgst || 0]);
+            taxRows.push([`IGST @ ${(igstPer || 0).toFixed(2)}%`, data.total_igst || 0]);
+            if (num(data.total_vat) > 0) {
+                taxRows.push(["VAT", data.total_vat]);
+            }
+            if (num(data.total_cenvat) > 0) {
+                taxRows.push(["CENVAT", data.total_cenvat]);
+            }
+            if (num(data.total_duty) > 0) {
+                taxRows.push(["DUTY", data.total_duty]);
+            }
+            if (num(data.total_cess) > 0) {
+                taxRows.push(["CESS", data.total_cess]);
+            }
+            if (num(data.total_hr_sec_cess) > 0) {
+                taxRows.push(["HECESS", data.total_hr_sec_cess]);
+            }
+            if (num(data.total_other) > 0) {
+                taxRows.push(["Other Charges", data.total_other]);
+            }
+            
+            // Total before TCS
+            taxRows.push(["Total", data.sub_total]);
+            
+            taxRows.push([`TCS @ ${(tcsPer || 0).toFixed(2)}%`, data.total_tcs || 0]);
+            if (num(data.round_off) !== 0) {
+                taxRows.push(["Round Off", data.round_off]);
+            }
+
             const summaryHeight = Math.max(38, 14 + (taxRows.length * 6));
             doc.rect(margin, summaryTop, contentWidth, summaryHeight);
             doc.line(midX, summaryTop, midX, summaryTop + summaryHeight);
@@ -544,7 +591,13 @@ const InvoicePreparation = () => {
             doc.setFontSize(8);
             taxRows.forEach(([label, value], index) => {
                 const rowY = summaryTop + 9 + (index * 6);
-                doc.setFont("helvetica", label === "GST" ? "bold" : "normal");
+                
+                // Draw a dividing line before Total and before TCS
+                if (label === "Total" || label.startsWith("TCS")) {
+                    doc.line(midX, rowY - 4, right, rowY - 4);
+                }
+
+                doc.setFont("helvetica", ["CGST", "SGST", "IGST", "Total", "TCS"].some(k => label.includes(k)) ? "bold" : "normal");
                 doc.text(label, taxLabelX, rowY);
                 doc.text(fmt(value, 2), taxValueX, rowY, { align: "right" });
             });
@@ -555,7 +608,7 @@ const InvoicePreparation = () => {
             doc.setFont("helvetica", "bold");
             doc.text("Amount Chargeable (in words)", margin + 3, y + 7);
             doc.setFont("helvetica", "normal");
-            doc.text(doc.splitTextToSize(numberToWords(num(data.net_amount)), 105), margin + 3, y + 13);
+            doc.text(doc.splitTextToSize(numberToWords(Math.round(num(data.net_amount))), 105), margin + 3, y + 13);
             doc.setFont("helvetica", "bold");
             doc.text("Grand Total", right - 48, y + 11);
             doc.setFontSize(10);
@@ -563,6 +616,14 @@ const InvoicePreparation = () => {
 
             y += 30;
             doc.rect(margin, y, contentWidth, 24);
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(7);
+            doc.text("Declaration:", margin + 3, y + 6);
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(6.5);
+            const declarationText = "We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.";
+            doc.text(doc.splitTextToSize(declarationText, 110), margin + 3, y + 11);
+
             doc.setFont("helvetica", "bold");
             doc.setFontSize(7);
             doc.text("For KAYAAR EXPORTS PRIVATE LIMITED", right - 5, y + 9, { align: "right" });
@@ -1928,7 +1989,7 @@ const InvoicePreparation = () => {
                         </div>
 
                         {/* Modal Footer */}
-                        <div className="bg-[#D9E5F7] p-3 border-t border-slate-400 flex justify-between gap-3 px-6 shadow-inner">
+                        <div className="bg-[#D9E5F7] p-3 border-t border-slate-400 flex flex-wrap justify-between items-center gap-3 px-6 shadow-inner">
                             <div className="flex items-center gap-2">
                                 <input type="checkbox" checked={formData.is_approved} onChange={e => setFormData({ ...formData, is_approved: e.target.checked })} className="w-4 h-4" />
                                 <span className="text-xs font-black text-blue-800">Approval</span>
