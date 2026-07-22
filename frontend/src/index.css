@@ -1,3 +1,30 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Highly Visible & Accessible Scrollbar for Easy Mouse Dragging */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 10px; /* Wider track for easy grab/click */
+  height: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #E2E8F0; /* Solid light grey track (slate-200) */
+  border-radius: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #475569; /* Solid high-contrast dark grey (slate-600) */
+  border-radius: 6px;
+  border: 1px solid #F8FAFC; /* White border separation */
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #1E293B; /* Darker grey on hover (slate-800) */
+}
+
+/* Firefox Scrollbar Support */
+.custom-scrollbar {
+  scrollbar-width: auto; /* standard width for easy interaction */
+  scrollbar-color: #475569 #E2E8F0;
+}

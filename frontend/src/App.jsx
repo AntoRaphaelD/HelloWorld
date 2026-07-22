@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import LoginScreen from './components/LoginScreen';
 import { authAPI, setAuthToken } from './service/api';
+import { FilterProvider, useFilter } from './context/FilterContext';
 
 // --- Master Components ---
 import AccountMaster from './components/AccountMaster';
@@ -185,7 +186,7 @@ const SidebarMetric = ({ label, value, tone = "blue" }) => {
  * SIDEBAR SECTION WRAPPER
  */
 const SidebarSection = ({ title, children, tone = "blue" }) => {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const toneClass = {
     blue: "bg-blue-500",
     rose: "bg-rose-500",
@@ -237,6 +238,84 @@ const SidebarSection = ({ title, children, tone = "blue" }) => {
       </AnimatePresence>
     </motion.div>
   );
+};
+
+const SidebarFilterPanel = () => {
+  const { 
+    searchQuery, setSearchQuery,
+    searchField, setSearchField,
+    searchFields,
+    fromDate, setFromDate,
+    toDate, setToDate,
+    showDateSlicer
+  } = useFilter();
+
+  return (
+    <div className="flex flex-col h-full bg-slate-50/50 p-4 border-t border-slate-200 overflow-y-auto text-xs gap-3">
+      {/* Search Section */}
+      {searchFields && searchFields.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Search Field</label>
+          <select 
+            value={searchField} 
+            onChange={e => setSearchField(e.target.value)}
+            className="w-full border border-slate-200 p-2 rounded-lg bg-white outline-none focus:ring-1 focus:ring-blue-500 text-xs font-semibold"
+          >
+            {searchFields.map(field => (
+              <option key={field.value} value={field.value}>{field.label}</option>
+            ))}
+          </select>
+
+          <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider mt-1">Search Value</label>
+          <input 
+            type="text" 
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="Search query..."
+            className="w-full border border-slate-200 px-3 py-2 rounded-lg bg-white outline-none focus:ring-1 focus:ring-blue-500 text-xs font-semibold"
+          />
+        </div>
+      )}
+
+      {/* Date Slicer Section */}
+      {showDateSlicer && (
+        <div className="flex flex-col gap-1.5 border-t border-slate-200/60 pt-2.5">
+          <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Date Range Filter</label>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <span className="w-10 text-[9px] font-bold text-slate-400 uppercase">From:</span>
+              <input 
+                type="date" 
+                value={fromDate}
+                onChange={e => setFromDate(e.target.value)}
+                className="flex-1 border border-slate-200 p-1.5 rounded-lg bg-white outline-none text-xs font-semibold"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-10 text-[9px] font-bold text-slate-400 uppercase">To:</span>
+              <input 
+                type="date" 
+                value={toDate}
+                onChange={e => setToDate(e.target.value)}
+                className="flex-1 border border-slate-200 p-1.5 rounded-lg bg-white outline-none text-xs font-semibold"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const RouteFilterResetter = () => {
+  const location = useLocation();
+  const { resetFilters } = useFilter();
+
+  useEffect(() => {
+    resetFilters([], '', false);
+  }, [location.pathname]);
+
+  return null;
 };
 
 /**
@@ -311,12 +390,14 @@ export default function App() {
   }
 
   return (
-    <Router>
-      {!auth ? (
-        <LoginScreen onAuthenticated={handleAuthenticated} />
-      ) : (
-      <>
-      <div className="flex h-screen bg-[#F8FAFC] overflow-hidden font-sans text-slate-900">
+    <FilterProvider>
+      <Router>
+        <RouteFilterResetter />
+        {!auth ? (
+          <LoginScreen onAuthenticated={handleAuthenticated} />
+        ) : (
+        <>
+        <div className="flex h-screen bg-[#F8FAFC] overflow-hidden font-sans text-slate-900">
         
         {/* --- LEGENDARY SIDEBAR --- */}
         <motion.aside
@@ -357,7 +438,8 @@ export default function App() {
           </div>
 
           {/* Navigation - ALL FIELDS INCLUDED */}
-          <nav className="relative flex-1 overflow-y-auto custom-scrollbar pb-4">
+          {/* Navigation - ALL FIELDS INCLUDED (50%) */}
+          <nav className="h-[50%] overflow-y-scroll custom-scrollbar pb-4 border-b border-slate-200 shrink-0">
             <SidebarSection title="Masters" tone="blue">
               <SidebarLink to="/accounts" label="Accounts" icon={Users} colorClass="text-blue-500" />
               <SidebarLink to="/product" label="Product Master" icon={Package} colorClass="text-blue-500" />
@@ -374,7 +456,6 @@ export default function App() {
                 <SidebarLink to="/production" label="RG1 Production" icon={Factory} colorClass="text-rose-500" />
                 <SidebarLink to="/despatch" label="Despatch Entry" icon={Truck} colorClass="text-rose-500" />
                 <SidebarLink to="/invoice-prep" label="Invoice Gen" icon={FileText} colorClass="text-rose-500" />
-                {/* <SidebarLink to="/invoice-approval" label="Approvals" icon={CheckSquare} colorClass="text-rose-500" /> */}
               </SidebarSection>
 
               <SidebarSection title="Depot Management" tone="emerald">
@@ -390,32 +471,31 @@ export default function App() {
             </SidebarSection>
           </nav>
 
-          {/* User Profile */}
-          <div className="relative m-4 rounded-xl border border-slate-200 bg-slate-50/90 p-4 shadow-sm">
-             {/* <div className="space-y-3">
-              <SidebarMetric label="Core" value={92} tone="blue" />
-              <SidebarMetric label="Backup" value={78} tone="emerald" />
-             </div> */}
-             <div className="mt-4 pt-4 border-t border-slate-200 flex items-center gap-3">
-               <motion.div
-                 whileHover={{ scale: 1.08 }}
-                 className="h-9 w-9 rounded-lg bg-white flex items-center justify-center shadow-sm text-[10px] font-black border border-slate-100"
-               >
-                 {auth.user.username.slice(0, 2).toUpperCase()}
-               </motion.div>
-               <div className="min-w-0">
-                 <p className="text-[13px] font-black uppercase text-slate-900">{auth.user.username}</p>
-                 <p className="text-[10px] text-emerald-700 font-bold uppercase animate-pulse">System Online</p>
-               </div>
-               <button
-                 type="button"
-                 onClick={handleLogout}
-                 className="ml-auto h-8 w-8 rounded-lg bg-white text-slate-400 flex items-center justify-center shadow-sm hover:text-red-600 hover:shadow-md transition-all"
-                 title="Logout"
-               >
-                 <LogOut size={15} />
-               </button>
-             </div>
+          {/* Date Slicer & Search functionality (40%) */}
+          <div className="h-[40%] overflow-hidden shrink-0">
+            <SidebarFilterPanel />
+          </div>
+
+          {/* User Profile & Logout (10%) */}
+          <div className="h-[10%] min-h-[60px] border-t border-slate-200 bg-slate-50/90 px-4 flex items-center gap-3 shrink-0">
+            <motion.div
+              whileHover={{ scale: 1.08 }}
+              className="h-9 w-9 rounded-lg bg-white flex items-center justify-center shadow-sm text-[10px] font-black border border-slate-100"
+            >
+              {auth.user.username.slice(0, 2).toUpperCase()}
+            </motion.div>
+            <div className="min-w-0">
+              <p className="text-[13px] font-black uppercase text-slate-900 truncate">{auth.user.username}</p>
+              <p className="text-[10px] text-emerald-700 font-bold uppercase animate-pulse">System Online</p>
+            </div>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="ml-auto h-8 w-8 rounded-lg bg-white text-slate-400 flex items-center justify-center shadow-sm hover:text-red-600 hover:shadow-md transition-all"
+              title="Logout"
+            >
+              <LogOut size={15} />
+            </button>
           </div>
         </motion.aside>
 
@@ -487,7 +567,8 @@ export default function App() {
 `}</style>
       </>
       )}
-    </Router>
+      </Router>
+    </FilterProvider>
   );
 }
 

@@ -5,6 +5,7 @@ import {
     ChevronRight, RefreshCw, Save, ShoppingCart, Search, Filter, 
     Square, CheckSquare, MinusCircle, FileSignature, Loader2    
 } from 'lucide-react';
+import { useFilter } from '../context/FilterContext';
 
 const SalesWithOrder = () => {
     const [list, setList] = useState([]);
@@ -15,9 +16,16 @@ const SalesWithOrder = () => {
     const [isSelectionMode, setIsSelectionMode] = useState(false);
     const [selectedIds, setSelectedIds] = useState([]);
     
-    const [searchField, setSearchField] = useState('order_no');
+    const { searchQuery: searchValue, searchField, resetFilters, sortField, setSortField, sortOrder, setSortOrder, fromDate, toDate } = useFilter();
     const [searchCondition, setSearchCondition] = useState('Like');
-    const [searchValue, setSearchValue] = useState('');
+    const handleSort = (field) => {
+        if (sortField === field) {
+            setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortField(field);
+            setSortOrder('asc');
+        }
+    };
 
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 10;
@@ -54,6 +62,11 @@ const SalesWithOrder = () => {
     useEffect(() => {
         fetchMasters();
         fetchRecords();
+        resetFilters([
+            { value: 'order_no', label: 'Order No' },
+            { value: 'party', label: 'Party Name' },
+            { value: 'date', label: 'Date' }
+        ], 'order_no', true);
     }, []);
 
     const fetchMasters = async () => {
@@ -183,22 +196,53 @@ const SalesWithOrder = () => {
 
     const filteredData = useMemo(() => {
         let result = Array.isArray(list) ? [...list] : [];
-        if (searchValue.trim()) {
-            result = result.filter(item => {
-                let val;
-                if (searchField === 'party') {
-                    val = item.Party?.account_name || '';
-                } else {
-                    val = item[searchField] || '';
-                }
-                const term = searchValue.toLowerCase().trim();
-                return searchCondition === 'Equal' 
-                    ? String(val).toLowerCase() === term 
-                    : String(val).toLowerCase().includes(term);
-            });
+        if (fromDate) {
+            result = result.filter(item => item.date >= fromDate);
         }
-        return result.sort((a, b) => b.id - a.id);
-    }, [list, searchValue, searchField, searchCondition]);
+        if (toDate) {
+            result = result.filter(item => item.date <= toDate);
+        }
+
+        const term = searchValue.toLowerCase().trim();
+        const filtered = result.filter(item => {
+            let val;
+            if (searchField === 'party') {
+                val = item.Party?.account_name || '';
+            } else {
+                val = item[searchField] || '';
+            }
+            return searchCondition === 'Equal' 
+                ? String(val).toLowerCase() === term 
+                : String(val).toLowerCase().includes(term);
+        });
+
+        filtered.sort((a, b) => {
+            let aVal, bVal;
+            if (sortField === 'order_no') {
+                aVal = String(a.order_no || '');
+                bVal = String(b.order_no || '');
+                return sortOrder === 'asc'
+                    ? aVal.localeCompare(bVal, undefined, { numeric: true, sensitivity: 'base' })
+                    : bVal.localeCompare(aVal, undefined, { numeric: true, sensitivity: 'base' });
+            } else if (sortField === 'date') {
+                aVal = new Date(a.date || 0).getTime();
+                bVal = new Date(b.date || 0).getTime();
+            } else if (sortField === 'party') {
+                aVal = String(a.Party?.account_name || '');
+                bVal = String(b.Party?.account_name || '');
+                return sortOrder === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+            } else {
+                aVal = a.id || 0;
+                bVal = b.id || 0;
+            }
+
+            if (aVal < bVal) return sortOrder === 'asc' ? -1 : 1;
+            if (aVal > bVal) return sortOrder === 'asc' ? 1 : -1;
+            return 0;
+        });
+
+        return filtered;
+    }, [list, searchValue, searchField, searchCondition, fromDate, toDate, sortField, sortOrder]);
 
     const currentItems = filteredData.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
     const totalPages = Math.ceil(filteredData.length / itemsPerPage) || 1;
@@ -227,30 +271,8 @@ const SalesWithOrder = () => {
                 </div>
             </div>
 
-            {/* Search Bar */}
-            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-6 flex flex-wrap items-end gap-4">
-                <div className="flex-1 min-w-[180px]">
-                    <label className="text-[10px] font-bold text-black uppercase mb-1 block">Search Field</label>
-                    <select value={searchField} onChange={e => setSearchField(e.target.value)} className="w-full border border-slate-200 p-2 rounded-xl text-[13px] outline-none focus:ring-1 focus:ring-blue-500">
-                        <option value="order_no">Order No</option>
-                        <option value="party">Party Name</option>
-                    </select>
-                </div>
-                <div className="flex-1 min-w-[150px]">
-                    <label className="text-[10px] font-bold text-black uppercase mb-1 block">Condition</label>
-                    <select value={searchCondition} onChange={e => setSearchCondition(e.target.value)} className="w-full border p-2 rounded-xl text-[13px] outline-none">
-                        <option value="Like">Like</option>
-                        <option value="Equal">Equal</option>
-                    </select>
-                </div>
-                <div className="flex-[2] min-w-[280px]">
-                    <label className="text-[10px] font-bold text-black uppercase mb-1 block">Value</label>
-                    <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-black" size={16} />
-                        <input type="text" value={searchValue} onChange={e => setSearchValue(e.target.value)} className="w-full border pl-9 pr-4 py-2 rounded-xl text-[13px] outline-none focus:ring-1 focus:ring-blue-500" placeholder="Live search..." />
-                    </div>
-                </div>
-
+            {/* Search Bar - Handled in Sidebar */}
+            <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm mb-6 flex justify-end items-center gap-4">
                 {!isSelectionMode ? (
                     <button onClick={() => setIsSelectionMode(true)} className="border border-blue-200 bg-blue-50 text-blue-600 px-8 py-2 rounded-xl text-base font-bold hover:bg-blue-100 shadow-sm transition-all">
                         Select
@@ -265,6 +287,8 @@ const SalesWithOrder = () => {
                         </button>
                     </div>
                 )}
+                
+                <div className="bg-slate-50 text-blue-600 border border-slate-200 px-4 py-2 rounded-lg text-xs font-bold flex items-center justify-center min-w-[100px] gap-2"><Filter size={14}/> {filteredData.length} Matches</div>
             </div>
 
             {/* Table */}
@@ -273,9 +297,15 @@ const SalesWithOrder = () => {
                     <thead className="bg-blue-700 border-b text-white text-sm font-bold uppercase tracking-wider">
                         <tr>
                             {isSelectionMode && <th className="p-4 w-12 text-center">#</th>}
-                            <th className="p-4">Order No</th>
-                            <th className="p-4">Order Date</th>
-                            <th className="p-4">Party Name</th>
+                            <th className="p-4 cursor-pointer select-none" onClick={() => handleSort('order_no')}>
+                                Order No {sortField === 'order_no' ? (sortOrder === 'asc' ? '▲' : '▼') : ''}
+                            </th>
+                            <th className="p-4 cursor-pointer select-none" onClick={() => handleSort('date')}>
+                                Order Date {sortField === 'date' ? (sortOrder === 'asc' ? '▲' : '▼') : ''}
+                            </th>
+                            <th className="p-4 cursor-pointer select-none" onClick={() => handleSort('party')}>
+                                Party Name {sortField === 'party' ? (sortOrder === 'asc' ? '▲' : '▼') : ''}
+                            </th>
                             <th className="p-4">Broker</th>
                             {!isSelectionMode && <th className="p-4 w-10"></th>}
                         </tr>

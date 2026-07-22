@@ -4,6 +4,7 @@ import {
     Plus, Edit, Trash2, X, ChevronLeft, 
     ChevronRight, RefreshCw, Save, Briefcase, Search, Filter, 
     Square, CheckSquare ,User, MapPin, Hash, Percent, Scale, Loader2 } from 'lucide-react';
+import { useFilter } from '../context/FilterContext';
 
 const BrokerMaster = () => {
     const [list, setList] = useState([]);
@@ -14,9 +15,16 @@ const BrokerMaster = () => {
     const [isSelectionMode, setIsSelectionMode] = useState(false);
     const [selectedIds, setSelectedIds] = useState([]);
     
-    const [searchField, setSearchField] = useState('broker_name');
+    const { searchQuery: searchValue, searchField, resetFilters, sortField, setSortField, sortOrder, setSortOrder } = useFilter();
     const [searchCondition, setSearchCondition] = useState('Like');
-    const [searchValue, setSearchValue] = useState('');
+    const handleSort = (field) => {
+        if (sortField === field) {
+            setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortField(field);
+            setSortOrder('asc');
+        }
+    };
 
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 10;
@@ -32,7 +40,13 @@ const BrokerMaster = () => {
 
     const [formData, setFormData] = useState(initialState);
 
-    useEffect(() => { fetchRecords(); }, []);
+    useEffect(() => { 
+        fetchRecords(); 
+        resetFilters([
+            { value: 'broker_name', label: 'Broker Name' },
+            { value: 'broker_code', label: 'Broker Code' }
+        ], 'broker_name', false);
+    }, []);
 
     const fetchRecords = async () => {
     setLoading(true);
@@ -56,8 +70,31 @@ const BrokerMaster = () => {
                 return searchCondition === 'Equal' ? itemValue === term : itemValue.includes(term);
             });
         }
-        return result.sort((a, b) => b.id - a.id);
-    }, [list, searchValue, searchField, searchCondition]);
+
+        result.sort((a, b) => {
+            let aVal, bVal;
+            if (sortField === 'broker_code') {
+                aVal = String(a.broker_code || '');
+                bVal = String(b.broker_code || '');
+                return sortOrder === 'asc'
+                    ? aVal.localeCompare(bVal, undefined, { numeric: true, sensitivity: 'base' })
+                    : bVal.localeCompare(aVal, undefined, { numeric: true, sensitivity: 'base' });
+            } else if (sortField === 'broker_name') {
+                aVal = String(a.broker_name || '');
+                bVal = String(b.broker_name || '');
+                return sortOrder === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+            } else {
+                aVal = a.id || 0;
+                bVal = b.id || 0;
+            }
+
+            if (aVal < bVal) return sortOrder === 'asc' ? -1 : 1;
+            if (aVal > bVal) return sortOrder === 'asc' ? 1 : -1;
+            return 0;
+        });
+
+        return result;
+    }, [list, searchValue, searchField, searchCondition, sortField, sortOrder]);
 
     const totalPages = Math.ceil(filteredData.length / itemsPerPage) || 1;
     const currentItems = filteredData.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
@@ -145,30 +182,8 @@ const BrokerMaster = () => {
                 </div>
             </div>
 
-            {/* Search Bar */}
-            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-6 flex flex-wrap items-end gap-4">
-                <div className="flex-1 min-w-[180px]">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Search Field</label>
-                    <select value={searchField} onChange={e => setSearchField(e.target.value)} className="w-full border border-slate-200 p-2 rounded-xl text-[13px] outline-none focus:ring-1 focus:ring-blue-500">
-                        <option value="broker_name">Broker Name</option>
-                        <option value="broker_code">Broker Code</option>
-                    </select>
-                </div>
-                <div className="flex-1 min-w-[150px]">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Condition</label>
-                    <select value={searchCondition} onChange={e => setSearchCondition(e.target.value)} className="w-full border p-2 rounded-xl text-[13px] outline-none">
-                        <option value="Like">Like</option>
-                        <option value="Equal">Equal</option>
-                    </select>
-                </div>
-                <div className="flex-[2] min-w-[280px]">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Value</label>
-                    <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
-                        <input type="text" value={searchValue} onChange={e => setSearchValue(e.target.value)} className="w-full border pl-9 pr-4 py-2 rounded-xl text-[13px] outline-none focus:ring-1 focus:ring-blue-500" placeholder="Live search..." />
-                    </div>
-                </div>
-
+            {/* Search Bar - Handled in Sidebar */}
+            <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm mb-6 flex justify-end items-center">
                 {!isSelectionMode ? (
                     <button onClick={() => setIsSelectionMode(true)} className="border border-blue-200 bg-blue-50 text-blue-600 px-8 py-2 rounded-xl text-base font-bold hover:bg-blue-100 shadow-sm transition-all">
                         Select
@@ -191,8 +206,12 @@ const BrokerMaster = () => {
                     <thead className="bg-slate-900 text-white text-[10px] font-bold uppercase tracking-wider">
                         <tr>
                             {isSelectionMode && <th className="p-3 w-12 text-center">#</th>}
-                            <th className="p-3">Code</th>
-                            <th className="p-3">Broker Name</th>
+                            <th className="p-3 cursor-pointer select-none" onClick={() => handleSort('broker_code')}>
+                                Code {sortField === 'broker_code' ? (sortOrder === 'asc' ? '▲' : '▼') : ''}
+                            </th>
+                            <th className="p-3 cursor-pointer select-none" onClick={() => handleSort('broker_name')}>
+                                Broker Name {sortField === 'broker_name' ? (sortOrder === 'asc' ? '▲' : '▼') : ''}
+                            </th>
                             <th className="p-3 text-right">Commission</th>
                             <th className="p-3">Address</th>
                             {!isSelectionMode && <th className="p-3 w-10"></th>}

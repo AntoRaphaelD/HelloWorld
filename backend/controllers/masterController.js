@@ -356,11 +356,125 @@ const calculateInvoiceBreakdown = ({ Details = [], config, freight_charges, sale
     return { processedRows, totals };
 };
 
+const renumberInvoices = async (transaction) => {
+    const invoices = await InvoiceHeader.findAll({
+        include: [{ model: Account, as: 'Party' }],
+        order: [['id', 'ASC']],
+        transaction
+    });
+
+    let normalCounter = 0;
+    let dmCounter = 0;
+    let diCounter = 0;
+
+    const updates = [];
+
+    for (const inv of invoices) {
+        const partyName = String(inv.Party?.account_name || inv.party_name || '').toUpperCase().trim();
+        let newInvNo = '';
+        if (partyName === 'DEPOT - MUMBAI') {
+            dmCounter++;
+            newInvNo = `DM-${dmCounter}`;
+        } else if (partyName.includes('KAYAAR EXPORTS PRIVATE LIMITED')) {
+            diCounter++;
+            newInvNo = `DI-${diCounter}`;
+        } else {
+            normalCounter++;
+            newInvNo = `${normalCounter}`;
+        }
+        updates.push({ id: inv.id, oldNo: inv.invoice_no, newNo: newInvNo });
+    }
+
+    // Step 1: Update to temporary values to prevent unique constraints
+    for (const u of updates) {
+        if (u.oldNo !== u.newNo) {
+            await InvoiceHeader.update(
+                { invoice_no: `TEMP-${u.id}` },
+                { where: { id: u.id }, transaction }
+            );
+        }
+    }
+
+    // Step 2: Update to final correct sequential values
+    for (const u of updates) {
+        if (u.oldNo !== u.newNo) {
+            await InvoiceHeader.update(
+                { invoice_no: u.newNo },
+                { where: { id: u.id }, transaction }
+            );
+        }
+    }
+};
+
+const renumberDepotInvoices = async (transaction) => {
+    const invoices = await DepotSalesHeader.findAll({
+        include: [
+            { model: Account, as: 'Depot' },
+            { model: Account, as: 'Party' }
+        ],
+        order: [['id', 'ASC']],
+        transaction
+    });
+
+    let mumbaiCounter = 0;
+    let kayaarCounter = 0;
+    let otherCounter = 0;
+
+    const updates = [];
+
+    for (const inv of invoices) {
+        const depotName = String(inv.Depot?.account_name || inv.depot_name || '').toUpperCase().trim();
+        const partyName = String(inv.Party?.account_name || inv.party_name || '').toUpperCase().trim();
+
+        let newInvNo = '';
+        if (depotName === 'DEPOT - MUMBAI') {
+            mumbaiCounter++;
+            newInvNo = `${mumbaiCounter}`;
+        } else if (partyName.includes('KAYAAR EXPORTS PRIVATE LIMITED')) {
+            kayaarCounter++;
+            newInvNo = `${kayaarCounter}`;
+        } else {
+            otherCounter++;
+            newInvNo = `${otherCounter}`;
+        }
+        updates.push({ id: inv.id, oldNo: inv.invoice_no, newNo: newInvNo, sales_type: inv.sales_type });
+    }
+
+    // Step 1: Update to temporary values to prevent unique constraints
+    for (const u of updates) {
+        if (u.oldNo !== u.newNo) {
+            await DepotSalesHeader.update(
+                { invoice_no: `TEMP-${u.id}` },
+                { where: { id: u.id }, transaction }
+            );
+        }
+    }
+
+    // Step 2: Update to final correct sequential values
+    for (const u of updates) {
+        if (u.oldNo !== u.newNo) {
+            await DepotSalesHeader.update(
+                { invoice_no: u.newNo },
+                { where: { id: u.id }, transaction }
+            );
+
+            // Also update any DepotReceived records linked by invoice_no!
+            if (u.sales_type === 'DEPOT TRANSFER') {
+                await DepotReceived.update(
+                    { invoice_no: u.newNo },
+                    { where: { invoice_no: u.oldNo }, transaction }
+                );
+            }
+        }
+    }
+};
+
 // SECOND: Overwrite the .create method with the dynamic formula logic
 invoiceCtrl.create = async (req, res) => {
     const t = await sequelize.transaction();
     try {
         const { Details, invoice_type_id, freight_charges, sales_type, ...headerData } = req.body;
+        headerData.invoice_no = `TEMP-CREATE-${Date.now()}-${Math.random()}`;
         const config = await InvoiceType.findByPk(invoice_type_id);
         if (!config) throw new Error("Invoice type not found");
 
@@ -417,6 +531,7 @@ invoiceCtrl.create = async (req, res) => {
             }
         }
 
+        await renumberInvoices(t);
         await t.commit();
         res.status(201).json({ success: true, data: header });
     } catch (err) {
@@ -431,6 +546,7 @@ invoiceCtrl.update = async (req, res) => {
     try {
         const { id } = req.params;
         const { Details, invoice_type_id, freight_charges, sales_type, ...headerData } = req.body;
+        headerData.invoice_no = `TEMP-UPDATE-${id}`;
         const config = await InvoiceType.findByPk(invoice_type_id, { transaction: t });
         if (!config) throw new Error("Invoice type not found");
 
@@ -558,6 +674,7 @@ invoiceCtrl.update = async (req, res) => {
             }
         }
 
+        await renumberInvoices(t);
         await t.commit();
         res.json({ success: true });
     } catch (err) {
@@ -594,6 +711,7 @@ invoiceCtrl.delete = async (req, res) => {
         }
         await InvoiceDetail.destroy({ where: { invoice_id: id }, transaction: t });
         await InvoiceHeader.destroy({ where: { id }, transaction: t });
+        await renumberInvoices(t);
         await t.commit();
         res.json({ success: true });
     } catch (err) {
@@ -1046,6 +1164,7 @@ depotSalesCtrl.create = async (req, res) => {
     const t = await sequelize.transaction();
     try {
         const { Details, ...headerData } = req.body;
+        headerData.invoice_no = `TEMP-CREATE-${Date.now()}-${Math.random()}`;
         const isTransfer = headerData.sales_type === 'DEPOT TRANSFER';
 
         // 1. Create Header
@@ -1078,6 +1197,7 @@ depotSalesCtrl.create = async (req, res) => {
             }
         }
 
+        await renumberDepotInvoices(t);
         await t.commit();
         res.status(201).json({ success: true, data: header });
     } catch (err) {
@@ -1091,6 +1211,7 @@ depotSalesCtrl.update = async (req, res) => {
     try {
         const { id } = req.params;
         const { Details, ...headerData } = req.body;
+        headerData.invoice_no = `TEMP-UPDATE-${id}`;
 
         // 1. Delete old details
         await DepotSalesDetail.destroy({ where: { depot_sales_id: id }, transaction: t });
@@ -1109,6 +1230,7 @@ depotSalesCtrl.update = async (req, res) => {
             await DepotSalesDetail.bulkCreate(detailRows, { transaction: t });
         }
 
+        await renumberDepotInvoices(t);
         await t.commit();
         res.json({ success: true });
     } catch (err) {
@@ -1169,6 +1291,7 @@ depotSalesCtrl.delete = async (req, res) => {
             }
             await DepotSalesHeader.destroy({ where: { id }, transaction: t });
         }
+        await renumberDepotInvoices(t);
         await t.commit();
         res.json({ success: true });
     } catch (err) {
@@ -1193,6 +1316,7 @@ depotSalesCtrl.bulkDelete = async (req, res) => {
                 await DepotSalesHeader.destroy({ where: { id }, transaction: t });
             }
         }
+        await renumberDepotInvoices(t);
         await t.commit();
         res.json({ success: true });
     } catch (err) {

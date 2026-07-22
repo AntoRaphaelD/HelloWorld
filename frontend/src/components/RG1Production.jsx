@@ -5,6 +5,7 @@ import {
     ChevronRight, RefreshCw, Save, Factory, Search, Filter, 
     Square, CheckSquare, Loader2
 } from 'lucide-react';
+import { useFilter } from '../context/FilterContext';
 
 const RG1Production = () => {
     // --- 1. State Management ---
@@ -18,9 +19,16 @@ const RG1Production = () => {
     const [selectedIds, setSelectedIds] = useState([]);
     
     // Search Filters
-    const [searchField, setSearchField] = useState('product_name');
+    const { searchQuery: searchValue, searchField, resetFilters, sortField, setSortField, sortOrder, setSortOrder, fromDate, toDate } = useFilter();
     const [searchCondition, setSearchCondition] = useState('Like');
-    const [searchValue, setSearchValue] = useState('');
+    const handleSort = (field) => {
+        if (sortField === field) {
+            setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortField(field);
+            setSortOrder('asc');
+        }
+    };
 
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 10;
@@ -174,6 +182,11 @@ const RG1Production = () => {
     useEffect(() => {
         fetchMasters();
         fetchRecords();
+        resetFilters([
+            { value: 'product_name', label: 'Product Name' },
+            { value: 'ref_no', label: 'Ref No' },
+            { value: 'date', label: 'Date' }
+        ], 'product_name', true);
     }, []);
 
     const fetchMasters = async () => {
@@ -296,15 +309,46 @@ const RG1Production = () => {
 
     const filteredData = useMemo(() => {
         let result = Array.isArray(list) ? [...list] : [];
-        if (searchValue.trim()) {
-            result = result.filter(item => {
-                const val = searchField === 'product_name' ? item.Product?.product_name : item[searchField];
-                const term = searchValue.toLowerCase().trim();
-                return searchCondition === 'Equal' ? String(val).toLowerCase() === term : String(val).toLowerCase().includes(term);
-            });
+        if (fromDate) {
+            result = result.filter(item => item.date >= fromDate);
         }
-        return result.sort((a, b) => b.id - a.id);
-    }, [list, searchValue, searchField, searchCondition]);
+        if (toDate) {
+            result = result.filter(item => item.date <= toDate);
+        }
+
+        const term = searchValue.toLowerCase().trim();
+        const filtered = result.filter(item => {
+            const val = searchField === 'product_name' ? item.Product?.product_name : item[searchField];
+            return searchCondition === 'Equal' ? String(val).toLowerCase() === term : String(val).toLowerCase().includes(term);
+        });
+
+        filtered.sort((a, b) => {
+            let aVal, bVal;
+            if (sortField === 'ref_no') {
+                aVal = String(a.ref_no || '');
+                bVal = String(b.ref_no || '');
+                return sortOrder === 'asc'
+                    ? aVal.localeCompare(bVal, undefined, { numeric: true, sensitivity: 'base' })
+                    : bVal.localeCompare(aVal, undefined, { numeric: true, sensitivity: 'base' });
+            } else if (sortField === 'date') {
+                aVal = new Date(a.date || 0).getTime();
+                bVal = new Date(b.date || 0).getTime();
+            } else if (sortField === 'product_name') {
+                aVal = String(a.Product?.product_name || '');
+                bVal = String(b.Product?.product_name || '');
+                return sortOrder === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+            } else {
+                aVal = a.id || 0;
+                bVal = b.id || 0;
+            }
+
+            if (aVal < bVal) return sortOrder === 'asc' ? -1 : 1;
+            if (aVal > bVal) return sortOrder === 'asc' ? 1 : -1;
+            return 0;
+        });
+
+        return filtered;
+    }, [list, searchValue, searchField, searchCondition, fromDate, toDate, sortField, sortOrder]);
 
     const currentItems = filteredData.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
     const totalPages = Math.ceil(filteredData.length / itemsPerPage) || 1;
@@ -329,30 +373,8 @@ const RG1Production = () => {
                 </div>
             </div>
 
-            {/* Dynamic Search Bar */}
-            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-6 flex flex-wrap items-end gap-4">
-                <div className="flex-1 min-w-[180px]">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Search Field</label>
-                    <select value={searchField} onChange={(e) => setSearchField(e.target.value)} className="w-full border border-slate-200 p-2 rounded-xl text-[13px] outline-none focus:ring-1 focus:ring-blue-500 bg-white">
-                        <option value="product_name">Count (Product)</option>
-                        <option value="id">Log ID</option>
-                    </select>
-                </div>
-                <div className="flex-1 min-w-[150px]">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Condition</label>
-                    <select value={searchCondition} onChange={(e) => setSearchCondition(e.target.value)} className="w-full border p-2 rounded-xl text-[13px] outline-none">
-                        <option value="Like">Like</option>
-                        <option value="Equal">Equal</option>
-                    </select>
-                </div>
-                <div className="flex-[2] min-w-[280px]">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Value</label>
-                    <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
-                        <input type="text" value={searchValue} onChange={(e) => setSearchValue(e.target.value)} className="w-full border pl-9 pr-4 py-2 rounded-xl text-[13px] outline-none focus:ring-1 focus:ring-blue-500 font-bold" />
-                    </div>
-                </div>
-
+            {/* Search Bar - Handled in Sidebar */}
+            <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm mb-6 flex justify-end items-center gap-4">
                 {!isSelectionMode ? (
                     <button onClick={() => setIsSelectionMode(true)} className="border border-blue-200 bg-blue-50 text-blue-600 px-10 py-2 rounded-xl text-sm font-bold hover:bg-blue-100 transition-all">Select</button>
                 ) : (
@@ -371,9 +393,15 @@ const RG1Production = () => {
                     <thead className="bg-blue-700 text-white text-[11px] font-bold uppercase tracking-wider">
                         <tr>
                             {isSelectionMode && <th className="p-4 w-12 text-center">#</th>}
-                            <th className="p-4">Log #</th>
-                            <th className="p-4">Date</th>
-                            <th className="p-4">Count (Product SKU)</th>
+                            <th className="p-4 cursor-pointer select-none" onClick={() => handleSort('id')}>
+                                Log # {sortField === 'id' ? (sortOrder === 'asc' ? '▲' : '▼') : ''}
+                            </th>
+                            <th className="p-4 cursor-pointer select-none" onClick={() => handleSort('date')}>
+                                Date {sortField === 'date' ? (sortOrder === 'asc' ? '▲' : '▼') : ''}
+                            </th>
+                            <th className="p-4 cursor-pointer select-none" onClick={() => handleSort('product_name')}>
+                                Count (Product SKU) {sortField === 'product_name' ? (sortOrder === 'asc' ? '▲' : '▼') : ''}
+                            </th>
                             <th className="p-4 text-right pr-10">Production (KG)</th>
                             <th className="p-4 text-right pr-10">Total Stock (KG)</th>
                             {!isSelectionMode && <th className="p-4 w-10"></th>}

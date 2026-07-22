@@ -12,6 +12,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { evaluate } from "mathjs"
 import logoImage from '../assets/logo.jpeg';
+import { useFilter } from '../context/FilterContext';
 
 // =====================================================
 // SAFE NUMBER HELPERS (PREVENT NaN + DECIMAL ISSUES)
@@ -259,10 +260,16 @@ const InvoicePreparation = () => {
     const [submitLoading, setSubmitLoading] = useState(false);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [activeTab, setActiveTab] = useState('head');
-    // SEARCH FILTERS (like AccountMaster)
-    const [searchField, setSearchField] = useState('invoice_no');
+    const { searchQuery: searchValue, searchField, fromDate, toDate, resetFilters, sortField, setSortField, sortOrder, setSortOrder } = useFilter();
     const [searchCondition, setSearchCondition] = useState('Like');
-    const [searchValue, setSearchValue] = useState('');
+    const handleSort = (field) => {
+        if (sortField === field) {
+            setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortField(field);
+            setSortOrder('asc');
+        }
+    };
     const [printData, setPrintData] = useState(null);
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 10;
@@ -283,50 +290,53 @@ const InvoicePreparation = () => {
         });
     }, [listData.types, formData.sales_type]);
     const filteredInvoices = useMemo(() => {
-
         let result = [...listData.history];
-        result.sort((a, b) => b.id - a.id);
 
-        if (searchValue.trim()) {
-
-            result = result.filter(item => {
-
-                let fieldValue = '';
-
-                switch (searchField) {
-                    case 'invoice_no':
-                        fieldValue = String(item.invoice_no || '');
-                        break;
-
-                    case 'date':
-                        fieldValue = String(item.date || '');
-                        break;
-
-                    case 'party':
-                        fieldValue = String(item.Party?.account_name || '');
-                        break;
-
-                    case 'status':
-                        fieldValue = item.is_approved ? 'APPROVED' : 'PENDING';
-                        break;
-
-                    default:
-                        fieldValue = '';
-                }
-
-                const term = searchValue.toLowerCase().trim();
-                const value = fieldValue.toLowerCase();
-
-                return searchCondition === 'Equal'
-                    ? value === term
-                    : value.includes(term);
-            });
-
+        if (fromDate) {
+            result = result.filter(item => item.date >= fromDate);
+        }
+        if (toDate) {
+            result = result.filter(item => item.date <= toDate);
         }
 
-        return result;
+        const term = searchValue.toLowerCase().trim();
+        const filtered = result.filter(item => {
+            let fieldValue = '';
+            if (searchField === 'invoice_no') fieldValue = String(item.invoice_no || '');
+            if (searchField === 'date') fieldValue = String(item.date || '');
+            if (searchField === 'party') fieldValue = String(item.Party?.account_name || '');
+            if (searchField === 'status') fieldValue = item.is_approved ? 'APPROVED' : 'PENDING';
+            const value = fieldValue.toLowerCase();
+            return searchCondition === 'Equal' ? value === term : value.includes(term);
+        });
 
-    }, [listData.history, searchField, searchCondition, searchValue]);
+        filtered.sort((a, b) => {
+            let aVal, bVal;
+            if (sortField === 'invoice_no') {
+                aVal = String(a.invoice_no || '');
+                bVal = String(b.invoice_no || '');
+                return sortOrder === 'asc'
+                    ? aVal.localeCompare(bVal, undefined, { numeric: true, sensitivity: 'base' })
+                    : bVal.localeCompare(aVal, undefined, { numeric: true, sensitivity: 'base' });
+            } else if (sortField === 'date') {
+                aVal = new Date(a.date || 0).getTime();
+                bVal = new Date(b.date || 0).getTime();
+            } else if (sortField === 'party') {
+                aVal = String(a.Party?.account_name || '');
+                bVal = String(b.Party?.account_name || '');
+                return sortOrder === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+            } else {
+                aVal = a.id || 0;
+                bVal = b.id || 0;
+            }
+
+            if (aVal < bVal) return sortOrder === 'asc' ? -1 : 1;
+            if (aVal > bVal) return sortOrder === 'asc' ? 1 : -1;
+            return 0;
+        });
+
+        return filtered;
+    }, [listData.history, searchValue, searchField, searchCondition, fromDate, toDate, sortField, sortOrder]);
 
     const totalPages = Math.ceil(filteredInvoices.length / itemsPerPage) || 1;
     const currentItems = filteredInvoices.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
@@ -343,8 +353,8 @@ const InvoicePreparation = () => {
     // EXPORT PDF - COMPACT TAX INVOICE FORMAT
     // =====================================================
     const getHSN = (productId) => {
-        const prod = listData.products.find(p => p.id === productId);
-        return prod?.printing_tariff_sub_head_no || '';
+        const prod = listData.products.find(p => String(p.id) === String(productId));
+        return prod?.printing_tariff_desc || '';
     };
     const getProductShortDesc = (productId) => {
         const prod = listData.products.find(p => String(p.id) === String(productId));
@@ -1123,7 +1133,15 @@ const InvoicePreparation = () => {
         } catch (e) { console.error(e); } finally { setLoading(false); }
     };
 
-    useEffect(() => { init(); }, []);
+    useEffect(() => { 
+        init(); 
+        resetFilters([
+            { value: 'invoice_no', label: 'Invoice No' },
+            { value: 'date', label: 'Invoice Date' },
+            { value: 'party', label: 'Party Name' },
+            { value: 'status', label: 'Status' }
+        ], 'invoice_no', true);
+    }, []);
 
     // ==========================================
     // 4. HANDLERS
@@ -1137,11 +1155,12 @@ const InvoicePreparation = () => {
 
         setFormData(prev => {
             let updatedInvNo = prev.invoice_no;
-            if (!prev.id) {
-                const prefix = getPrefixForParty(acc.account_name);
-                const seq = getNextInvoiceSequence(listData.history, prefix);
-                updatedInvNo = prefix ? `${prefix}${seq}` : seq.toString();
-            }
+            const prefix = getPrefixForParty(acc.account_name);
+            const historyExcludingCurrent = prev.id 
+                ? listData.history.filter(item => item.id !== prev.id)
+                : listData.history;
+            const seq = getNextInvoiceSequence(historyExcludingCurrent, prefix);
+            updatedInvNo = prefix ? `${prefix}${seq}` : seq.toString();
             return {
                 ...prev,
                 party_id: partyId,
@@ -1546,70 +1565,10 @@ const InvoicePreparation = () => {
                     <button onClick={() => { setFormData({ ...emptyInvoice, invoice_no: getNextInvoiceSequence(listData.history, '').toString() }); setGridRows([]); setActiveTab('head'); setIsModalOpen(true); }} className="bg-blue-600 text-white px-8 py-2 rounded-xl font-bold shadow-lg hover:bg-blue-700 transition-all uppercase text-xs flex items-center gap-2"><Plus size={18} /> New Invoice</button>
                 </div>
             </div>
-            {/* SEARCH FILTER BAR */}
-            <div className="bg-white p-4 rounded-xl border border-slate-300 shadow-sm mb-4">
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-
-                    {/* FIELD */}
-                    <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">
-                            Search Field
-                        </label>
-                        <select
-                            value={searchField}
-                            onChange={(e) => setSearchField(e.target.value)}
-                            className="w-full border border-slate-300 p-2 text-xs font-bold rounded"
-                        >
-                            <option value="invoice_no">Invoice No</option>
-                            <option value="date">Date</option>
-                            <option value="party">Party</option>
-                            <option value="status">Status</option>
-                        </select>
-                    </div>
-
-                    {/* CONDITION */}
-                    <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">
-                            Condition
-                        </label>
-                        <select
-                            value={searchCondition}
-                            onChange={(e) => setSearchCondition(e.target.value)}
-                            className="w-full border border-slate-300 p-2 text-xs font-bold rounded"
-                        >
-                            <option value="Like">Contains</option>
-                            <option value="Equal">Exact</option>
-                        </select>
-                    </div>
-
-                    {/* VALUE */}
-                    <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">
-                            Search Value
-                        </label>
-                        <input
-                            type="text"
-                            placeholder="Search..."
-                            value={searchValue}
-                            onChange={(e) => setSearchValue(e.target.value)}
-                            className="w-full border border-slate-300 p-2 text-xs font-bold rounded"
-                        />
-                    </div>
-
-                    {/* CLEAR */}
-                    <div className="flex gap-2">
-                        <button
-                            onClick={() => setSearchValue('')}
-                            className="flex-1 border border-slate-300 py-2 text-xs font-bold rounded hover:bg-gray-50"
-                        >
-                            Clear
-                        </button>
-
-                        <div className="flex-1 bg-blue-50 text-blue-700 border border-blue-200 py-2 rounded text-xs font-bold flex items-center justify-center">
-                            {filteredInvoices.length} Matches
-                        </div>
-                    </div>
-
+            {/* Search Bar - Handled in Sidebar */}
+            <div className="bg-white p-3 rounded-xl border border-slate-300 shadow-sm mb-4 flex justify-end items-center">
+                <div className="bg-blue-50 text-blue-700 border border-blue-200 px-4 py-1.5 rounded text-xs font-bold">
+                    {filteredInvoices.length} Matches
                 </div>
             </div>
             <div className="bg-white rounded-2xl border border-slate-300 shadow-sm overflow-hidden">
@@ -1617,9 +1576,15 @@ const InvoicePreparation = () => {
                     <thead className="bg-blue-700 text-white text-[10px] uppercase font-black tracking-widest">
                         <tr>
                             {isSelectionMode && <th className="p-6 w-12 text-center">Select</th>}
-                            <th className="p-6">InvoiceNo</th>
-                            <th className="p-6">Date</th>
-                            <th className="p-6">Party</th>
+                            <th className="p-6 cursor-pointer select-none" onClick={() => handleSort('invoice_no')}>
+                                InvoiceNo {sortField === 'invoice_no' ? (sortOrder === 'asc' ? '▲' : '▼') : ''}
+                            </th>
+                            <th className="p-6 cursor-pointer select-none" onClick={() => handleSort('date')}>
+                                Date {sortField === 'date' ? (sortOrder === 'asc' ? '▲' : '▼') : ''}
+                            </th>
+                            <th className="p-6 cursor-pointer select-none" onClick={() => handleSort('party')}>
+                                Party {sortField === 'party' ? (sortOrder === 'asc' ? '▲' : '▼') : ''}
+                            </th>
                         </tr>
                     </thead>
                     <tbody className="divide-y text-sm font-mono">

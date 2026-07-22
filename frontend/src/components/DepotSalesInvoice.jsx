@@ -10,6 +10,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { evaluate } from "mathjs";
 import logoImage from '../assets/logo.jpeg';
+import { useFilter } from '../context/FilterContext';
 
 const evaluateFormula = (formula, ctx) => {
 
@@ -154,10 +155,16 @@ const DepotSalesInvoice = () => {
     const [submitLoading, setSubmitLoading] = useState(false);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [activeTab, setActiveTab] = useState('head');
-
-    const [searchField, setSearchField] = useState('invoice_no');
+    const { searchQuery: searchValue, searchField, fromDate, toDate, resetFilters, sortField, setSortField, sortOrder, setSortOrder } = useFilter();
     const [searchCondition, setSearchCondition] = useState('Like');
-    const [searchValue, setSearchValue] = useState('');
+    const handleSort = (field) => {
+        if (sortField === field) {
+            setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortField(field);
+            setSortOrder('asc');
+        }
+    };
 
     // Pagination (registry)
     const [page, setPage] = useState(1);
@@ -337,7 +344,7 @@ const DepotSalesInvoice = () => {
         const lineRows = gridRows.length ? gridRows : [{}];
         const getHSN = (productId) => {
             const product = listData.products.find(p => String(p.id) === String(productId));
-            return product?.printing_tariff_sub_head_no || '';
+            return product?.printing_tariff_desc || '';
         };
         const getProductShortDesc = (productId) => {
             const product = listData.products.find(p => String(p.id) === String(productId));
@@ -704,7 +711,14 @@ const DepotSalesInvoice = () => {
             setLoading(false);
         }
     };
-    useEffect(() => { init(); }, []);
+    useEffect(() => { 
+        init(); 
+        resetFilters([
+            { value: 'invoice_no', label: 'Invoice No' },
+            { value: 'depot', label: 'Depot Name' },
+            { value: 'party', label: 'Party Name' }
+        ], 'invoice_no', true);
+    }, []);
     // ==========================================
     // 5. HANDLERS
     // ==========================================
@@ -941,7 +955,15 @@ const DepotSalesInvoice = () => {
     };
 
     const filteredHistory = useMemo(() => {
-        const history = Array.isArray(listData.history) ? listData.history : [];
+        let history = Array.isArray(listData.history) ? listData.history : [];
+
+        if (fromDate) {
+            history = history.filter(item => item.date >= fromDate);
+        }
+        if (toDate) {
+            history = history.filter(item => item.date <= toDate);
+        }
+
         const term = searchValue.toLowerCase().trim();
         return history
             .filter(item => (item.DepotSalesDetails || []).some(d => String(d.order_type).toLowerCase() !== "transfer"))
@@ -954,13 +976,34 @@ const DepotSalesInvoice = () => {
                 return searchCondition === 'Equal' ? value === term : value.includes(term);
             })
             .sort((a, b) => {
-                const da = a.date ? new Date(a.date).getTime() : 0;
-                const db = b.date ? new Date(b.date).getTime() : 0;
-                // latest first; fallback to id desc
-                if (db !== da) return db - da;
-                return (b.id || 0) - (a.id || 0);
+                let aVal, bVal;
+                if (sortField === 'invoice_no') {
+                    aVal = String(a.invoice_no || '');
+                    bVal = String(b.invoice_no || '');
+                    return sortOrder === 'asc'
+                        ? aVal.localeCompare(bVal, undefined, { numeric: true, sensitivity: 'base' })
+                        : bVal.localeCompare(aVal, undefined, { numeric: true, sensitivity: 'base' });
+                } else if (sortField === 'date') {
+                    aVal = new Date(a.date || 0).getTime();
+                    bVal = new Date(b.date || 0).getTime();
+                } else if (sortField === 'depot') {
+                    aVal = String(a.Depot?.account_name || '');
+                    bVal = String(b.Depot?.account_name || '');
+                    return sortOrder === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+                } else if (sortField === 'party') {
+                    aVal = String(a.Party?.account_name || '');
+                    bVal = String(b.Party?.account_name || '');
+                    return sortOrder === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+                } else {
+                    aVal = a.id || 0;
+                    bVal = b.id || 0;
+                }
+
+                if (aVal < bVal) return sortOrder === 'asc' ? -1 : 1;
+                if (aVal > bVal) return sortOrder === 'asc' ? 1 : -1;
+                return 0;
             });
-    }, [listData.history, searchValue, searchField, searchCondition]);
+    }, [listData.history, searchValue, searchField, searchCondition, fromDate, toDate, sortField, sortOrder]);
 
     useEffect(() => {
         setPage(1);
@@ -1016,20 +1059,11 @@ const DepotSalesInvoice = () => {
                     </button>
                 </div>
             </div>
-            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-6 flex gap-4 items-end">
-                <div className="flex-1">
-                    <label className="text-[9px] font-black text-slate-500 uppercase block mb-1">Search Field</label>
-                    <select value={searchField} onChange={e => setSearchField(e.target.value)} className="w-full border border-slate-300 p-2 text-xs font-bold rounded">
-                        <option value="invoice_no">Invoice No</option>
-                        <option value="depot">Depot</option>
-                        <option value="party">Party</option>
-                    </select>
+            {/* Search Bar - Handled in Sidebar */}
+            <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm mb-6 flex justify-end items-center">
+                <div className="bg-blue-50 text-blue-700 border border-blue-200 px-6 py-1.5 rounded text-xs font-bold">
+                    {filteredHistory.length} Matches
                 </div>
-                <div className="flex-1">
-                    <label className="text-[9px] font-black text-slate-500 uppercase block mb-1">Value</label>
-                    <input value={searchValue} onChange={e => setSearchValue(e.target.value)} className="w-full border border-slate-300 p-2 text-xs font-bold rounded" placeholder="Search..." />
-                </div>
-                <div className="bg-blue-50 text-blue-700 border border-blue-200 px-6 py-2 rounded text-xs font-bold">{filteredHistory.length} Matches</div>
             </div>
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                 <div className="flex flex-col">
@@ -1037,10 +1071,18 @@ const DepotSalesInvoice = () => {
                         <thead className="bg-slate-900 text-white text-[10px] uppercase font-bold tracking-wider">
                             <tr>
                                 {isSelectionMode && <th className="p-3 w-12 text-center">Select</th>}
-                                <th className="p-3">Inv #</th>
-                                <th className="p-3">Date</th>
-                                <th className="p-3">Depot</th>
-                                <th className="p-3">Party</th>
+                                <th className="p-3 cursor-pointer select-none" onClick={() => handleSort('invoice_no')}>
+                                    Inv # {sortField === 'invoice_no' ? (sortOrder === 'asc' ? '▲' : '▼') : ''}
+                                </th>
+                                <th className="p-3 cursor-pointer select-none" onClick={() => handleSort('date')}>
+                                    Date {sortField === 'date' ? (sortOrder === 'asc' ? '▲' : '▼') : ''}
+                                </th>
+                                <th className="p-3 cursor-pointer select-none" onClick={() => handleSort('depot')}>
+                                    Depot {sortField === 'depot' ? (sortOrder === 'asc' ? '▲' : '▼') : ''}
+                                </th>
+                                <th className="p-3 cursor-pointer select-none" onClick={() => handleSort('party')}>
+                                    Party {sortField === 'party' ? (sortOrder === 'asc' ? '▲' : '▼') : ''}
+                                </th>
                                 <th className="p-3 text-right">Net Value</th>
                             </tr>
                         </thead>
@@ -1152,15 +1194,15 @@ const DepotSalesInvoice = () => {
                                                 const depotAcc = listData.depots.find(d => d.id === depotId);
                                                 const partyAcc = listData.parties.find(p => p.id === parseInt(formData.party_id));
 
-                                                let updatedInvNo = formData.invoice_no;
-                                                if (!formData.id) {
-                                                    const seq = getNextDepotInvoiceSequence(
-                                                        listData.history,
-                                                        depotAcc?.account_name || '',
-                                                        partyAcc?.account_name || ''
-                                                    );
-                                                    updatedInvNo = seq.toString();
-                                                }
+                                                const historyExcludingCurrent = formData.id 
+                                                    ? listData.history.filter(item => item.id !== formData.id)
+                                                    : listData.history;
+                                                const seq = getNextDepotInvoiceSequence(
+                                                    historyExcludingCurrent,
+                                                    depotAcc?.account_name || '',
+                                                    partyAcc?.account_name || ''
+                                                );
+                                                const updatedInvNo = seq.toString();
 
                                                 setFormData(prev => ({
                                                     ...prev,
@@ -1178,15 +1220,15 @@ const DepotSalesInvoice = () => {
 
                                                 const depotAcc = listData.depots.find(d => d.id === parseInt(formData.depot_id));
 
-                                                let updatedInvNo = formData.invoice_no;
-                                                if (!formData.id) {
-                                                    const seq = getNextDepotInvoiceSequence(
-                                                        listData.history,
-                                                        depotAcc?.account_name || '',
-                                                        acc.account_name || ''
-                                                    );
-                                                    updatedInvNo = seq.toString();
-                                                }
+                                                const historyExcludingCurrent = formData.id 
+                                                    ? listData.history.filter(item => item.id !== formData.id)
+                                                    : listData.history;
+                                                const seq = getNextDepotInvoiceSequence(
+                                                    historyExcludingCurrent,
+                                                    depotAcc?.account_name || '',
+                                                    acc.account_name || ''
+                                                );
+                                                const updatedInvNo = seq.toString();
 
                                                 setFormData(prev => ({
                                                     ...prev,

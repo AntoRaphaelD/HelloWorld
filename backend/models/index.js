@@ -360,8 +360,7 @@ const InvoiceHeader = sequelize.define('InvoiceHeader', {
   // =============================
 
   invoice_no: {
-    type: DataTypes.STRING,
-    unique: true
+    type: DataTypes.STRING
   },
 
   date: {
@@ -823,8 +822,7 @@ const DepotReceived = sequelize.define('DepotReceived', {
 const DepotSalesHeader = sequelize.define('DepotSalesHeader', {
 
   invoice_no: {
-    type: DataTypes.STRING,
-    unique: true
+    type: DataTypes.STRING
   },
 
   date: {

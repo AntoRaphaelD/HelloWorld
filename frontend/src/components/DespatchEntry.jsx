@@ -5,6 +5,7 @@ import {
     Save, Search, Square, CheckSquare, Clock, Truck, MapPin,
     CalendarDays, ShieldCheck, Package, IndianRupee, ArrowRight
 } from 'lucide-react';
+import { useFilter } from '../context/FilterContext';
 
 const DespatchEntry = () => {
     const [list, setList] = useState([]);
@@ -14,9 +15,18 @@ const DespatchEntry = () => {
     const [submitLoading, setSubmitLoading] = useState(false);
     const [isSelectionMode, setIsSelectionMode] = useState(false);
     const [selectedIds, setSelectedIds] = useState([]);
-    const [searchField, setSearchField] = useState('vehicle_no');
+    
+    const { searchQuery: searchValue, searchField, resetFilters, sortField, setSortField, sortOrder, setSortOrder, fromDate, toDate } = useFilter();
     const [searchCondition, setSearchCondition] = useState('Like');
-    const [searchValue, setSearchValue] = useState('');
+    const handleSort = (field) => {
+        if (sortField === field) {
+            setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortField(field);
+            setSortOrder('asc');
+        }
+    };
+
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 10;
 
@@ -50,6 +60,11 @@ const DespatchEntry = () => {
     useEffect(() => {
         fetchRecords();
         fetchTransports();
+        resetFilters([
+            { value: 'vehicle_no', label: 'Vehicle No' },
+            { value: 'load_no', label: 'Load No' },
+            { value: 'lr_no', label: 'LR No' }
+        ], 'vehicle_no', true);
     }, []);
 
     const fetchRecords = async () => {
@@ -160,14 +175,42 @@ const DespatchEntry = () => {
 
     const filteredData = useMemo(() => {
         let result = Array.isArray(list) ? [...list] : [];
-        if (searchValue.trim()) {
-            result = result.filter(item => {
-                const val = item[searchField] || '';
-                return String(val).toLowerCase().includes(searchValue.toLowerCase().trim());
-            });
+        if (fromDate) {
+            result = result.filter(item => item.load_date >= fromDate);
         }
-        return result.sort((a, b) => b.id - a.id);
-    }, [list, searchValue, searchField]);
+        if (toDate) {
+            result = result.filter(item => item.load_date <= toDate);
+        }
+
+        const term = searchValue.toLowerCase().trim();
+        const filtered = result.filter(item => {
+            const val = item[searchField] || '';
+            return String(val).toLowerCase().includes(term);
+        });
+
+        filtered.sort((a, b) => {
+            let aVal, bVal;
+            if (sortField === 'load_no') {
+                aVal = String(a.load_no || '');
+                bVal = String(b.load_no || '');
+                return sortOrder === 'asc'
+                    ? aVal.localeCompare(bVal, undefined, { numeric: true, sensitivity: 'base' })
+                    : bVal.localeCompare(aVal, undefined, { numeric: true, sensitivity: 'base' });
+            } else if (sortField === 'date') {
+                aVal = new Date(a.load_date || 0).getTime();
+                bVal = new Date(b.load_date || 0).getTime();
+            } else {
+                aVal = a.id || 0;
+                bVal = b.id || 0;
+            }
+
+            if (aVal < bVal) return sortOrder === 'asc' ? -1 : 1;
+            if (aVal > bVal) return sortOrder === 'asc' ? 1 : -1;
+            return 0;
+        });
+
+        return filtered;
+    }, [list, searchValue, searchField, fromDate, toDate, sortField, sortOrder]);
 
     const currentItems = filteredData.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
     const totalPages = Math.ceil(filteredData.length / itemsPerPage) || 1;
@@ -213,29 +256,39 @@ const DespatchEntry = () => {
                     </div>
                 </header>
 
-                <section className="mb-5 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                    <div className="flex flex-wrap items-end gap-4">
-                        <div className="grid flex-1 auto-cols-auto grid-flow-col gap-4">
-                            <div><label className={labelClass}>Search field</label><select value={searchField} onChange={e => setSearchField(e.target.value)} className={fieldClass}><option value="vehicle_no">Vehicle No</option><option value="load_no">Load No</option></select></div>
-                            <div><label className={labelClass}>Condition</label><select value={searchCondition} onChange={e => setSearchCondition(e.target.value)} className={fieldClass}><option value="Like">Like</option><option value="Equal">Equal</option></select></div>
-                            <div className="min-w-[250px]"><label className={labelClass}>Search value</label><div className="relative"><Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={17} /><input type="text" value={searchValue} onChange={e => setSearchValue(e.target.value)} className={`${fieldClass} pl-10`} placeholder="Search despatch records" /></div></div>
-                        </div>
-                        {!isSelectionMode ? (
-                            <button onClick={() => setIsSelectionMode(true)} className="h-[42px] rounded-lg border border-blue-500 bg-blue-500 px-5 py-2 text-sm font-semibold text-white transition-colors duration-200 hover:bg-blue-800 hover:border-blue-700 hover:text-white">Select records</button>
-                        ) : (
-                            <div className="flex gap-2"><button onClick={() => { setIsSelectionMode(false); setSelectedIds([]); }} className="h-[42px] rounded-lg border border-slate-300 px-4 text-sm font-semibold text-slate-700">Clear</button><button onClick={handleBulkDelete} disabled={selectedIds.length === 0} className="inline-flex h-[42px] items-center gap-2 rounded-lg bg-red-600 px-4 text-sm font-semibold text-white disabled:opacity-40"><Trash2 size={16} /> Delete ({selectedIds.length})</button></div>
-                        )}
-                    </div>
-                </section>
+                {/* Search Bar - Handled in Sidebar */}
+                <div className="mb-5 rounded-xl border border-slate-200 bg-white p-3 shadow-sm flex justify-end items-center gap-4">
+                    {!isSelectionMode ? (
+                        <button onClick={() => setIsSelectionMode(true)} className="h-[42px] rounded-lg border border-blue-500 bg-blue-500 px-5 py-2 text-sm font-semibold text-white transition-colors duration-200 hover:bg-blue-800 hover:border-blue-700 hover:text-white">Select records</button>
+                    ) : (
+                        <div className="flex gap-2"><button onClick={() => { setIsSelectionMode(false); setSelectedIds([]); }} className="h-[42px] rounded-lg border border-slate-300 px-4 text-sm font-semibold text-slate-700">Clear</button><button onClick={handleBulkDelete} disabled={selectedIds.length === 0} className="inline-flex h-[42px] items-center gap-2 rounded-lg bg-red-600 px-4 text-sm font-semibold text-white disabled:opacity-40"><Trash2 size={16} /> Delete ({selectedIds.length})</button></div>
+                    )}
+                </div>
+            {/* </section> */}
+            
 
-                <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                    <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
-                        <div><h2 className="text-sm font-semibold text-slate-900">Despatch records</h2><p className="mt-0.5 text-xs text-slate-500">{filteredData.length} record{filteredData.length === 1 ? '' : 's'} found</p></div>
-                        {isSelectionMode && <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">{selectedIds.length} selected</span>}
-                    </div>
-                    <div className="overflow-x-auto">
-                        <table className="w-full min-w-[850px] text-left">
-                            <thead className="border-b border-slate-200 bg-slate-50"><tr className="text-[11px] font-bold uppercase tracking-wider text-slate-500">{isSelectionMode && <th className="w-14 px-5 py-3 text-center">Select</th>}<th className="px-5 py-3">Load number</th><th className="px-5 py-3">Load date</th><th className="px-5 py-3">Transport</th><th className="px-5 py-3 text-right">Bags</th><th className="px-5 py-3 text-right">Freight</th>{!isSelectionMode && <th className="w-16 px-5 py-3"><span className="sr-only">Edit</span></th>}</tr></thead>
+            <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+                    <div><h2 className="text-sm font-semibold text-slate-900">Despatch records</h2><p className="mt-0.5 text-xs text-slate-500">{filteredData.length} record{filteredData.length === 1 ? '' : 's'} found</p></div>
+                    {isSelectionMode && <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">{selectedIds.length} selected</span>}
+                </div>
+                <div className="overflow-x-auto">
+                    <table className="w-full min-w-[850px] text-left">
+                        <thead className="border-b border-slate-200 bg-slate-50">
+                            <tr className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                                {isSelectionMode && <th className="w-14 px-5 py-3 text-center">Select</th>}
+                                <th className="px-5 py-3 cursor-pointer select-none" onClick={() => handleSort('load_no')}>
+                                    Load number {sortField === 'load_no' ? (sortOrder === 'asc' ? '▲' : '▼') : ''}
+                                </th>
+                                <th className="px-5 py-3 cursor-pointer select-none" onClick={() => handleSort('date')}>
+                                    Load date {sortField === 'date' ? (sortOrder === 'asc' ? '▲' : '▼') : ''}
+                                </th>
+                                <th className="px-5 py-3">Transport</th>
+                                <th className="px-5 py-3 text-right">Bags</th>
+                                <th className="px-5 py-3 text-right">Freight</th>
+                                {!isSelectionMode && <th className="w-16 px-5 py-3"><span className="sr-only">Edit</span></th>}
+                            </tr>
+                        </thead>
                             <tbody className="divide-y divide-slate-100">
                                 {loading ? (
                                     <tr><td colSpan={7} className="px-5 py-16 text-center text-sm text-slate-500"><RefreshCw size={20} className="mx-auto mb-3 animate-spin text-blue-600" />Loading despatch records...</td></tr>
