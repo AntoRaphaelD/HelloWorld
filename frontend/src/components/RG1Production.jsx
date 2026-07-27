@@ -72,12 +72,11 @@ const RG1Production = () => {
         return `${yyyy}-${mm}-${dd}`;
     };
 
-    const getPreviousDayInvoiceKgs = (productId, dateValue) => {
-        const previousDate = getPreviousDate(dateValue);
-        if (!productId || !previousDate) return '';
+    const getInvoiceKgsForDate = (productId, dateValue) => {
+        if (!productId || !dateValue) return '0.000';
 
         const invoiceKgs = invoices.reduce((sum, invoice) => {
-            if (invoice.date !== previousDate) return sum;
+            if (invoice.date !== dateValue) return sum;
             const details = invoice.InvoiceDetails || invoice.Details || invoice.details || [];
             return sum + details.reduce((detailSum, detail) => (
                 parseInt(detail.product_id) === parseInt(productId)
@@ -87,7 +86,7 @@ const RG1Production = () => {
         }, 0);
 
         const directKgs = directInvoices.reduce((sum, invoice) => {
-            if (invoice.date !== previousDate) return sum;
+            if (invoice.date !== dateValue) return sum;
             const details = invoice.DirectInvoiceDetails || invoice.Details || invoice.details || [];
             return sum + details.reduce((detailSum, detail) => (
                 parseInt(detail.product_id) === parseInt(productId)
@@ -170,8 +169,8 @@ const RG1Production = () => {
             return;
         }
 
-        const nextInvoiceKgs = getPreviousDayInvoiceKgs(formData.product_id, formData.date);
-        if (nextInvoiceKgs !== '' && formData.invoice_kgs !== nextInvoiceKgs) {
+        const nextInvoiceKgs = getInvoiceKgsForDate(formData.product_id, formData.date);
+        if (formData.invoice_kgs !== nextInvoiceKgs) {
             setFormData(prevForm => ({
                 ...prevForm,
                 invoice_kgs: nextInvoiceKgs
