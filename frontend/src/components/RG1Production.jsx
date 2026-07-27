@@ -340,10 +340,51 @@ const RG1Production = () => {
     } finally { 
         setSubmitLoading(false); 
     }
-};
+};    const processedList = useMemo(() => {
+        if (!Array.isArray(list)) return [];
+        
+        // Sort chronologically ascending to calculate running prev_closing_kgs sequentially
+        const sortedList = [...list].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        
+        // Track the stock_kgs for each product to carry forward
+        const lastStockPerProduct = {};
+
+        const processed = sortedList.map(item => {
+            const productId = item.product_id;
+            const dateValue = item.date;
+
+            // 1. Calculate dynamic invoice_kgs for this day
+            const dynamicInvoiceKgs = getInvoiceKgsForDate(productId, dateValue);
+
+            // 2. Calculate dynamic prev_closing_kgs
+            let prevClosing = '0.000';
+            if (lastStockPerProduct[productId] !== undefined) {
+                prevClosing = lastStockPerProduct[productId];
+            } else {
+                const product = getProduct(productId);
+                prevClosing = Math.max(0, num(product?.mill_stock)).toFixed(3);
+            }
+
+            // Save this item's stock_kgs as the last stock for this product
+            lastStockPerProduct[productId] = Math.max(0, num(item.stock_kgs)).toFixed(3);
+
+            // 3. Calculate dynamic production_kgs
+            const dynamicProductionKgs = ((num(dynamicInvoiceKgs) + num(item.stock_kgs)) - num(prevClosing)).toFixed(3);
+
+            return {
+                ...item,
+                invoice_kgs: dynamicInvoiceKgs,
+                prev_closing_kgs: prevClosing,
+                production_kgs: dynamicProductionKgs
+            };
+        });
+
+        // Return processed list, but sorted by date descending for the UI presentation
+        return processed.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    }, [list, invoices, directInvoices, products]);
 
     const filteredData = useMemo(() => {
-        let result = Array.isArray(list) ? [...list] : [];
+        let result = Array.isArray(processedList) ? [...processedList] : [];
         if (fromDate) {
             result = result.filter(item => item.date >= fromDate);
         }
@@ -383,8 +424,7 @@ const RG1Production = () => {
         });
 
         return filtered;
-    }, [list, searchValue, searchField, searchCondition, fromDate, toDate, sortField, sortOrder]);
-
+    }, [processedList, searchValue, searchField, searchCondition, fromDate, toDate, sortField, sortOrder]);
     const currentItems = filteredData.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
     const totalPages = Math.ceil(filteredData.length / itemsPerPage) || 1;
 
