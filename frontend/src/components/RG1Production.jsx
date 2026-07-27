@@ -99,7 +99,43 @@ const RG1Production = () => {
         return (invoiceKgs + directKgs).toFixed(3);
     };
 
+    const getPreviousDayClosingKgs = (productId, dateValue) => {
+        if (!productId || !dateValue) return '0.000';
+
+        const prodRecords = list.filter(item => 
+            parseInt(item.product_id) === parseInt(productId) && 
+            item.date < dateValue &&
+            (!formData.id || item.id !== formData.id)
+        );
+
+        if (prodRecords.length === 0) {
+            const product = getProduct(productId);
+            const millStock = num(product?.mill_stock);
+            return Math.max(0, millStock).toFixed(3);
+        }
+
+        prodRecords.sort((a, b) => {
+            const dateDiff = new Date(b.date).getTime() - new Date(a.date).getTime();
+            if (dateDiff !== 0) return dateDiff;
+            return b.id - a.id;
+        });
+
+        const latestPrevRecord = prodRecords[0];
+        return Math.max(0, num(latestPrevRecord.stock_kgs)).toFixed(3);
+    };
+
     // --- 2. Auto-Calculation Logic ---
+    useEffect(() => {
+        // If product or date changes, dynamically calculate the previous day's closing stock (ensuring non-negative)
+        const nextPrevClosing = getPreviousDayClosingKgs(formData.product_id, formData.date);
+        if (formData.prev_closing_kgs !== nextPrevClosing) {
+            setFormData(prevForm => ({
+                ...prevForm,
+                prev_closing_kgs: nextPrevClosing
+            }));
+        }
+    }, [formData.product_id, formData.date, list, products]);
+
     useEffect(() => {
         // If it's an existing record and inputs haven't changed from original, don't recalculate stock_kgs
         if (formData.id && originalRecord &&
@@ -163,7 +199,7 @@ const RG1Production = () => {
             return;
         }
 
-        const prev = num(formData.prev_closing_kgs);
+        const prev = Math.max(0, num(formData.prev_closing_kgs));
         const inv = num(formData.invoice_kgs);
         const stock = num(formData.stock_kgs);
 
@@ -235,7 +271,7 @@ const RG1Production = () => {
         packing_type_id: pType ? pType.id : '',
         weight_per_bag: product.pack_nett_wt ?? '',
         // 🟢 This mill_stock must be updated by the backend during the previous save
-        prev_closing_kgs: product.mill_stock ?? ''
+        prev_closing_kgs: Math.max(0, num(product.mill_stock)).toFixed(3)
     }));
 };
 
