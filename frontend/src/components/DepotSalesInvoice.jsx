@@ -695,7 +695,7 @@ const DepotSalesInvoice = () => {
 
             setListData({
                 types: invoiceTypesRes.data.data || [],
-                parties: accs.filter(a => !a.account_group?.toUpperCase().includes('DEPOT')),
+                parties: accs.filter(a => a.account_group?.toUpperCase() === 'DEBTORS - DEPOT - PARTIES'),
                 depots: accs.filter(a => a.account_group?.toUpperCase().includes('DEPOT')),
                 transports: transportsRes.data.data || [],
                 products: productsRes.data.data || [],
