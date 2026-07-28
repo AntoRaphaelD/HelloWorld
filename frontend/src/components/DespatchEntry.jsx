@@ -6,6 +6,7 @@ import {
     CalendarDays, ShieldCheck, Package, IndianRupee, ArrowRight
 } from 'lucide-react';
 import { useFilter } from '../context/FilterContext';
+import LocalSearchBar from './LocalSearchBar';
 
 const DespatchEntry = () => {
     const [list, setList] = useState([]);
@@ -255,6 +256,8 @@ const DespatchEntry = () => {
                         <button onClick={handleAddNew} className="inline-flex h-10 items-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"><Plus size={17} /> New despatch</button>
                     </div>
                 </header>
+
+                <LocalSearchBar />
 
                 {/* Search Bar - Handled in Sidebar */}
                 <div className="mb-5 rounded-xl border border-slate-200 bg-white p-3 shadow-sm flex justify-end items-center gap-4">

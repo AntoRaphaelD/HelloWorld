@@ -11,6 +11,7 @@ import autoTable from 'jspdf-autotable';
 import { evaluate } from "mathjs";
 import logoImage from '../assets/logo.jpeg';
 import { useFilter } from '../context/FilterContext';
+import LocalSearchBar from './LocalSearchBar';
 
 const evaluateFormula = (formula, ctx) => {
 
@@ -33,7 +34,7 @@ const evaluateFormula = (formula, ctx) => {
 // HELPERS & FORMATTING
 // ==========================================
 const num = (v) => isNaN(parseFloat(v)) ? 0 : parseFloat(v);
-const money = (v) => num(v).toFixed(2);
+const money = (v) => Math.round(num(v)).toString();
 const toNullableDateTime = (value) => {
     if (!value || value === 'Invalid date') return null;
 
@@ -738,13 +739,13 @@ const DepotSalesInvoice = () => {
             return;
         }
 
-        const order = listData.orders.find(
-            o => o.order_no === orderNo
-        );
+        const order = source === 'WITH'
+            ? listData.orders.find(o => o.order_no === orderNo)
+            : listData.directInvoices.find(o => o.order_no === orderNo);
 
         if (!order) return;
 
-        const details = order?.OrderDetails || [];
+        const details = order?.OrderDetails || order?.DirectInvoiceDetails || order?.Details || order?.details || [];
 
         // 🔵 AUTO FILL HEADER
         const party = order.Party || {};
@@ -762,7 +763,7 @@ const DepotSalesInvoice = () => {
 
             return {
                 order_no: orderNo,
-                order_type: 'WITH_ORDER',
+                order_type: source === 'WITH' ? 'WITH_ORDER' : 'WITHOUT_ORDER',
                 product_id: d.product_id,
                 product_description: d.Product?.product_name || '',
                 // 🟢 qty from order is mapped to packs here
@@ -1059,6 +1060,9 @@ const DepotSalesInvoice = () => {
                     </button>
                 </div>
             </div>
+            
+            <LocalSearchBar searchCondition={searchCondition} setSearchCondition={setSearchCondition} />
+
             {/* Search Bar - Handled in Sidebar */}
             <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm mb-6 flex justify-end items-center">
                 <div className="bg-blue-50 text-blue-700 border border-blue-200 px-6 py-1.5 rounded text-xs font-bold">
@@ -1368,9 +1372,16 @@ const DepotSalesInvoice = () => {
                                     <div className="bg-[#EBF2FA] p-3 border border-slate-300 flex items-center justify-between rounded shadow-sm">
                                         <div className="flex items-center gap-4">
                                             <span className="text-[10px] font-black uppercase text-blue-700">Sync Mill Order:</span>
-                                            <select onChange={handleOrderSync} className="border border-slate-300 text-[11px] p-1 w-72 font-bold rounded">
-                                                <option value="">-- Choose Order --</option>
-                                                {listData.orders.map(o => <option key={o.id} value={`WITH|${o.order_no}`}>{o.order_no}</option>)}
+                                            <select onChange={handleOrderSync} className="border border-slate-300 text-[11px] p-1 w-72 font-bold rounded bg-white">
+                                                 <option value="">-- Choose Order --</option>
+                                                 {listData.orders.map(o => <option key={`with-${o.id}`} value={`WITH|${o.order_no}`}>{o.order_no}</option>)}
+                                            </select>
+                                        </div>
+                                        <div className="flex items-center gap-4">
+                                            <span className="text-[10px] font-black uppercase text-blue-700">Sync Direct Doc:</span>
+                                            <select onChange={handleOrderSync} className="border border-slate-300 text-[11px] p-1 w-72 font-bold rounded bg-white">
+                                                 <option value="">-- Direct Doc --</option>
+                                                 {listData.directInvoices.map(o => <option key={`without-${o.id}`} value={`WITHOUT|${o.order_no}`}>{o.order_no}</option>)}
                                             </select>
                                         </div>
                                     </div>

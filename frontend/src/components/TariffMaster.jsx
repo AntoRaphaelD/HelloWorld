@@ -6,6 +6,7 @@ import {
     Square, CheckSquare
 } from 'lucide-react';
 import { useFilter } from '../context/FilterContext';
+import LocalSearchBar from './LocalSearchBar';
 
 const TariffMaster = () => {
     const [list, setList] = useState([]);
@@ -203,6 +204,8 @@ const TariffMaster = () => {
                     </button>
                 </div>
             </div>
+
+            <LocalSearchBar />
 
             {/* Search Bar - Handled in Sidebar */}
             <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm mb-6 flex justify-end items-center">

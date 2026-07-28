@@ -13,6 +13,7 @@ import autoTable from 'jspdf-autotable';
 import { evaluate } from "mathjs"
 import logoImage from '../assets/logo.jpeg';
 import { useFilter } from '../context/FilterContext';
+import LocalSearchBar from './LocalSearchBar';
 
 // =====================================================
 // SAFE NUMBER HELPERS (PREVENT NaN + DECIMAL ISSUES)
@@ -22,7 +23,7 @@ const num = (v) => {
     return isNaN(n) ? 0 : n;
 };
 
-const money = (v) => Number(num(v).toFixed(2));
+const money = (v) => Math.round(num(v));
 
 const imageUrlToDataUrl = async (url) => {
     const response = await fetch(url);
@@ -1565,6 +1566,9 @@ const InvoicePreparation = () => {
                     <button onClick={() => { setFormData({ ...emptyInvoice, invoice_no: getNextInvoiceSequence(listData.history, '').toString() }); setGridRows([]); setActiveTab('head'); setIsModalOpen(true); }} className="bg-blue-600 text-white px-8 py-2 rounded-xl font-bold shadow-lg hover:bg-blue-700 transition-all uppercase text-xs flex items-center gap-2"><Plus size={18} /> New Invoice</button>
                 </div>
             </div>
+            
+            <LocalSearchBar searchCondition={searchCondition} setSearchCondition={setSearchCondition} />
+
             {/* Search Bar - Handled in Sidebar */}
             <div className="bg-white p-3 rounded-xl border border-slate-300 shadow-sm mb-4 flex justify-end items-center">
                 <div className="bg-blue-50 text-blue-700 border border-blue-200 px-4 py-1.5 rounded text-xs font-bold">

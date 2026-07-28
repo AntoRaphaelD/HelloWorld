@@ -6,6 +6,7 @@ import {
     Square, CheckSquare, Loader2
 } from 'lucide-react';
 import { useFilter } from '../context/FilterContext';
+import LocalSearchBar from './LocalSearchBar';
 
 const RG1Production = () => {
     // --- 1. State Management ---
@@ -73,7 +74,7 @@ const RG1Production = () => {
     };
 
     const getInvoiceKgsForDate = (productId, dateValue) => {
-        if (!productId || !dateValue) return '0.000';
+        if (!productId || !dateValue) return '0.00';
 
         const invoiceKgs = invoices.reduce((sum, invoice) => {
             if (invoice.date !== dateValue) return sum;
@@ -95,11 +96,11 @@ const RG1Production = () => {
             ), 0);
         }, 0);
 
-        return (invoiceKgs + directKgs).toFixed(3);
+        return (invoiceKgs + directKgs).toFixed(2);
     };
 
     const getPreviousDayClosingKgs = (productId, dateValue) => {
-        if (!productId || !dateValue) return '0.000';
+        if (!productId || !dateValue) return '0.00';
 
         const prodRecords = list.filter(item => 
             parseInt(item.product_id) === parseInt(productId) && 
@@ -110,7 +111,7 @@ const RG1Production = () => {
         if (prodRecords.length === 0) {
             const product = getProduct(productId);
             const millStock = num(product?.mill_stock);
-            return Math.max(0, millStock).toFixed(3);
+            return Math.max(0, millStock).toFixed(2);
         }
 
         prodRecords.sort((a, b) => {
@@ -120,7 +121,7 @@ const RG1Production = () => {
         });
 
         const latestPrevRecord = prodRecords[0];
-        return Math.max(0, num(latestPrevRecord.stock_kgs)).toFixed(3);
+        return Math.max(0, num(latestPrevRecord.stock_kgs)).toFixed(2);
     };
 
     // --- 2. Auto-Calculation Logic ---
@@ -150,7 +151,7 @@ const RG1Production = () => {
             .some(value => value !== undefined && value !== null && value !== '');
 
         const nextStockKgs = hasStockInput
-            ? ((num(formData.stock_bags) * num(formData.weight_per_bag)) + (num(formData.stock_loose_kgs) * num(product?.wt_per_cone))).toFixed(3)
+            ? ((num(formData.stock_bags) * num(formData.weight_per_bag)) + (num(formData.stock_loose_kgs) * num(product?.wt_per_cone))).toFixed(2)
             : '';
 
         if (formData.stock_kgs !== nextStockKgs) {
@@ -202,7 +203,7 @@ const RG1Production = () => {
         const inv = num(formData.invoice_kgs);
         const stock = num(formData.stock_kgs);
 
-        const nextProductionKgs = ((inv + stock) - prev).toFixed(3);
+        const nextProductionKgs = ((inv + stock) - prev).toFixed(2);
 
         if (formData.production_kgs !== nextProductionKgs) {
             setFormData(prevForm => ({
@@ -270,7 +271,7 @@ const RG1Production = () => {
         packing_type_id: pType ? pType.id : '',
         weight_per_bag: product.pack_nett_wt ?? '',
         // 🟢 This mill_stock must be updated by the backend during the previous save
-        prev_closing_kgs: Math.max(0, num(product.mill_stock)).toFixed(3)
+        prev_closing_kgs: Math.max(0, num(product.mill_stock)).toFixed(2)
     }));
 };
 
@@ -357,19 +358,19 @@ const RG1Production = () => {
             const dynamicInvoiceKgs = getInvoiceKgsForDate(productId, dateValue);
 
             // 2. Calculate dynamic prev_closing_kgs
-            let prevClosing = '0.000';
+            let prevClosing = '0.00';
             if (lastStockPerProduct[productId] !== undefined) {
                 prevClosing = lastStockPerProduct[productId];
             } else {
                 const product = getProduct(productId);
-                prevClosing = Math.max(0, num(product?.mill_stock)).toFixed(3);
+                prevClosing = Math.max(0, num(product?.mill_stock)).toFixed(2);
             }
 
             // Save this item's stock_kgs as the last stock for this product
-            lastStockPerProduct[productId] = Math.max(0, num(item.stock_kgs)).toFixed(3);
+            lastStockPerProduct[productId] = Math.max(0, num(item.stock_kgs)).toFixed(2);
 
             // 3. Calculate dynamic production_kgs
-            const dynamicProductionKgs = ((num(dynamicInvoiceKgs) + num(item.stock_kgs)) - num(prevClosing)).toFixed(3);
+            const dynamicProductionKgs = ((num(dynamicInvoiceKgs) + num(item.stock_kgs)) - num(prevClosing)).toFixed(2);
 
             return {
                 ...item,
@@ -440,13 +441,15 @@ const RG1Production = () => {
             {/* Header Section */}
             <div className="flex justify-between items-center mb-6">
                 <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-                    <Factory className="text-blue-700" /> RG1 Production Ledger
+                    <Factory className="text-blue-700" /> Yarn Production
                 </h1>
                 <div className="flex gap-2">
                     <button onClick={handleAddNew} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg font-bold text-xs uppercase shadow-md transition-all active:scale-95"><Plus size={16} /> New Entry</button>
                     <button onClick={fetchRecords} className="p-2 border border-slate-200 rounded-lg bg-white shadow-sm"><RefreshCw size={20} className={loading ? 'animate-spin' : ''} /></button>
                 </div>
             </div>
+
+            <LocalSearchBar searchCondition={searchCondition} setSearchCondition={setSearchCondition} />
 
             {/* Search Bar - Handled in Sidebar */}
             <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm mb-6 flex justify-end items-center gap-4">

@@ -6,6 +6,7 @@ import {
     Square, CheckSquare, Hash, Landmark, Phone, Mail, Globe, User, CreditCard, Loader2
 } from 'lucide-react';
 import { useFilter } from '../context/FilterContext';
+import LocalSearchBar from './LocalSearchBar';
 
 const AccountMaster = () => {
     // --- 1. State Management ---
@@ -198,6 +199,8 @@ const handleRowClick = async (item) => {
                     <button onClick={fetchRecords} className="p-2 border border-slate-200 rounded-lg bg-white"><RefreshCw size={20} className={loading ? 'animate-spin' : ''} /></button>
                 </div>
             </div>
+
+            <LocalSearchBar />
 
             {/* Search Bar - Handled in Sidebar */}
             <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm mb-6 flex justify-end items-center">

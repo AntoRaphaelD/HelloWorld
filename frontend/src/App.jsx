@@ -38,6 +38,7 @@ import DepotStorage from './components/DepotStorage';
 // --- Reports ---
 import ReportsDashboard from './components/ReportsDashboard';
 import SystemMaintenance from './components/SystemMaintenance';
+import DateRangePicker from './components/DateRangePicker';
 
 /**
  * ANIMATED HOME SCREEN
@@ -242,9 +243,6 @@ const SidebarSection = ({ title, children, tone = "blue" }) => {
 
 const SidebarFilterPanel = () => {
   const { 
-    searchQuery, setSearchQuery,
-    searchField, setSearchField,
-    searchFields,
     fromDate, setFromDate,
     toDate, setToDate,
     showDateSlicer
@@ -252,55 +250,16 @@ const SidebarFilterPanel = () => {
 
   return (
     <div className="flex flex-col h-full bg-slate-50/50 p-4 border-t border-slate-200 overflow-y-auto text-xs gap-3">
-      {/* Search Section */}
-      {searchFields && searchFields.length > 0 && (
-        <div className="flex flex-col gap-1.5">
-          <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Search Field</label>
-          <select 
-            value={searchField} 
-            onChange={e => setSearchField(e.target.value)}
-            className="w-full border border-slate-200 p-2 rounded-lg bg-white outline-none focus:ring-1 focus:ring-blue-500 text-xs font-semibold"
-          >
-            {searchFields.map(field => (
-              <option key={field.value} value={field.value}>{field.label}</option>
-            ))}
-          </select>
-
-          <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider mt-1">Search Value</label>
-          <input 
-            type="text" 
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search query..."
-            className="w-full border border-slate-200 px-3 py-2 rounded-lg bg-white outline-none focus:ring-1 focus:ring-blue-500 text-xs font-semibold"
-          />
-        </div>
-      )}
-
       {/* Date Slicer Section */}
       {showDateSlicer && (
-        <div className="flex flex-col gap-1.5 border-t border-slate-200/60 pt-2.5">
+        <div className="flex flex-col gap-1.5 pt-1.5">
           <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Date Range Filter</label>
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center gap-2">
-              <span className="w-10 text-[9px] font-bold text-slate-400 uppercase">From:</span>
-              <input 
-                type="date" 
-                value={fromDate}
-                onChange={e => setFromDate(e.target.value)}
-                className="flex-1 border border-slate-200 p-1.5 rounded-lg bg-white outline-none text-xs font-semibold"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-10 text-[9px] font-bold text-slate-400 uppercase">To:</span>
-              <input 
-                type="date" 
-                value={toDate}
-                onChange={e => setToDate(e.target.value)}
-                className="flex-1 border border-slate-200 p-1.5 rounded-lg bg-white outline-none text-xs font-semibold"
-              />
-            </div>
-          </div>
+          <DateRangePicker 
+            fromDate={fromDate}
+            setFromDate={setFromDate}
+            toDate={toDate}
+            setToDate={setToDate}
+          />
         </div>
       )}
     </div>
@@ -404,7 +363,7 @@ export default function App() {
           initial={{ x: -24, opacity: 0 }}
           animate={{ x: 0, opacity: 1 }}
           transition={{ duration: 0.4, ease: "easeOut" }}
-          className="w-64 bg-white border-r border-slate-200 flex flex-col z-30 shadow-xl shadow-slate-200/40 relative overflow-hidden"
+          className="w-96 bg-white border-r border-slate-200 flex flex-col z-30 shadow-xl shadow-slate-200/40 relative overflow-hidden"
         >
           <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-slate-50 to-transparent pointer-events-none" />
           <div className="absolute left-0 top-0 bottom-0 w-px bg-gradient-to-b from-blue-500 via-emerald-400 to-rose-500 opacity-70" />
@@ -453,7 +412,7 @@ export default function App() {
               <SidebarSection title="Factory Operations" tone="rose">
                 <SidebarLink to="/order-with" label="Sales With Order" icon={ClipboardCheck} colorClass="text-rose-500" />
                 <SidebarLink to="/order-without" label="Sales WithOut Order" icon={Zap} colorClass="text-rose-500" />
-                <SidebarLink to="/production" label="RG1 Production" icon={Factory} colorClass="text-rose-500" />
+                <SidebarLink to="/production" label="Yarn Production" icon={Factory} colorClass="text-rose-500" />
                 <SidebarLink to="/despatch" label="Despatch Entry" icon={Truck} colorClass="text-rose-500" />
                 <SidebarLink to="/invoice-prep" label="Invoice Gen" icon={FileText} colorClass="text-rose-500" />
               </SidebarSection>

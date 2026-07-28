@@ -6,6 +6,7 @@ import {
     Square, CheckSquare, Hash, Briefcase, MapPin, Loader2
 } from 'lucide-react';
 import { useFilter } from '../context/FilterContext';
+import LocalSearchBar from './LocalSearchBar';
 
 const TransportMaster = () => {
     const [list, setList] = useState([]);
@@ -183,6 +184,8 @@ const TransportMaster = () => {
                     </button>
                 </div>
             </div>
+
+            <LocalSearchBar />
 
             {/* Search Bar - Handled in Sidebar */}
             <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm mb-6 flex justify-end items-center">
