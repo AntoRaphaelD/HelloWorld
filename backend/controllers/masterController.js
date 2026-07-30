@@ -937,14 +937,27 @@ const getDepotInventory = async (req, res) => {
 
         const data = await Promise.all(products.map(async (p) => {
 
-            // inward stock for that depot
-            const inward = await DepotReceived.sum('total_kgs', {
+            // inward stock from DepotReceived logs
+            const inwardReceived = await DepotReceived.sum('total_kgs', {
                 where: {
                     depot_id: depotId,
                     product_id: p.id,
                     type: 'INWARD'
                 }
             }) || 0;
+
+            // inward stock from Invoice Preparation (standard invoices billed to this depot)
+            const inwardInvoiced = await InvoiceDetail.sum('total_kgs', {
+                include: [{
+                    model: InvoiceHeader,
+                    attributes: [],
+                    required: true,
+                    where: { party_id: depotId }
+                }],
+                where: { product_id: p.id }
+            }) || 0;
+
+            const inward = inwardReceived + inwardInvoiced;
 
             // sales from that depot
             const outward = await DepotSalesDetail.sum('total_kgs', {

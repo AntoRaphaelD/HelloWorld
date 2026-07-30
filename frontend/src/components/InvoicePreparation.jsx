@@ -1028,8 +1028,8 @@ const InvoicePreparation = () => {
 
             return {
                 ...item,
-                total_kgs: money(totalKgs),
-                charity_per_bale: money(charityPerBale),
+                total_kgs: totalKgs,
+                charity_per_bale: charityPerBale,
                 gst_per: displayGstPer,
                 sgst_per: sgstPer,
                 cgst_per: cgstPer,
@@ -1085,7 +1085,7 @@ const InvoicePreparation = () => {
             total_other: money(hTotals.other),
             sub_total: money(finalGross),
             // 🟢 Round off is calculated after TCS deduction
-            round_off: money(calculatedRoundOff),
+            round_off: calculatedRoundOff.toFixed(2),
             net_amount: finalNetAmount
         }));
 
@@ -1695,6 +1695,7 @@ const InvoicePreparation = () => {
                                         />
                                         <RowSelect
                                             label="Invoice Type"
+                                            isSearchable={false}
                                             value={formData.invoice_type_id}
                                             options={filteredInvoiceTypes.map(t => ({
                                                 value: t.id,
@@ -2071,15 +2072,83 @@ const RowInput = ({ label, width = "w-full", color = "bg-white", ...props }) => 
     </div>
 );
 
-const RowSelect = ({ label, options, width = "w-full", ...props }) => (
-    <div className="flex items-center">
-        <label className="w-[140px] text-[10px] font-black text-slate-700 uppercase tracking-tighter">{label}</label>
-        <select {...props} className={`border border-slate-300 p-1 text-[11px] font-bold outline-none rounded-sm shadow-sm ${width}`}>
-            <option value="">-- Select --</option>
-            {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
-    </div>
-);
+const RowSelect = ({ label, options = [], width = "w-full", value, onChange, disabled, isSearchable = true, ...props }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const [searchTerm, setSearchTerm] = useState("");
+    const containerRef = React.useRef(null);
+
+    const selectedOption = options.find(o => String(o.value) === String(value));
+
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (containerRef.current && !containerRef.current.contains(event.target)) {
+                setIsOpen(false);
+            }
+        };
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
+
+    useEffect(() => {
+        if (isOpen) {
+            setSearchTerm("");
+        }
+    }, [isOpen]);
+
+    const filteredOptions = options.filter(o => 
+        String(o.label || "").toLowerCase().includes(searchTerm.toLowerCase())
+    );
+
+    return (
+        <div className="flex items-center relative" ref={containerRef}>
+            <label className="w-[140px] text-[10px] font-black text-slate-700 uppercase tracking-tighter">{label}</label>
+            <div className={`${width} relative`}>
+                <div 
+                    onClick={() => !disabled && setIsOpen(!isOpen)}
+                    className={`border border-slate-300 p-1 px-2 text-[11px] font-bold rounded-sm shadow-sm cursor-pointer bg-white min-h-[24px] flex items-center justify-between ${disabled ? "bg-slate-100 cursor-not-allowed opacity-60" : ""}`}
+                >
+                    <span className="truncate">{selectedOption ? selectedOption.label : "-- Select --"}</span>
+                    <span className="text-slate-400 text-[8px] ml-1">▼</span>
+                </div>
+                
+                {isOpen && (
+                    <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-300 rounded shadow-lg z-50 max-h-60 overflow-y-auto">
+                        {isSearchable && (
+                            <div className="p-1 border-b sticky top-0 bg-white">
+                                <input 
+                                    type="text"
+                                    value={searchTerm}
+                                    onChange={e => setSearchTerm(e.target.value)}
+                                    placeholder="Search..."
+                                    className="w-full border-2 border-slate-700 bg-slate-100 p-1 text-[10px] rounded focus:outline-none focus:ring-1 focus:ring-blue-500 font-semibold text-slate-900"
+                                    onClick={e => e.stopPropagation()}
+                                />
+                            </div>
+                        )}
+                        <div className="max-h-48 overflow-y-auto">
+                            {filteredOptions.length > 0 ? (
+                                filteredOptions.map(o => (
+                                    <div 
+                                        key={o.value}
+                                        onClick={() => {
+                                            onChange?.({ target: { value: o.value } });
+                                            setIsOpen(false);
+                                        }}
+                                        className={`p-1.5 px-2 text-[11px] hover:bg-blue-500 hover:text-white cursor-pointer ${String(o.value) === String(value) ? "bg-blue-100 font-black" : ""}`}
+                                    >
+                                        {o.label}
+                                    </div>
+                                ))
+                            ) : (
+                                <div className="p-2 text-slate-400 text-center text-[10px]">No results found</div>
+                            )}
+                        </div>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
 const TotalRow = ({ label, value, isEditable = false, onChange, color = "text-slate-900" }) => {
 
     const displayValue =
