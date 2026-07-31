@@ -45,7 +45,9 @@ const DespatchEntry = () => {
         out_hh: '12', out_mm: '00', out_period: 'PM',
         no_of_bags: 0,
         freight: 0,
-        freight_per_bag: 0
+        freight_per_bag: 0,
+        original_no_of_bags: 0,
+        original_freight: 0
     };
 
     const [formData, setFormData] = useState(emptyState);
@@ -53,10 +55,10 @@ const DespatchEntry = () => {
     const minutes = Array.from({ length: 60 }, (_, i) => i.toString().padStart(2, '0'));
 
     const calculatedFreightPerBag = useMemo(() => {
-        const bags = parseFloat(formData.no_of_bags) || 0;
-        const total = parseFloat(formData.freight) || 0;
+        const bags = parseFloat(formData.original_no_of_bags) || 0;
+        const total = parseFloat(formData.original_freight) || 0;
         return bags > 0 ? (total / bags).toFixed(2) : '0.00';
-    }, [formData.no_of_bags, formData.freight]);
+    }, [formData.original_no_of_bags, formData.original_freight]);
 
     useEffect(() => {
         fetchRecords();
@@ -156,8 +158,10 @@ const DespatchEntry = () => {
                 insurance_no: payload.insurance_no || '',
                 in_time: finalIn,
                 out_time: finalOut,
-                no_of_bags: Number(payload.no_of_bags) || 0,
-                freight: Number(payload.freight) || 0,
+                original_no_of_bags: Number(payload.original_no_of_bags) || 0,
+                original_freight: Number(payload.original_freight) || 0,
+                no_of_bags: formData.id ? (Number(payload.no_of_bags) || 0) : (Number(payload.original_no_of_bags) || 0),
+                freight: formData.id ? (Number(payload.freight) || 0) : (Number(payload.original_freight) || 0),
                 freight_per_bag: Number(calculatedFreightPerBag) || 0
             };
             if (formData.id) {
@@ -301,8 +305,8 @@ const DespatchEntry = () => {
                                         <td className="px-5 py-4"><span className="inline-flex rounded-md bg-slate-100 px-2.5 py-1 font-mono text-sm font-bold text-slate-800">L-{item.load_no}</span></td>
                                         <td className="px-5 py-4 text-sm text-slate-600">{item.load_date || '—'}</td>
                                         <td className="px-5 py-4 text-sm font-semibold uppercase text-slate-800">{item.Transport?.transport_name || 'DIRECT'}</td>
-                                        <td className="px-5 py-4 text-right text-sm font-semibold tabular-nums">{item.no_of_bags || 0}</td>
-                                        <td className="px-5 py-4 text-right text-sm font-semibold tabular-nums">₹{parseFloat(item.freight || 0).toLocaleString('en-IN')}</td>
+                                        <td className="px-5 py-4 text-right text-sm font-semibold tabular-nums">{item.original_no_of_bags ?? item.no_of_bags ?? 0}</td>
+                                        <td className="px-5 py-4 text-right text-sm font-semibold tabular-nums">₹{parseFloat(item.original_freight ?? item.freight ?? 0).toLocaleString('en-IN')}</td>
                                         {!isSelectionMode && <td className="px-5 py-4 text-right"><span className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 group-hover:bg-white group-hover:text-blue-600"><Edit size={16} /></span></td>}
                                     </tr>
                                 )) : (
@@ -354,8 +358,8 @@ const DespatchEntry = () => {
                                     <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                                         <SectionTitle icon={IndianRupee}>Freight details</SectionTitle>
                                         <div className="grid gap-4 sm:grid-cols-2">
-                                            <div><label className={labelClass}>Number of bags</label><div className="relative"><Package className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={17} /><input type="number" className={`${fieldClass} pl-10 text-right font-semibold tabular-nums`} value={formData.no_of_bags ?? ''} onChange={e => setFormData({ ...formData, no_of_bags: Number(e.target.value) })} placeholder="0" /></div></div>
-                                            <div><label className={labelClass}>Total freight</label><div className="relative"><span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-semibold text-slate-400">₹</span><input type="number" className={`${fieldClass} pl-8 text-right font-semibold tabular-nums`} value={formData.freight ?? ''} onChange={e => setFormData({ ...formData, freight: Number(e.target.value) })} placeholder="0.00" /></div></div>
+                                            <div><label className={labelClass}>Number of bags</label><div className="relative"><Package className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={17} /><input type="number" className={`${fieldClass} pl-10 text-right font-semibold tabular-nums`} value={formData.original_no_of_bags ?? ''} onChange={e => setFormData({ ...formData, original_no_of_bags: Number(e.target.value) })} placeholder="0" /></div></div>
+                                            <div><label className={labelClass}>Total freight</label><div className="relative"><span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-semibold text-slate-400">₹</span><input type="number" className={`${fieldClass} pl-8 text-right font-semibold tabular-nums`} value={formData.original_freight ?? ''} onChange={e => setFormData({ ...formData, original_freight: Number(e.target.value) })} placeholder="0.00" /></div></div>
                                             <div className="sm:col-span-2 flex items-center justify-between rounded-lg border border-blue-100 bg-blue-50 px-4 py-3"><div><p className="text-[11px] font-bold uppercase tracking-wider text-blue-600">Freight per bag</p><p className="mt-0.5 text-xs text-blue-600/70">Calculated automatically</p></div><input type="text" readOnly className="w-36 border-0 bg-transparent text-right text-xl font-bold tabular-nums text-blue-800 outline-none" value={`₹ ${calculatedFreightPerBag}`} /></div>
                                         </div>
                                     </section>

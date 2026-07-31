@@ -1651,11 +1651,43 @@ const DespatchEntry = sequelize.define('DespatchEntry', {
 
   freight_per_bag: {
     type: DataTypes.DECIMAL(12, 2)
+  },
+
+  original_no_of_bags: {
+    type: DataTypes.DECIMAL(10, 2),
+    defaultValue: 0
+  },
+
+  original_freight: {
+    type: DataTypes.DECIMAL(12, 2),
+    defaultValue: 0
   }
 
 }, {
   tableName: 'tbl_DespatchEntries',
-  timestamps: true
+  timestamps: true,
+  hooks: {
+    beforeCreate: (despatch) => {
+      const num = (v) => isNaN(parseFloat(v)) ? 0 : parseFloat(v);
+      if (despatch.original_no_of_bags === undefined || despatch.original_no_of_bags === null || num(despatch.original_no_of_bags) === 0) {
+        despatch.original_no_of_bags = despatch.no_of_bags;
+      }
+      if (despatch.original_freight === undefined || despatch.original_freight === null || num(despatch.original_freight) === 0) {
+        despatch.original_freight = despatch.freight;
+      }
+    },
+    beforeUpdate: (despatch) => {
+      const num = (v) => isNaN(parseFloat(v)) ? 0 : parseFloat(v);
+      if (despatch.changed('original_no_of_bags')) {
+        const deltaBags = num(despatch.original_no_of_bags) - num(despatch._previousDataValues.original_no_of_bags);
+        despatch.no_of_bags = num(despatch.no_of_bags) + deltaBags;
+      }
+      if (despatch.changed('original_freight')) {
+        const deltaFreight = num(despatch.original_freight) - num(despatch._previousDataValues.original_freight);
+        despatch.freight = num(despatch.freight) + deltaFreight;
+      }
+    }
+  }
 });
 
 /**

@@ -119,7 +119,8 @@ const sanitizeData = (data) => {
         'vat_amt', 'cenvat_amt', 'duty_amt', 'cess_amt', 'hr_sec_cess_amt', 'tcs_amt',
         'assessable_value', 'charity_per_bale', 'charity_amt', 'other_amt', 'freight_amt',
         'resale', 'convert_to_hank', 'convert_to_cone', 'rounded_off', 'sub_total', 'final_value',
-        'total_gst', 'total_sgst', 'total_cgst', 'total_igst'
+        'total_gst', 'total_sgst', 'total_cgst', 'total_igst',
+        'original_no_of_bags', 'original_freight'
     ];
 
     // 🔵 NEW ADDRESS FIELDS
@@ -1542,7 +1543,9 @@ module.exports = {
                                 "load_date",
                                 "vehicle_no",
                                 "freight",
-                                "no_of_bags"
+                                "no_of_bags",
+                                "original_freight",
+                                "original_no_of_bags"
                             ],
                             include: [
                                 {

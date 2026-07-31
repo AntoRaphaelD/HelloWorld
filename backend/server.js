@@ -85,6 +85,33 @@ const ensureUserColumns = async () => {
   }
 };
 
+const ensureDespatchColumns = async () => {
+  const queryInterface = sequelize.getQueryInterface();
+  const table = 'tbl_DespatchEntries';
+  const existing = await queryInterface.describeTable(table);
+  const columns = {
+    original_no_of_bags: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+    original_freight: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 }
+  };
+
+  let added = false;
+  for (const [name, definition] of Object.entries(columns)) {
+    if (!existing[name]) {
+      await queryInterface.addColumn(table, name, definition);
+      added = true;
+    }
+  }
+
+  if (added || Object.keys(existing).length > 0) {
+    await sequelize.query(`
+      UPDATE tbl_DespatchEntries 
+      SET original_no_of_bags = COALESCE(NULLIF(original_no_of_bags, 0), no_of_bags, 0),
+          original_freight = COALESCE(NULLIF(original_freight, 0), freight, 0)
+      WHERE original_no_of_bags = 0 OR original_no_of_bags IS NULL
+    `);
+  }
+};
+
 async function startServer() {
   const app = express();
   app.use(cors());
@@ -102,6 +129,7 @@ async function startServer() {
     await sequelize.sync({ alter: false });
     await ensureUserColumns();
     await ensureInvoiceDetailColumns();
+    await ensureDespatchColumns();
 
     const PORT = process.env.PORT || 5000;
     app.listen(PORT, () => {
