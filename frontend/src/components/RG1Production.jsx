@@ -86,17 +86,7 @@ const RG1Production = () => {
             ), 0);
         }, 0);
 
-        const directKgs = directInvoices.reduce((sum, invoice) => {
-            if (invoice.date !== dateValue) return sum;
-            const details = invoice.DirectInvoiceDetails || invoice.Details || invoice.details || [];
-            return sum + details.reduce((detailSum, detail) => (
-                parseInt(detail.product_id) === parseInt(productId)
-                    ? detailSum + num(detail.qty)
-                    : detailSum
-            ), 0);
-        }, 0);
-
-        return (invoiceKgs + directKgs).toFixed(2);
+        return invoiceKgs.toFixed(2);
     };
 
     const getPreviousDayClosingKgs = (productId, dateValue) => {
