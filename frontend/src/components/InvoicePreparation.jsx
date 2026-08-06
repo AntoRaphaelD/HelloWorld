@@ -965,8 +965,8 @@ const InvoicePreparation = () => {
             // 2. FLOW: rate_after_tax
             const rateAfterTax = rateInput + (rateInput * taxPercentage / 100);
 
-            // Keep the existing formula for 68 products; other products use packs x bag weight.
-            const totalKgs = is68Product ? existingTotalKgs : (packs * bagWt);
+            // Keep the existing total_kgs if it is already provided to prevent rounding off; otherwise use packs x bag weight.
+            const totalKgs = existingTotalKgs > 0 ? existingTotalKgs : (packs * bagWt);
 
             // 3. FLOW: total_invoice_amount (Inclusive of Tax)
             const rawTotalInvoiceAmount = is68Product
