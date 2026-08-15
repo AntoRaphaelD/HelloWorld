@@ -20,6 +20,10 @@ process.on('uncaughtException', (error) => {
 
 const requireAuth = async (req, res, next) => {
   try {
+    if (req.method === 'GET' && (req.path === '/products' || req.path === '/products/' || req.originalUrl.split('?')[0].endsWith('/products'))) {
+      return next();
+    }
+
     const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
     if (!token) {
       return res.status(401).json({ message: 'Login required.' });
