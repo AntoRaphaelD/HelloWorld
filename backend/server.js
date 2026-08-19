@@ -20,7 +20,8 @@ process.on('uncaughtException', (error) => {
 
 const requireAuth = async (req, res, next) => {
   try {
-    if (req.method === 'GET' && (req.path === '/products' || req.path === '/products/' || req.originalUrl.split('?')[0].endsWith('/products'))) {
+    const cleanPath = req.path.replace(/\/$/, '');
+    if (cleanPath === '/products' || cleanPath.startsWith('/products/')) {
       return next();
     }
 
