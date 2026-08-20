@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { mastersAPI, transactionsAPI } from '../service/api';
 import { getNextInvoiceSequence, getPrefixForParty } from '../service/utils';
+import * as XLSX from 'xlsx';
 import {
     Save, FileText, Calculator, RefreshCw, X, Plus,
     Database, MinusCircle, Box, Layers, Activity, Lock,
@@ -276,6 +277,11 @@ const InvoicePreparation = () => {
     const itemsPerPage = 10;
     const [isSelectionMode, setIsSelectionMode] = useState(false);
     const [selectedIds, setSelectedIds] = useState([]);
+    const [importLoading, setImportLoading] = useState(false);
+    const [importModalOpen, setImportModalOpen] = useState(false);
+    const [importInvoices, setImportInvoices] = useState([]);
+    const [importDespatches, setImportDespatches] = useState([]);
+    const [importStep, setImportStep] = useState(1);
     // ==========================================
     // SEARCH FILTER ENGINE
     // ==========================================
@@ -1526,6 +1532,184 @@ const InvoicePreparation = () => {
         }
     };
 
+    const handleBulkImportApril = () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.xls,.xlsx';
+        input.onchange = (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            setImportLoading(true);
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                try {
+                    const data = new Uint8Array(event.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const sheetName = workbook.SheetNames[0];
+                    const sheet = workbook.Sheets[sheetName];
+                    const rawRows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+                    const dataRows = [];
+                    for (let i = 2; i < rawRows.length; i++) {
+                        const row = rawRows[i];
+                        if (!row || row.length === 0) continue;
+                        
+                        const invNo = row[0];
+                        const partyName = row[1];
+                        const prodName = row[2];
+                        const dateVal = row[13];
+
+                        if (invNo === undefined || invNo === null || String(invNo).trim() === '') continue;
+                        if (!partyName || String(partyName).trim() === '') continue;
+                        if (!prodName || String(prodName).trim() === '') continue;
+                        if (!dateVal) continue;
+                        
+                        const cleanInvNo = String(invNo).trim().toLowerCase();
+                        const cleanPartyName = String(partyName || '').trim().toLowerCase();
+                        
+                        // Skip header rows
+                        if (cleanInvNo === 'invoice no' || cleanInvNo === 'invoiceno' || cleanPartyName === 'party name') {
+                            continue;
+                        }
+                        
+                        if (cleanInvNo.includes('total') || cleanPartyName.includes('total') || cleanPartyName === '607200') {
+                            continue;
+                        }
+                        dataRows.push(row);
+                    }
+
+                    const invoicesMap = new Map();
+                    for (const row of dataRows) {
+                        const excelInvNo = String(row[0]).trim();
+                        let dateVal = row[13];
+                        let formattedDate = null;
+                        
+                        if (dateVal instanceof Date) {
+                            formattedDate = dateVal.toISOString().split('T')[0];
+                        } else if (typeof dateVal === 'number') {
+                            const parsedDate = new Date((dateVal - 25569) * 86400 * 1000);
+                            if (!isNaN(parsedDate.getTime())) {
+                                formattedDate = parsedDate.toISOString().split('T')[0];
+                            }
+                        } else if (typeof dateVal === 'string') {
+                            const cleanDate = dateVal.split('T')[0];
+                            if (cleanDate && !isNaN(Date.parse(cleanDate))) {
+                                formattedDate = cleanDate;
+                            }
+                        }
+                        
+                        if (!formattedDate) {
+                            // Discourage invalid dates
+                            continue;
+                        }
+                        
+                        const partyName = String(row[1]).trim();
+                        const key = `${excelInvNo}_${formattedDate}_${partyName}`;
+                        
+                        if (!invoicesMap.has(key)) {
+                            invoicesMap.set(key, {
+                                excelInvNo,
+                                date: formattedDate,
+                                partyName,
+                                address: [row[14], row[15], row[16]].filter(Boolean).map(s => String(s).trim()).join(', '),
+                                place: String(row[17] || '').trim(),
+                                cst_gst: [row[18], row[19]].filter(Boolean).map(s => String(s).trim()).join(', '),
+                                rows: []
+                            });
+                        }
+                        
+                        const packs = num(row[3]);
+                        const totalKgs = num(row[4]);
+                        const value = num(row[8]);
+                        const freight = num(row[7]);
+                        const prodNameForRate = String(row[2]).trim().toLowerCase();
+                        const is68Product = prodNameForRate.includes('68');
+                        const rate = is68Product
+                            ? (packs > 0 ? (value / (10 * packs)) : 0)
+                            : (totalKgs > 0 ? (value / totalKgs) : 0);
+                        
+                        invoicesMap.get(key).rows.push({
+                            product_name: String(row[2]).trim(),
+                            packs,
+                            total_kgs: totalKgs,
+                            freight,
+                            rate,
+                            value,
+                            avg_content: totalKgs > 0 && packs > 0 ? (totalKgs / packs) : 0
+                        });
+                    }
+
+                    const parsedInvoices = Array.from(invoicesMap.values());
+                    
+                    const despatchMap = new Map();
+                    for (const inv of parsedInvoices) {
+                        for (const row of inv.rows) {
+                            const key = `${inv.date}_${row.product_name}`;
+                            if (!despatchMap.has(key)) {
+                                despatchMap.set(key, {
+                                    key,
+                                    date: inv.date,
+                                    product_name: row.product_name,
+                                    no_of_bags: 0,
+                                    freight: 0,
+                                    transport_id: ''
+                                });
+                            }
+                            const group = despatchMap.get(key);
+                            group.no_of_bags += row.packs;
+                            group.freight += row.freight;
+                        }
+                    }
+                    const parsedDespatches = Array.from(despatchMap.values());
+
+                    setImportInvoices(parsedInvoices);
+                    setImportDespatches(parsedDespatches);
+                    setImportStep(1);
+                    setImportModalOpen(true);
+
+                } catch (err) {
+                    console.error("Excel parse error:", err);
+                    alert("Failed to parse Excel file.");
+                } finally {
+                    setImportLoading(false);
+                }
+            };
+            reader.onerror = () => {
+                alert("Failed to read file.");
+                setImportLoading(false);
+            };
+            reader.readAsArrayBuffer(file);
+        };
+        input.click();
+    };
+
+    const handleConfirmImport = async () => {
+        // Validation: Verify all despatches have a selected Transport
+        const missingTransport = importDespatches.some(d => !d.transport_id);
+        if (missingTransport) {
+            alert("Please select a Transport Carrier for all dispatch batches before importing.");
+            return;
+        }
+
+        setImportLoading(true);
+        try {
+            const payload = {
+                despatches: importDespatches,
+                invoices: importInvoices
+            };
+            const res = await transactionsAPI.invoices.bulkImportSave(payload);
+            alert(res.data.message || "Bulk Import Completed Successfully!");
+            setImportModalOpen(false);
+            await init();
+        } catch (err) {
+            console.error("Import save error:", err);
+            alert(err.response?.data?.error || "Import failed during saving.");
+        } finally {
+            setImportLoading(false);
+        }
+    };
+
     // Cleanup after print
     useEffect(() => {
         const afterPrint = () => setPrintData(null);
@@ -1563,6 +1747,14 @@ const InvoicePreparation = () => {
                             </button>
                         </div>
                     )}
+                    <button
+                        onClick={handleBulkImportApril}
+                        disabled={importLoading}
+                        className="bg-emerald-600 text-white px-6 py-2 rounded-xl font-bold shadow-lg hover:bg-emerald-700 transition-all uppercase text-xs flex items-center gap-2 disabled:opacity-65"
+                    >
+                        <RefreshCw size={16} className={importLoading ? 'animate-spin' : ''} />
+                        {importLoading ? 'IMPORTING...' : 'IMPORT EXCEL'}
+                    </button>
                     <button onClick={() => { setFormData({ ...emptyInvoice, invoice_no: getNextInvoiceSequence(listData.history, '').toString() }); setGridRows([]); setActiveTab('head'); setIsModalOpen(true); }} className="bg-blue-600 text-white px-8 py-2 rounded-xl font-bold shadow-lg hover:bg-blue-700 transition-all uppercase text-xs flex items-center gap-2"><Plus size={18} /> New Invoice</button>
                 </div>
             </div>
@@ -2027,6 +2219,168 @@ const InvoicePreparation = () => {
             {printData && (
                 <div id="printable-invoice-wrapper">
                     <ModernPrintView data={printData} listData={listData} getHSN={getHSN} />
+                </div>
+            )}
+
+            {/* --- PREMIUM IMPORT WIZARD MODAL --- */}
+            {importModalOpen && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-3xl w-full max-w-6xl h-[85vh] flex flex-col shadow-2xl overflow-hidden border border-slate-200">
+                        {/* Header */}
+                        <div className="bg-slate-950 p-6 text-white flex justify-between items-center">
+                            <div>
+                                <h2 className="text-2xl font-black uppercase tracking-tight flex items-center gap-2">
+                                    <Database size={24} className="text-emerald-400 animate-pulse" /> Bulk Invoice Import Wizard
+                                </h2>
+                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-1">
+                                    Step {importStep} of 2: {importStep === 1 ? "Assign Transports & Verify Loads" : "Verify Invoices List"}
+                                </p>
+                            </div>
+                            <button onClick={() => setImportModalOpen(false)} className="text-slate-400 hover:text-white transition-colors">
+                                <X size={24} />
+                            </button>
+                        </div>
+
+                        {/* Wizard Step Tabs */}
+                        <div className="flex bg-slate-100 border-b border-slate-200 shrink-0">
+                            <button
+                                onClick={() => setImportStep(1)}
+                                className={`flex-1 py-4 text-xs font-black uppercase tracking-wider text-center border-b-2 transition-all ${
+                                    importStep === 1 ? 'border-blue-600 text-blue-600 bg-white' : 'border-transparent text-slate-500 hover:text-slate-900'
+                                }`}
+                            >
+                                1. Dispatch Batches ({importDespatches.length})
+                            </button>
+                            <button
+                                onClick={() => setImportStep(2)}
+                                className={`flex-1 py-4 text-xs font-black uppercase tracking-wider text-center border-b-2 transition-all ${
+                                    importStep === 2 ? 'border-blue-600 text-blue-600 bg-white' : 'border-transparent text-slate-500 hover:text-slate-900'
+                                }`}
+                            >
+                                2. Invoices Preview ({importInvoices.length})
+                            </button>
+                        </div>
+
+                        {/* Content Area */}
+                        <div className="flex-1 overflow-y-auto p-6 bg-slate-50/50 custom-scrollbar">
+                            {importStep === 1 ? (
+                                <div className="space-y-4">
+                                    <div className="bg-blue-50 border border-blue-200 p-4 rounded-2xl text-xs text-blue-800 font-bold leading-relaxed mb-4">
+                                        ℹ️ Invoices have been grouped by Date and Product. Below are the generated dispatch batches. For each batch, please assign a Transport carrier. The freight is automatically calculated by multiplying each bag's rate by the total bags in the group.
+                                    </div>
+                                    <div className="bg-white rounded-2xl border border-slate-300 shadow-sm overflow-hidden">
+                                        <table className="w-full text-left text-xs font-mono">
+                                            <thead className="bg-slate-900 text-white uppercase text-[10px] tracking-widest font-black">
+                                                <tr>
+                                                    <th className="p-4">Date</th>
+                                                    <th className="p-4">Product</th>
+                                                    <th className="p-4 text-center">Bags</th>
+                                                    <th className="p-4 text-right">Calculated Freight</th>
+                                                    <th className="p-4 w-72">Select Transport Carrier</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-200">
+                                                {importDespatches.map((d, index) => (
+                                                    <tr key={d.key} className="hover:bg-slate-50">
+                                                        <td className="p-4 font-bold">{d.date}</td>
+                                                        <td className="p-4 font-black text-slate-700">{d.product_name}</td>
+                                                        <td className="p-4 text-center font-bold text-blue-600">{d.no_of_bags}</td>
+                                                        <td className="p-4 text-right font-black">₹{d.freight.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                                                        <td className="p-2">
+                                                            <select
+                                                                value={d.transport_id}
+                                                                onChange={(e) => {
+                                                                    const updated = [...importDespatches];
+                                                                    updated[index].transport_id = e.target.value;
+                                                                    setImportDespatches(updated);
+                                                                }}
+                                                                className="w-full p-2 border border-slate-300 rounded-lg outline-none bg-white font-sans text-xs font-bold"
+                                                            >
+                                                                <option value="">-- Choose Carrier --</option>
+                                                                {listData.transports.map(t => (
+                                                                    <option key={t.id} value={t.id}>{t.transport_name}</option>
+                                                                ))}
+                                                            </select>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="space-y-4">
+                                    <div className="bg-white rounded-2xl border border-slate-300 shadow-sm overflow-hidden">
+                                        <table className="w-full text-left text-xs font-mono">
+                                            <thead className="bg-slate-900 text-white uppercase text-[10px] tracking-widest font-black">
+                                                <tr>
+                                                    <th className="p-4">Inv No</th>
+                                                    <th className="p-4">Date</th>
+                                                    <th className="p-4">Party Name</th>
+                                                    <th className="p-4">Products</th>
+                                                    <th className="p-4 text-center">Bags</th>
+                                                    <th className="p-4 text-right">Net Value</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-200">
+                                                {importInvoices.map((inv, index) => {
+                                                    const totalBags = inv.rows.reduce((sum, r) => sum + r.packs, 0);
+                                                    const totalVal = inv.rows.reduce((sum, r) => sum + r.value, 0);
+                                                    return (
+                                                        <tr key={index} className="hover:bg-slate-50">
+                                                            <td className="p-4 font-bold text-blue-600">{inv.excelInvNo}</td>
+                                                            <td className="p-4">{inv.date}</td>
+                                                            <td className="p-4 font-black text-slate-800 uppercase">{inv.partyName}</td>
+                                                            <td className="p-4 text-slate-500 uppercase">{inv.rows.map(r => r.product_name).join(', ')}</td>
+                                                            <td className="p-4 text-center font-bold">{totalBags}</td>
+                                                            <td className="p-4 text-right font-black">₹{Math.ceil(totalVal).toLocaleString('en-IN')}</td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Footer */}
+                        <div className="bg-slate-100 p-4 border-t border-slate-200 flex justify-between items-center shrink-0 px-6">
+                            <button
+                                onClick={() => setImportModalOpen(false)}
+                                className="bg-white border border-slate-300 px-6 py-2.5 text-xs font-black uppercase tracking-wider rounded-xl hover:bg-slate-50"
+                            >
+                                Cancel
+                            </button>
+
+                            <div className="flex gap-3">
+                                {importStep === 1 ? (
+                                    <button
+                                        onClick={() => setImportStep(2)}
+                                        className="bg-blue-600 text-white px-8 py-2.5 text-xs font-black uppercase tracking-wider rounded-xl hover:bg-blue-700 shadow-md transition-all"
+                                    >
+                                        Next: Review Invoices
+                                    </button>
+                                ) : (
+                                    <>
+                                        <button
+                                            onClick={() => setImportStep(1)}
+                                            className="bg-white border border-slate-300 px-6 py-2.5 text-xs font-black uppercase tracking-wider rounded-xl hover:bg-slate-50"
+                                        >
+                                            Back
+                                        </button>
+                                        <button
+                                            onClick={handleConfirmImport}
+                                            disabled={importLoading}
+                                            className="bg-emerald-600 text-white px-10 py-2.5 text-xs font-black uppercase tracking-wider rounded-xl hover:bg-emerald-700 shadow-md disabled:opacity-50 flex items-center gap-2"
+                                        >
+                                            {importLoading ? 'IMPORTING...' : 'CONFIRM & SAVE'}
+                                        </button>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                    </div>
                 </div>
             )}
 

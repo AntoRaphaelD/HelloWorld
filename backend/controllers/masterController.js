@@ -360,7 +360,7 @@ const calculateInvoiceBreakdown = ({ Details = [], config, freight_charges, sale
 const renumberInvoices = async (transaction) => {
     const invoices = await InvoiceHeader.findAll({
         include: [{ model: Account, as: 'Party' }],
-        order: [['id', 'ASC']],
+        order: [['date', 'ASC'], ['id', 'ASC']],
         transaction
     });
 
@@ -1338,10 +1338,201 @@ depotSalesCtrl.bulkDelete = async (req, res) => {
         res.status(500).json({ success: false, error: err.message });
     }
 };
+
+const bulkImportSave = async (req, res) => {
+    const t = await sequelize.transaction();
+    try {
+        const { despatches = [], invoices = [] } = req.body;
+
+        const despatchMap = new Map();
+        
+        for (const d of despatches) {
+            const despatchRecord = await DespatchEntry.create({
+                load_no: `LD-APR-${d.date.replace(/-/g, '')}-${d.product_name.replace(/\s+/g, '')}-${Math.floor(Math.random() * 1000)}`,
+                load_date: d.date,
+                transport_id: d.transport_id || null,
+                no_of_bags: d.no_of_bags,
+                freight: d.freight,
+                original_no_of_bags: d.no_of_bags,
+                original_freight: d.freight
+            }, { transaction: t });
+            
+            despatchMap.set(d.key, despatchRecord);
+        }
+
+        let invoiceType = await InvoiceType.findOne({ transaction: t });
+        if (!invoiceType) {
+            invoiceType = await InvoiceType.create({
+                name: 'GST 5%',
+                gst_percentage: 5,
+                sgst_percentage: 2.5,
+                cgst_percentage: 2.5,
+                igst_percentage: 5,
+                charity_value: 0.1,
+                tcs_percentage: 0
+            }, { transaction: t });
+        }
+
+        let importedCount = 0;
+        let skippedCount = 0;
+
+        for (const inv of invoices) {
+            let account = await Account.findOne({
+                where: { account_name: inv.partyName },
+                transaction: t
+            });
+            if (!account) {
+                account = await Account.create({
+                    account_name: inv.partyName,
+                    account_group: 'DEBTORS - YARN SALES',
+                    address: inv.address,
+                    place: inv.place,
+                    gst_no: inv.cst_gst.split(',')[0] || ''
+                }, { transaction: t });
+            }
+
+            const detailsPayload = [];
+            let mainProductKey = "";
+            for (const r of inv.rows) {
+                const prodName = String(r.product_name).trim();
+                let product = null;
+                if (prodName.includes('68')) {
+                    product = await Product.findByPk(1, { transaction: t });
+                } else if (prodName.includes('61')) {
+                    product = await Product.findByPk(5, { transaction: t });
+                }
+                if (!product) {
+                    product = await Product.findOne({ transaction: t });
+                }
+
+                if (!mainProductKey) {
+                    mainProductKey = prodName;
+                }
+
+                detailsPayload.push({
+                    product_id: product ? product.id : null,
+                    product_description: prodName,
+                    packs: num(r.packs),
+                    total_kgs: num(r.total_kgs),
+                    rate: num(r.rate),
+                    avg_content: num(r.avg_content)
+                });
+            }
+
+            const matchKey = `${inv.date}_${mainProductKey}`;
+            const matchedDespatch = despatchMap.get(matchKey);
+            const loadId = matchedDespatch ? matchedDespatch.id : null;
+
+            const totalKgs = detailsPayload.reduce((sum, d) => sum + d.total_kgs, 0);
+            const netAmount = Math.ceil(inv.rows.reduce((sum, r) => sum + num(r.value), 0));
+
+            const duplicate = await InvoiceHeader.findOne({
+                where: {
+                    party_id: account.id,
+                    net_amount: netAmount
+                },
+                include: [{
+                    model: InvoiceDetail,
+                    attributes: ['total_kgs']
+                }],
+                transaction: t
+            });
+
+            if (duplicate) {
+                const dupKgs = duplicate.InvoiceDetails.reduce((sum, d) => sum + num(d.total_kgs), 0);
+                if (Math.abs(dupKgs - totalKgs) < 0.01) {
+                    skippedCount++;
+                    continue;
+                }
+            }
+
+            const { processedRows, totals } = calculateInvoiceBreakdown({
+                Details: detailsPayload,
+                config: invoiceType,
+                freight_charges: inv.rows.reduce((sum, r) => sum + num(r.freight), 0),
+                sales_type: inv.partyName === 'DEPOT - MUMBAI' || inv.partyName.includes('KAYAAR EXPORTS') ? 'GST SALES' : 'CST SALES'
+            });
+
+            const header = await InvoiceHeader.create({
+                invoice_no: `TEMP-IMPORT-${Date.now()}-${Math.random()}`,
+                date: inv.date,
+                sales_type: inv.partyName === 'DEPOT - MUMBAI' || inv.partyName.includes('KAYAAR EXPORTS') ? 'GST SALES' : 'CST SALES',
+                invoice_type_id: invoiceType.id,
+                party_id: account.id,
+                load_id: loadId,
+                address: inv.address,
+                total_assessable: totals.assess,
+                total_charity: totals.charity,
+                freight_charges: totals.freight,
+                total_gst: totals.gst,
+                total_sgst: totals.sgst,
+                total_cgst: totals.cgst,
+                total_igst: totals.igst,
+                total_vat: totals.vat,
+                total_cenvat: totals.cenvat,
+                total_duty: totals.duty,
+                total_cess: totals.cess,
+                total_hr_sec_cess: totals.hcess,
+                total_tcs: totals.tcs,
+                total_other: totals.other,
+                sub_total: totals.net,
+                round_off: Math.ceil(totals.net) - totals.net,
+                net_amount: Math.ceil(totals.net),
+                is_approved: true
+            }, { transaction: t });
+
+            for (const row of processedRows) {
+                await InvoiceDetail.create({ ...row, invoice_id: header.id }, { transaction: t });
+                await Product.decrement('mill_stock', { by: row.total_kgs, where: { id: row.product_id }, transaction: t });
+            }
+
+            if (inv.partyName === 'DEPOT - MUMBAI') {
+                for (const row of processedRows) {
+                    await DepotReceived.create({
+                        date: inv.date,
+                        depot_id: account.id,
+                        invoice_no: header.invoice_no,
+                        product_id: row.product_id,
+                        packs: row.packs,
+                        total_kgs: row.total_kgs,
+                        rate: row.rate
+                    }, { transaction: t });
+                }
+            }
+
+            importedCount++;
+        }
+
+        await renumberInvoices(t);
+        
+        const updatedInvoices = await InvoiceHeader.findAll({ transaction: t });
+        for (const inv of updatedInvoices) {
+            if (inv.load_id) {
+                await DepotReceived.update(
+                    { invoice_no: inv.invoice_no },
+                    { where: { depot_id: inv.party_id, date: inv.date }, transaction: t }
+                );
+            }
+        }
+
+        await t.commit();
+        res.json({
+            success: true,
+            message: `Bulk import completed. Imported: ${importedCount}, Skipped (Duplicates): ${skippedCount}`
+        });
+
+    } catch (err) {
+        if (t) await t.rollback();
+        console.error("BULK IMPORT ERROR:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+};
+
 // --- 5. EXPORTS ---
 // --- masterController.js (Bottom of file) ---
 
 module.exports = {
+    bulkImportSave,
     account: createMasterController(Account),
     broker: createMasterController(Broker),
     transport: createMasterController(Transport),

@@ -27,6 +27,7 @@
     "mysql2": "^3.16.0",
     "nodemailer": "^8.0.7",
     "nodemon": "^3.1.11",
-    "sequelize": "^6.37.7"
+    "sequelize": "^6.37.7",
+    "xlsx": "^0.18.5"
   }
 }

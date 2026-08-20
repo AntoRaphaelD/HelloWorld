@@ -55,6 +55,7 @@
     router.post('/production/bulk-delete', validate(ctrl.production.bulkDelete));
 
     // Invoices (Sales WITH Order)
+    router.post('/invoices/bulk-import-save', validate(ctrl.bulkImportSave));
     router.post('/invoices', validate(ctrl.invoice.create));
     router.post('/invoices/bulk-delete', validate(ctrl.invoice.bulkDelete));
     router.get('/invoices', validate(ctrl.invoice.getAll));

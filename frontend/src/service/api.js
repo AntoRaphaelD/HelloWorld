@@ -137,7 +137,8 @@ export const transactionsAPI = {
     approve: (id) => api.put(`/invoices/approve/${id}`),
     reject: (id) => api.put(`/invoices/reject/${id}`), 
     delete: (id) => api.delete(`/invoices/${id}`),
-    bulkDelete: (ids) => api.post('/invoices/bulk-delete', { ids })
+    bulkDelete: (ids) => api.post('/invoices/bulk-delete', { ids }),
+    bulkImportSave: (payload) => api.post('/invoices/bulk-import-save', payload)
   },
   
   // Mill Sales WITHOUT Order (Direct Sales)
