@@ -4,7 +4,7 @@ import axios from 'axios';
 const BASE_URL = 'http://localhost:5002';
 
 // REST API Instance (Existing)
-const api = axios.create({ 
+const api = axios.create({
   baseURL: `${BASE_URL}/api`,
   headers: {
     'Content-Type': 'application/json'

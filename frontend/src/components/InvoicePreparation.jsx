@@ -1580,11 +1580,13 @@ const InvoicePreparation = () => {
                     }
 
                     const invoicesMap = new Map();
+                    const parsedInvoices = [];
+
                     for (const row of dataRows) {
                         const excelInvNo = String(row[0]).trim();
                         let dateVal = row[13];
                         let formattedDate = null;
-                        
+
                         if (dateVal instanceof Date) {
                             formattedDate = dateVal.toISOString().split('T')[0];
                         } else if (typeof dateVal === 'number') {
@@ -1598,49 +1600,52 @@ const InvoicePreparation = () => {
                                 formattedDate = cleanDate;
                             }
                         }
-                        
+
                         if (!formattedDate) {
-                            // Discourage invalid dates
                             continue;
                         }
-                        
+
                         const partyName = String(row[1]).trim();
-                        const key = `${excelInvNo}_${formattedDate}_${partyName}`;
-                        
-                        if (!invoicesMap.has(key)) {
-                            invoicesMap.set(key, {
-                                excelInvNo,
-                                date: formattedDate,
-                                partyName,
-                                address: [row[14], row[15], row[16]].filter(Boolean).map(s => String(s).trim()).join(', '),
-                                place: String(row[17] || '').trim(),
-                                cst_gst: [row[18], row[19]].filter(Boolean).map(s => String(s).trim()).join(', '),
-                                rows: []
-                            });
-                        }
-                        
+
                         const packs = num(row[3]);
                         const totalKgs = num(row[4]);
                         const value = num(row[8]);
                         const freight = num(row[7]);
+
                         const prodNameForRate = String(row[2]).trim().toLowerCase();
                         const is68Product = prodNameForRate.includes('68');
+
                         const rate = is68Product
                             ? (packs > 0 ? (value / (10 * packs)) : 0)
                             : (totalKgs > 0 ? (value / totalKgs) : 0);
-                        
-                        invoicesMap.get(key).rows.push({
-                            product_name: String(row[2]).trim(),
-                            packs,
-                            total_kgs: totalKgs,
-                            freight,
-                            rate,
-                            value,
-                            avg_content: totalKgs > 0 && packs > 0 ? (totalKgs / packs) : 0
+
+                        parsedInvoices.push({
+                            excelInvNo,
+                            date: formattedDate,
+                            partyName,
+                            address: [row[14], row[15], row[16]]
+                                .filter(Boolean)
+                                .map(s => String(s).trim())
+                                .join(', '),
+                            place: String(row[17] || '').trim(),
+                            cst_gst: [row[18], row[19]]
+                                .filter(Boolean)
+                                .map(s => String(s).trim())
+                                .join(', '),
+
+                            rows: [{
+                                product_name: String(row[2]).trim(),
+                                packs,
+                                total_kgs: totalKgs,
+                                freight,
+                                rate,
+                                value,
+                                avg_content: totalKgs > 0 && packs > 0
+                                    ? (totalKgs / packs)
+                                    : 0
+                            }]
                         });
                     }
-
-                    const parsedInvoices = Array.from(invoicesMap.values());
                     
                     const despatchMap = new Map();
                     for (const inv of parsedInvoices) {

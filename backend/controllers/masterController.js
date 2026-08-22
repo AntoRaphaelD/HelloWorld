@@ -1426,25 +1426,6 @@ const bulkImportSave = async (req, res) => {
             const totalKgs = detailsPayload.reduce((sum, d) => sum + d.total_kgs, 0);
             const netAmount = Math.ceil(inv.rows.reduce((sum, r) => sum + num(r.value), 0));
 
-            const duplicate = await InvoiceHeader.findOne({
-                where: {
-                    party_id: account.id,
-                    net_amount: netAmount
-                },
-                include: [{
-                    model: InvoiceDetail,
-                    attributes: ['total_kgs']
-                }],
-                transaction: t
-            });
-
-            if (duplicate) {
-                const dupKgs = duplicate.InvoiceDetails.reduce((sum, d) => sum + num(d.total_kgs), 0);
-                if (Math.abs(dupKgs - totalKgs) < 0.01) {
-                    skippedCount++;
-                    continue;
-                }
-            }
 
             const { processedRows, totals } = calculateInvoiceBreakdown({
                 Details: detailsPayload,
@@ -1518,7 +1499,7 @@ const bulkImportSave = async (req, res) => {
         await t.commit();
         res.json({
             success: true,
-            message: `Bulk import completed. Imported: ${importedCount}, Skipped (Duplicates): ${skippedCount}`
+            message: `Bulk import completed. Imported: ${importedCount}`
         });
 
     } catch (err) {
