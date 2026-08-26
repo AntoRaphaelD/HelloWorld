@@ -1,27 +1,71 @@
-export const getNextInvoiceSequence = (history, prefix) => {
-    const maxNo = history.reduce((max, item) => {
-        const invNo = String(item.invoice_no || '').trim();
-        if (prefix === 'DM-') {
+export const getNextInvoiceSequence = (history, prefix, currentPartyName = '') => {
+    if (prefix === 'DM-') {
+        const maxNo = history.reduce((max, item) => {
+            const invNo = String(item.invoice_no || '').trim();
             if (invNo.startsWith('DM-')) {
                 const cleanNo = invNo.substring(3);
                 const numVal = parseInt(cleanNo, 10);
                 return Math.max(max, isNaN(numVal) ? 0 : numVal);
             }
-        } else if (prefix === 'DI-') {
+            return max;
+        }, 0);
+        return maxNo + 1;
+    } else if (prefix === 'DI-') {
+        const maxNo = history.reduce((max, item) => {
+            const invNo = String(item.invoice_no || '').trim();
             if (invNo.startsWith('DI-')) {
                 const cleanNo = invNo.substring(3);
                 const numVal = parseInt(cleanNo, 10);
                 return Math.max(max, isNaN(numVal) ? 0 : numVal);
             }
+            return max;
+        }, 0);
+        return maxNo + 1;
+    }
+
+    // Normal Sequence
+    const sortedNormalHistory = [...history]
+        .filter(item => {
+            const invNo = String(item.invoice_no || '').trim();
+            return !invNo.startsWith('DM-') && !invNo.startsWith('DI-');
+        })
+        .sort((a, b) => {
+            const dateA = new Date(a.date || 0).getTime();
+            const dateB = new Date(b.date || 0).getTime();
+            if (dateA !== dateB) return dateA - dateB;
+            return (a.id || 0) - (b.id || 0);
+        });
+
+    let normalCounter = 0;
+    let lastWasYarnTesting = false;
+    let lastYarnTestingInvoiceNo = '';
+
+    for (const inv of sortedNormalHistory) {
+        const partyName = String(inv.Party?.account_name || inv.party_name || '').toUpperCase().trim();
+        const isYarnTesting = partyName.includes('YARN TESTING');
+        let newInvNo = '';
+        if (isYarnTesting && lastWasYarnTesting) {
+            newInvNo = lastYarnTestingInvoiceNo;
         } else {
-            if (!invNo.startsWith('DM-') && !invNo.startsWith('DI-')) {
-                const numVal = parseInt(invNo, 10);
-                return Math.max(max, isNaN(numVal) ? 0 : numVal);
+            normalCounter++;
+            newInvNo = String(normalCounter);
+            if (isYarnTesting) {
+                lastYarnTestingInvoiceNo = newInvNo;
             }
         }
-        return max;
-    }, 0);
-    return maxNo + 1;
+        lastWasYarnTesting = isYarnTesting;
+    }
+
+    const currentPartyUpper = String(currentPartyName || '').toUpperCase().trim();
+    if (currentPartyUpper.includes('YARN TESTING')) {
+        if (lastWasYarnTesting) {
+            return lastYarnTestingInvoiceNo || String(normalCounter + 1);
+        } else {
+            return String(normalCounter + 1);
+        }
+    } else {
+        return String(normalCounter + 1);
+    }
 };
 
 export const getPrefixForParty = (partyName) => {

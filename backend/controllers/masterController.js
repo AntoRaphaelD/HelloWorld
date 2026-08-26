@@ -368,6 +368,9 @@ const renumberInvoices = async (transaction) => {
     let dmCounter = 0;
     let diCounter = 0;
 
+    let lastWasYarnTesting = false;
+    let lastYarnTestingInvoiceNo = '';
+
     const updates = [];
 
     for (const inv of invoices) {
@@ -380,8 +383,17 @@ const renumberInvoices = async (transaction) => {
             diCounter++;
             newInvNo = `DI-${diCounter}`;
         } else {
-            normalCounter++;
-            newInvNo = `${normalCounter}`;
+            const isYarnTesting = partyName.includes('YARN TESTING');
+            if (isYarnTesting && lastWasYarnTesting) {
+                newInvNo = lastYarnTestingInvoiceNo;
+            } else {
+                normalCounter++;
+                newInvNo = `${normalCounter}`;
+                if (isYarnTesting) {
+                    lastYarnTestingInvoiceNo = newInvNo;
+                }
+            }
+            lastWasYarnTesting = isYarnTesting;
         }
         updates.push({ id: inv.id, oldNo: inv.invoice_no, newNo: newInvNo });
     }

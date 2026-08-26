@@ -1166,7 +1166,7 @@ const InvoicePreparation = () => {
             const historyExcludingCurrent = prev.id 
                 ? listData.history.filter(item => item.id !== prev.id)
                 : listData.history;
-            const seq = getNextInvoiceSequence(historyExcludingCurrent, prefix);
+            const seq = getNextInvoiceSequence(historyExcludingCurrent, prefix, acc.account_name);
             updatedInvNo = prefix ? `${prefix}${seq}` : seq.toString();
             return {
                 ...prev,
