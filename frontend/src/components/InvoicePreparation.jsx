@@ -1786,6 +1786,9 @@ const InvoicePreparation = () => {
                             <th className="p-6 cursor-pointer select-none" onClick={() => handleSort('party')}>
                                 Party {sortField === 'party' ? (sortOrder === 'asc' ? '▲' : '▼') : ''}
                             </th>
+                            <th className="p-6 select-none">
+                                Yarn / Description
+                            </th>
                         </tr>
                     </thead>
                     <tbody className="divide-y text-sm font-mono">
@@ -1814,9 +1817,9 @@ const InvoicePreparation = () => {
                                     {item.Party?.account_name}
                                 </td>
 
-
-
-
+                                <td className="p-6 text-slate-600">
+                                    {item.InvoiceDetails?.[0]?.product_description || '-'}
+                                </td>
                             </tr>
                         ))}
                     </tbody>

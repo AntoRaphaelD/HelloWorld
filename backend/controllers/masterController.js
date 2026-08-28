@@ -1385,6 +1385,35 @@ const bulkImportSave = async (req, res) => {
             }, { transaction: t });
         }
 
+        // Gather all invoice numbers to overwrite and clean them up first before starting the import loop
+        const invoiceNumbersToDelete = new Set();
+        for (const inv of invoices) {
+            let finalInvoiceNo = inv.excelInvNo;
+            const partyNameUpper = String(inv.partyName || '').toUpperCase().trim();
+            if (partyNameUpper === 'DEPOT - MUMBAI') {
+                if (!finalInvoiceNo.startsWith('DM-')) finalInvoiceNo = `DM-${finalInvoiceNo}`;
+            } else if (partyNameUpper.includes('KAYAAR EXPORTS') || partyNameUpper.includes('KAYAAR EXPORTS PRIVATE LIMITED')) {
+                if (!finalInvoiceNo.startsWith('DI-')) finalInvoiceNo = `DI-${finalInvoiceNo}`;
+            }
+            invoiceNumbersToDelete.add(finalInvoiceNo);
+        }
+
+        if (invoiceNumbersToDelete.size > 0) {
+            const existingInvoices = await InvoiceHeader.findAll({
+                where: { invoice_no: Array.from(invoiceNumbersToDelete) },
+                transaction: t
+            });
+            for (const existingInvoice of existingInvoices) {
+                const existingDetails = await InvoiceDetail.findAll({ where: { invoice_id: existingInvoice.id }, transaction: t });
+                for (const item of existingDetails) {
+                    await Product.increment('mill_stock', { by: item.total_kgs, where: { id: item.product_id }, transaction: t });
+                }
+                await DepotReceived.destroy({ where: { invoice_no: existingInvoice.invoice_no }, transaction: t });
+                await InvoiceDetail.destroy({ where: { invoice_id: existingInvoice.id }, transaction: t });
+                await InvoiceHeader.destroy({ where: { id: existingInvoice.id }, transaction: t });
+            }
+        }
+
         let importedCount = 0;
         let skippedCount = 0;
 
@@ -1438,7 +1467,6 @@ const bulkImportSave = async (req, res) => {
             const totalKgs = detailsPayload.reduce((sum, d) => sum + d.total_kgs, 0);
             const netAmount = Math.ceil(inv.rows.reduce((sum, r) => sum + num(r.value), 0));
 
-
             const { processedRows, totals } = calculateInvoiceBreakdown({
                 Details: detailsPayload,
                 config: invoiceType,
@@ -1446,8 +1474,21 @@ const bulkImportSave = async (req, res) => {
                 sales_type: inv.partyName === 'DEPOT - MUMBAI' || inv.partyName.includes('KAYAAR EXPORTS') ? 'GST SALES' : 'CST SALES'
             });
 
+            // Handle DI and DM prefixes according to business logic
+            let finalInvoiceNo = inv.excelInvNo;
+            const partyNameUpper = String(inv.partyName || '').toUpperCase().trim();
+            if (partyNameUpper === 'DEPOT - MUMBAI') {
+                if (!finalInvoiceNo.startsWith('DM-')) {
+                    finalInvoiceNo = `DM-${finalInvoiceNo}`;
+                }
+            } else if (partyNameUpper.includes('KAYAAR EXPORTS') || partyNameUpper.includes('KAYAAR EXPORTS PRIVATE LIMITED')) {
+                if (!finalInvoiceNo.startsWith('DI-')) {
+                    finalInvoiceNo = `DI-${finalInvoiceNo}`;
+                }
+            }
+
             const header = await InvoiceHeader.create({
-                invoice_no: `TEMP-IMPORT-${Date.now()}-${Math.random()}`,
+                invoice_no: finalInvoiceNo,
                 date: inv.date,
                 sales_type: inv.partyName === 'DEPOT - MUMBAI' || inv.partyName.includes('KAYAAR EXPORTS') ? 'GST SALES' : 'CST SALES',
                 invoice_type_id: invoiceType.id,
@@ -1496,28 +1537,20 @@ const bulkImportSave = async (req, res) => {
             importedCount++;
         }
 
-        await renumberInvoices(t);
-        
-        const updatedInvoices = await InvoiceHeader.findAll({ transaction: t });
-        for (const inv of updatedInvoices) {
-            if (inv.load_id) {
-                await DepotReceived.update(
-                    { invoice_no: inv.invoice_no },
-                    { where: { depot_id: inv.party_id, date: inv.date }, transaction: t }
-                );
-            }
-        }
-
         await t.commit();
         res.json({
             success: true,
-            message: `Bulk import completed. Imported: ${importedCount}`
+            message: `Bulk import completed. Imported: ${importedCount} records`
         });
 
     } catch (err) {
         if (t) await t.rollback();
         console.error("BULK IMPORT ERROR:", err);
-        res.status(500).json({ success: false, error: err.message });
+        let errorMessage = err.message;
+        if (err.errors && Array.isArray(err.errors)) {
+            errorMessage = "Validation Details: " + err.errors.map(e => `${e.path}: ${e.message}`).join(', ');
+        }
+        res.status(500).json({ success: false, error: errorMessage });
     }
 };
 
