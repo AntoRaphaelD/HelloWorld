@@ -32,8 +32,6 @@ export const setAuthToken = (token) => {
 export const authAPI = {
   login: (credentials) => authClient.post('/login', credentials),
   signup: (credentials) => authClient.post('/signup', credentials),
-  requestSignupOtp: (data) => authClient.post('/signup/request-otp', data),
-  verifySignupOtp: (data) => authClient.post('/signup/verify-otp', data),
   me: () => authClient.get('/me'),
   logout: () => authClient.post('/logout')
 };
@@ -115,7 +113,8 @@ export const transactionsAPI = {
     create: (data) => api.post('/orders', data),
     update: (id, data) => api.put(`/orders/${id}`, data),
     delete: (id) => api.delete(`/orders/${id}`),
-    bulkDelete: (ids) => api.post('/orders/bulk-delete', { ids })
+    bulkDelete: (ids) => api.post('/orders/bulk-delete', { ids }),
+    bulkImport: (items) => api.post('/orders/bulk-import', { items })
   },
 
   // Mill Production (RG1)
@@ -125,7 +124,8 @@ export const transactionsAPI = {
     create: (data) => api.post('/production', data), 
     update: (id, data) => api.put(`/production/${id}`, data),
     delete: (id) => api.delete(`/production/${id}`),
-    bulkDelete: (ids) => api.post('/production/bulk-delete', { ids })
+    bulkDelete: (ids) => api.post('/production/bulk-delete', { ids }),
+    bulkImport: (items) => api.post('/production/bulk-import', { items })
   },
   
   // Mill Sales WITH Order
@@ -147,7 +147,8 @@ export const transactionsAPI = {
     getById: (id) => api.get(`/direct-invoices/${id}`),
     create: (data) => api.post('/direct-invoices', data),
     update: (id, data) => api.put(`/direct-invoices/${id}`, data),
-    delete: (id) => api.delete(`/direct-invoices/${id}`)
+    delete: (id) => api.delete(`/direct-invoices/${id}`),
+    bulkImport: (items) => api.post('/direct-invoices/bulk-import', { items })
   },
 
   // Loading & Despatch
@@ -156,7 +157,8 @@ export const transactionsAPI = {
     create: (data) => api.post('/despatch', data),
     update: (id, data) => api.put(`/despatch/${id}`, data),
     delete: (id) => api.delete(`/despatch/${id}`),
-    bulkDelete: (ids) => api.post('/despatch/bulk-delete', { ids })
+    bulkDelete: (ids) => api.post('/despatch/bulk-delete', { ids }),
+    bulkImport: (items) => api.post('/despatch/bulk-import', { items })
   },
 
   // --- DEPOT OPERATIONS ---
@@ -166,7 +168,8 @@ export const transactionsAPI = {
     create: (data) => api.post('/depot-sales', data),
     update: (id, data) => api.put(`/depot-sales/${id}`, data),
     delete: (id) => api.delete(`/depot-sales/${id}`),
-    bulkDelete: (ids) => api.post('/depot-sales/bulk-delete', { ids })
+    bulkDelete: (ids) => api.post('/depot-sales/bulk-delete', { ids }),
+    bulkImportSave: (payload) => api.post('/depot-sales/bulk-import-save', payload)
   },
 
   depotReceived: {
@@ -175,7 +178,8 @@ export const transactionsAPI = {
     create: (data) => api.post('/depot-received', data), 
     update: (id, data) => api.put(`/depot-received/${id}`, data),
     delete: (id) => api.delete(`/depot-received/${id}`),
-    bulkDelete: (ids) => api.post('/depot-received/bulk-delete', { ids })
+    bulkDelete: (ids) => api.post('/depot-received/bulk-delete', { ids }),
+    bulkImport: (items) => api.post('/depot-received/bulk-import', { items })
   },
 
   depotInward: {

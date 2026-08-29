@@ -43,77 +43,120 @@ const requireAuth = async (req, res, next) => {
   }
 };
 
-const ensureInvoiceDetailColumns = async () => {
-  const queryInterface = sequelize.getQueryInterface();
-  const table = 'tbl_InvoiceDetails';
-  const existing = await queryInterface.describeTable(table);
-  const columns = {
-    broker_code1: { type: DataTypes.STRING },
-    broker_code2: { type: DataTypes.STRING },
-    broker_percentage2: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
-    lot_no: { type: DataTypes.STRING },
-    convert_to_cone: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
-    charity_per_bale: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
-    other_per: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 }
-  };
+const ensureProductColumns = async () => {
+  try {
+    const queryInterface = sequelize.getQueryInterface();
+    const table = 'tbl_Products';
+    const existing = await queryInterface.describeTable(table);
+    const columns = {
+      product_code: { type: DataTypes.STRING, allowNull: true },
+      mill_stock: { type: DataTypes.DECIMAL(15, 3), defaultValue: 0 },
+      printing_tariff_desc: { type: DataTypes.STRING, allowNull: true },
+      charity_rs: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+      other_receipt: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+      roundoff: { type: DataTypes.BOOLEAN, defaultValue: false }
+    };
 
-  for (const [name, definition] of Object.entries(columns)) {
-    if (!existing[name]) {
-      await queryInterface.addColumn(table, name, definition);
+    for (const [name, definition] of Object.entries(columns)) {
+      if (!existing[name]) {
+        await queryInterface.addColumn(table, name, definition);
+      }
     }
-  }
 
-  if (existing.convert_to_cone) {
-    await queryInterface.changeColumn(table, 'convert_to_cone', {
-      type: DataTypes.DECIMAL(12, 2),
-      defaultValue: 0
-    });
+    if (existing.product_code && !existing.product_code.allowNull) {
+      await queryInterface.changeColumn(table, 'product_code', {
+        type: DataTypes.STRING,
+        allowNull: true
+      });
+    }
+  } catch (err) {
+    console.error('ensureProductColumns error:', err.message);
+  }
+};
+
+const ensureInvoiceDetailColumns = async () => {
+  try {
+    const queryInterface = sequelize.getQueryInterface();
+    const table = 'tbl_InvoiceDetails';
+    const existing = await queryInterface.describeTable(table);
+    const columns = {
+      broker_code1: { type: DataTypes.STRING },
+      broker_code2: { type: DataTypes.STRING },
+      broker_percentage2: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+      lot_no: { type: DataTypes.STRING },
+      convert_to_cone: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
+      charity_per_bale: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+      other_per: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 }
+    };
+
+    for (const [name, definition] of Object.entries(columns)) {
+      if (!existing[name]) {
+        await queryInterface.addColumn(table, name, definition);
+      }
+    }
+
+    if (existing.convert_to_cone) {
+      await queryInterface.changeColumn(table, 'convert_to_cone', {
+        type: DataTypes.DECIMAL(12, 2),
+        defaultValue: 0
+      });
+    }
+  } catch (err) {
+    console.error('ensureInvoiceDetailColumns error:', err.message);
   }
 };
 
 const ensureUserColumns = async () => {
-  const queryInterface = sequelize.getQueryInterface();
-  const table = 'tbl_Users';
-  const existing = await queryInterface.describeTable(table);
-  const columns = {
-    mobile_no: { type: DataTypes.STRING, allowNull: true, unique: true },
-    otp_hash: { type: DataTypes.STRING, allowNull: true },
-    otp_salt: { type: DataTypes.STRING, allowNull: true },
-    otp_expires_at: { type: DataTypes.DATE, allowNull: true },
-    otp_verified_at: { type: DataTypes.DATE, allowNull: true }
-  };
+  try {
+    const queryInterface = sequelize.getQueryInterface();
+    const table = 'tbl_Users';
+    const existing = await queryInterface.describeTable(table);
+    const columns = {
+      mobile_no: { type: DataTypes.STRING, allowNull: true, unique: true },
+      otp_hash: { type: DataTypes.STRING, allowNull: true },
+      otp_salt: { type: DataTypes.STRING, allowNull: true },
+      otp_expires_at: { type: DataTypes.DATE, allowNull: true },
+      otp_verified_at: { type: DataTypes.DATE, allowNull: true }
+    };
 
-  for (const [name, definition] of Object.entries(columns)) {
-    if (!existing[name]) {
-      await queryInterface.addColumn(table, name, definition);
+    for (const [name, definition] of Object.entries(columns)) {
+      if (!existing[name]) {
+        await queryInterface.addColumn(table, name, definition);
+      }
     }
+  } catch (err) {
+    console.error('ensureUserColumns error:', err.message);
   }
 };
 
 const ensureDespatchColumns = async () => {
-  const queryInterface = sequelize.getQueryInterface();
-  const table = 'tbl_DespatchEntries';
-  const existing = await queryInterface.describeTable(table);
-  const columns = {
-    original_no_of_bags: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
-    original_freight: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 }
-  };
+  try {
+    const queryInterface = sequelize.getQueryInterface();
+    const table = 'tbl_DespatchEntries';
+    const existing = await queryInterface.describeTable(table);
+    const columns = {
+      original_no_of_bags: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+      original_freight: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 }
+    };
 
-  let added = false;
-  for (const [name, definition] of Object.entries(columns)) {
-    if (!existing[name]) {
-      await queryInterface.addColumn(table, name, definition);
-      added = true;
+    let added = false;
+    for (const [name, definition] of Object.entries(columns)) {
+      if (!existing[name]) {
+        await queryInterface.addColumn(table, name, definition);
+        added = true;
+      }
     }
-  }
 
-  if (added || Object.keys(existing).length > 0) {
-    await sequelize.query(`
-      UPDATE tbl_DespatchEntries 
-      SET original_no_of_bags = COALESCE(NULLIF(original_no_of_bags, 0), no_of_bags, 0),
-          original_freight = COALESCE(NULLIF(original_freight, 0), freight, 0)
-      WHERE original_no_of_bags = 0 OR original_no_of_bags IS NULL
-    `);
+    if (added || Object.keys(existing).length > 0) {
+      await sequelize.query(`
+        UPDATE tbl_DespatchEntries 
+        SET original_no_of_bags = COALESCE(NULLIF(original_no_of_bags, 0), no_of_bags, 0),
+            original_freight = COALESCE(NULLIF(original_freight, 0), freight, 0)
+        WHERE (original_no_of_bags = 0 OR original_no_of_bags IS NULL) AND no_of_bags IS NOT NULL
+      `);
+    }
+  } catch (err) {
+    console.error('ensureDespatchColumns error:', err.message);
   }
 };
 
@@ -131,8 +174,12 @@ async function startServer() {
     await sequelize.authenticate();
     console.log('Database connected');
 
-    await sequelize.sync({ alter: false });
+    // Safe sync: Only creates missing tables, NEVER alters or drops existing data
+    await sequelize.sync();
+
+    // Safe column migrations: Only adds missing columns non-destructively
     await ensureUserColumns();
+    await ensureProductColumns();
     await ensureInvoiceDetailColumns();
     await ensureDespatchColumns();
 

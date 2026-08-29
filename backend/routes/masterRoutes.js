@@ -40,6 +40,7 @@
 
     // Orders
     router.post('/orders', validate(ctrl.order.create));
+    router.post('/orders/bulk-import', validate(ctrl.order.bulkImport));
     router.get('/orders', validate(ctrl.order.getAll));
     router.get('/orders/:id', validate(ctrl.order.getOne));
     router.put('/orders/:id', validate(ctrl.order.update));
@@ -48,6 +49,7 @@
 
     // Production (RG1)
     router.post('/production', validate(ctrl.production.create));
+    router.post('/production/bulk-import', validate(ctrl.production.bulkImport));
     router.get('/production', validate(ctrl.production.getAll));
     router.get('/production/:id', validate(ctrl.production.getOne));
     router.put('/production/:id', validate(ctrl.production.update));
@@ -67,6 +69,7 @@
 
     // Direct Invoices (Sales WITHOUT Order)
     router.post('/direct-invoices', validate(ctrl.directInvoice.create));
+    router.post('/direct-invoices/bulk-import', validate(ctrl.directInvoice.bulkImport));
     router.get('/direct-invoices', validate(ctrl.directInvoice.getAll));
     router.get('/direct-invoices/:id', validate(ctrl.directInvoice.getOne));
     router.put('/direct-invoices/:id', validate(ctrl.directInvoice.update));
@@ -75,6 +78,7 @@
     // Despatch Entry
     router.get('/despatch', validate(ctrl.despatch.getAll));
     router.post('/despatch', validate(ctrl.despatch.create));
+    router.post('/despatch/bulk-import', validate(ctrl.despatch.bulkImport));
     router.put('/despatch/:id', validate(ctrl.despatch.update));
     router.delete('/despatch/:id', validate(ctrl.despatch.delete));
     router.post('/despatch/bulk-delete', validate(ctrl.despatch.bulkDelete));
@@ -90,6 +94,7 @@
     router.get('/depot-received', validate(ctrl.depotReceived.getAll));
     router.get('/depot-received/:id', validate(ctrl.depotReceived.getOne));
     router.post('/depot-received', validate(ctrl.depotReceived.create));
+    router.post('/depot-received/bulk-import', validate(ctrl.depotReceived.bulkImport));
     router.put('/depot-received/:id', validate(ctrl.depotReceived.update));
     router.delete('/depot-received/:id', validate(ctrl.depotReceived.delete));
     router.post('/depot-received/bulk-delete', validate(ctrl.depotReceived.bulkDelete));
@@ -99,6 +104,7 @@
     router.get('/depot-inventory/:depotId', validate(ctrl.getDepotInventory));
 
     // Depot Sales (Sales made from depot hub)
+    router.post('/depot-sales/bulk-import-save', validate(ctrl.bulkImportDepotSales));
     router.post('/depot-sales', validate(ctrl.depotSales.create));
     router.get('/depot-sales', validate(ctrl.depotSales.getAll));
     router.get('/depot-sales/:id', validate(ctrl.depotSales.getOne));

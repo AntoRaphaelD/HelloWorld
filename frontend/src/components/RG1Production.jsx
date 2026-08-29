@@ -3,15 +3,18 @@ import { mastersAPI, transactionsAPI } from '../service/api';
 import {
   Plus, Edit, Trash2, X, ChevronLeft,
   ChevronRight, RefreshCw, Save, Factory, Search, Filter,
-  Square, CheckSquare, Loader2
+  Square, CheckSquare, Loader2, Download, FileSpreadsheet
 } from 'lucide-react';
 import { useFilter } from '../context/FilterContext';
 import LocalSearchBar from './LocalSearchBar';
+import BulkImportModal from './BulkImportModal';
+import { downloadProductionTemplate } from '../service/excelTemplates';
 
 const RG1Production = () => {
   // --- 1. State Management ---
   const [list, setList] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isImportOpen, setIsImportOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
 
@@ -444,6 +447,21 @@ const RG1Production = () => {
           <Factory className="text-blue-700" /> Yarn Production
         </h1>
         <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={downloadProductionTemplate}
+            className="bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 px-4 py-2 rounded-lg font-bold text-xs uppercase shadow-sm transition-all flex items-center gap-1.5 active:scale-95"
+            title="Download Sample Excel Template"
+          >
+            <Download size={15} /> Template
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsImportOpen(true)}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg font-bold text-xs uppercase shadow-md transition-all flex items-center gap-1.5 active:scale-95"
+          >
+            <FileSpreadsheet size={15} /> Import Excel
+          </button>
           <button onClick={handleAddNew} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg font-bold text-xs uppercase shadow-md transition-all active:scale-95"><Plus size={16} /> New Entry</button>
           <button onClick={fetchRecords} className="p-2 border border-slate-200 rounded-lg bg-white shadow-sm"><RefreshCw size={20} className={loading ? 'animate-spin' : ''} /></button>
         </div>
@@ -727,6 +745,20 @@ const RG1Production = () => {
           </div>
         </div>
       )}
+
+      {/* Bulk Import Modal */}
+      <BulkImportModal
+        isOpen={isImportOpen}
+        onClose={() => setIsImportOpen(false)}
+        title="Import Yarn Production (RG1)"
+        subtitle="Upload an Excel file with Yarn Production logs to bulk import"
+        onDownloadTemplate={downloadProductionTemplate}
+        onSave={async (rows) => {
+          await transactionsAPI.production.bulkImport(rows);
+          await fetchMasters();
+          await fetchRecords();
+        }}
+      />
     </div>
   );
 };

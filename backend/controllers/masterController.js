@@ -216,6 +216,22 @@ const createMasterController = (Model, includeModels = []) => ({
             await Model.destroy({ where: { id: { [Op.in]: req.body.ids } } });
             res.status(200).json({ success: true });
         } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+    },
+    bulkImport: async (req, res) => {
+        const t = await sequelize.transaction();
+        try {
+            const rawItems = req.body.items || req.body || [];
+            const items = Array.isArray(rawItems) ? rawItems : [rawItems];
+            if (items.length === 0) throw new Error("No records provided to import.");
+            const sanitizedItems = items.map(item => sanitizeData(item));
+            const created = await Model.bulkCreate(sanitizedItems, { transaction: t });
+            await t.commit();
+            res.json({ success: true, count: created.length, message: `Successfully imported ${created.length} records.` });
+        } catch (err) {
+            if (t) await t.rollback();
+            console.error("Master bulk import error:", err);
+            res.status(500).json({ success: false, error: err.message });
+        }
     }
 });
 
@@ -425,7 +441,7 @@ const renumberDepotInvoices = async (transaction) => {
             { model: Account, as: 'Depot' },
             { model: Account, as: 'Party' }
         ],
-        order: [['id', 'ASC']],
+        order: [['date', 'ASC'], ['id', 'ASC']],
         transaction
     });
 
@@ -440,10 +456,10 @@ const renumberDepotInvoices = async (transaction) => {
         const partyName = String(inv.Party?.account_name || inv.party_name || '').toUpperCase().trim();
 
         let newInvNo = '';
-        if (depotName === 'DEPOT - MUMBAI') {
+        if (depotName.includes('DEPOT - MUMBAI') || depotName.includes('DEPOT MUMBAI') || partyName.includes('DEPOT - MUMBAI') || partyName.includes('DEPOT MUMBAI')) {
             mumbaiCounter++;
             newInvNo = `${mumbaiCounter}`;
-        } else if (partyName.includes('KAYAAR EXPORTS PRIVATE LIMITED')) {
+        } else if (depotName.includes('KAYAAR EXPORTS') || partyName.includes('KAYAAR EXPORTS')) {
             kayaarCounter++;
             newInvNo = `${kayaarCounter}`;
         } else {
@@ -938,6 +954,90 @@ productionCtrl.bulkDelete = async (req, res) => {
     }
 };
 
+productionCtrl.bulkImport = async (req, res) => {
+    const t = await sequelize.transaction();
+    try {
+        const rawItems = req.body.items || req.body || [];
+        const items = Array.isArray(rawItems) ? rawItems : [rawItems];
+        if (items.length === 0) throw new Error("No production records provided to import.");
+
+        let imported = 0;
+        for (const item of items) {
+            let product = null;
+            if (item.product_name) {
+                product = await Product.findOne({
+                    where: { product_name: { [Op.like]: `%${item.product_name}%` } },
+                    transaction: t
+                });
+            }
+            if (!product && item.product_id) {
+                product = await Product.findByPk(item.product_id, { transaction: t });
+            }
+            if (!product) {
+                product = await Product.findOne({ transaction: t });
+            }
+
+            const productId = product ? product.id : null;
+
+            // Resolve packing type
+            let packingType = null;
+            if (item.packing_type) {
+                packingType = await PackingType.findOne({
+                    where: { packing_type: item.packing_type },
+                    transaction: t
+                });
+            }
+            if (!packingType && product?.packing_type) {
+                packingType = await PackingType.findOne({
+                    where: { packing_type: product.packing_type },
+                    transaction: t
+                });
+            }
+            if (!packingType) {
+                packingType = await PackingType.findOne({ transaction: t });
+            }
+            const packingTypeId = packingType ? packingType.id : (item.packing_type_id || 1);
+
+            const weightPerBag = num(item.weight_per_bag || product?.pack_nett_wt || 45.36);
+            const productionKgs = num(item.production_kgs || item.production || (num(item.total_bags || item.stock_bags) * weightPerBag));
+            const prevClosingKgs = num(item.prev_closing_kgs || product?.mill_stock || 0);
+            const invoiceKgs = num(item.invoice_kgs || 0);
+            const stockKgs = num(item.stock_kgs) || Math.max(0, prevClosingKgs + productionKgs - invoiceKgs);
+            const stockBags = num(item.stock_bags) || (weightPerBag > 0 ? Math.floor(stockKgs / weightPerBag) : 0);
+            const stockLooseKgs = num(item.stock_loose_kgs) || (weightPerBag > 0 ? (stockKgs % weightPerBag) : 0);
+
+            await RG1Production.create({
+                date: item.date || new Date(),
+                product_id: productId,
+                packing_type_id: packingTypeId,
+                weight_per_bag: weightPerBag,
+                prev_closing_kgs: prevClosingKgs,
+                production_kgs: productionKgs,
+                invoice_kgs: invoiceKgs,
+                stock_kgs: stockKgs,
+                stock_bags: stockBags,
+                stock_loose_kgs: stockLooseKgs
+            }, { transaction: t });
+
+            if (productId) {
+                await Product.update(
+                    { mill_stock: stockKgs },
+                    { where: { id: productId }, transaction: t }
+                );
+            }
+
+            imported++;
+        }
+
+        await t.commit();
+        res.json({ success: true, count: imported, message: `Successfully imported ${imported} production records.` });
+    } catch (err) {
+        if (t) await t.rollback();
+        console.error("Production bulk import error:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+};
+
 // --- 4. DEPOT STORAGE LOGIC ---
 const getDepotInventory = async (req, res) => {
     try {
@@ -1080,6 +1180,73 @@ orderCtrl.update = async (req, res) => {
         res.status(500).json({ success: false, error: err.message });
     }
 };
+
+orderCtrl.bulkImport = async (req, res) => {
+    const t = await sequelize.transaction();
+    try {
+        const rawItems = req.body.items || req.body || [];
+        const items = Array.isArray(rawItems) ? rawItems : [rawItems];
+        if (items.length === 0) throw new Error("No orders provided to import.");
+
+        let imported = 0;
+        for (const item of items) {
+            let party = null;
+            if (item.party_name) {
+                party = await Account.findOne({ where: { account_name: item.party_name }, transaction: t });
+                if (!party) {
+                    party = await Account.create({ account_name: item.party_name, account_group: 'DEBTORS - YARN SALES' }, { transaction: t });
+                }
+            }
+            let broker = null;
+            if (item.broker_name) {
+                broker = await Broker.findOne({ where: { broker_name: item.broker_name }, transaction: t });
+            }
+
+            let product = null;
+            if (item.product_name) {
+                product = await Product.findOne({ where: { product_name: { [Op.like]: `%${item.product_name}%` } }, transaction: t });
+                if (!product) {
+                    product = await Product.findOne({ transaction: t });
+                }
+            }
+
+            const header = await OrderHeader.create({
+                order_no: item.order_no || `ORD-${Date.now()}-${imported + 1}`,
+                date: item.order_date || item.date || new Date(),
+                party_id: party ? party.id : sanitizeData(item).party_id,
+                broker_id: broker ? broker.id : sanitizeData(item).broker_id,
+                delivery_terms: item.delivery_terms || '',
+                remarks: item.remarks || '',
+                status: item.status || 'PENDING'
+            }, { transaction: t });
+
+            const packs = num(item.qty_packs || item.packs || item.qty);
+            const bagWt = num(item.bag_wt || item.avg_content || 45.36);
+            const totalKgs = num(item.total_kgs) || (packs * bagWt);
+            const rate = num(item.rate);
+
+            await OrderDetail.create({
+                order_id: header.id,
+                product_id: product ? product.id : sanitizeData(item).product_id,
+                qty: packs,
+                bag_wt: bagWt,
+                total_kgs: totalKgs,
+                rate_cr: rate,
+                packing_type: item.packing_type || 'HDPE BAGS'
+            }, { transaction: t });
+
+            imported++;
+        }
+
+        await t.commit();
+        res.json({ success: true, count: imported, message: `Successfully imported ${imported} sales orders.` });
+    } catch (err) {
+        if (t) await t.rollback();
+        console.error("Order bulk import error:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+};
+
 const directInvoiceCtrl = createMasterController(DirectInvoiceHeader, [
     { model: Account, as: 'Party' },
     {
@@ -1167,6 +1334,68 @@ directInvoiceCtrl.update = async (req, res) => {
     } catch (err) {
         await t.rollback();
         console.error("DIRECT UPDATE ERROR:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+};
+
+directInvoiceCtrl.bulkImport = async (req, res) => {
+    const t = await sequelize.transaction();
+    try {
+        const rawItems = req.body.items || req.body || [];
+        const items = Array.isArray(rawItems) ? rawItems : [rawItems];
+        if (items.length === 0) throw new Error("No direct orders provided to import.");
+
+        let imported = 0;
+        for (const item of items) {
+            let party = null;
+            if (item.party_name) {
+                party = await Account.findOne({ where: { account_name: item.party_name }, transaction: t });
+                if (!party) {
+                    party = await Account.create({ account_name: item.party_name, account_group: 'DEBTORS - YARN SALES' }, { transaction: t });
+                }
+            }
+            let broker = null;
+            if (item.broker_name) {
+                broker = await Broker.findOne({ where: { broker_name: item.broker_name }, transaction: t });
+            }
+            let product = null;
+            if (item.product_name) {
+                product = await Product.findOne({ where: { product_name: { [Op.like]: `%${item.product_name}%` } }, transaction: t });
+                if (!product) product = await Product.findOne({ transaction: t });
+            }
+
+            const header = await DirectInvoiceHeader.create({
+                order_no: item.order_no || `DO-${Date.now()}-${imported + 1}`,
+                date: item.order_date || item.date || new Date(),
+                party_id: party ? party.id : sanitizeData(item).party_id,
+                broker_id: broker ? broker.id : sanitizeData(item).broker_id,
+                remarks: item.remarks || '',
+                status: item.status || 'PENDING'
+            }, { transaction: t });
+
+            const packs = num(item.qty_packs || item.packs || item.qty);
+            const bagWt = num(item.bag_wt || item.avg_content || 45.36);
+            const totalKgs = num(item.total_kgs) || (packs * bagWt);
+            const rate = num(item.rate);
+
+            await DirectInvoiceDetail.create({
+                direct_invoice_id: header.id,
+                product_id: product ? product.id : sanitizeData(item).product_id,
+                qty: packs,
+                bag_wt: bagWt,
+                total_kgs: totalKgs,
+                rate_cr: rate,
+                packing_type: item.packing_type || 'HDPE BAGS'
+            }, { transaction: t });
+
+            imported++;
+        }
+
+        await t.commit();
+        res.json({ success: true, count: imported, message: `Successfully imported ${imported} direct orders.` });
+    } catch (err) {
+        if (t) await t.rollback();
+        console.error("Direct order bulk import error:", err);
         res.status(500).json({ success: false, error: err.message });
     }
 };
@@ -1554,11 +1783,205 @@ const bulkImportSave = async (req, res) => {
     }
 };
 
+const bulkImportDepotSales = async (req, res) => {
+    const t = await sequelize.transaction();
+    try {
+        const { depot_id, invoices = [] } = req.body;
+        if (!depot_id) {
+            throw new Error("Please select a Depot.");
+        }
+        if (!invoices || invoices.length === 0) {
+            throw new Error("No invoices to import.");
+        }
+
+        const depotAccount = await Account.findByPk(depot_id, { transaction: t });
+        if (!depotAccount) {
+            throw new Error("Selected Depot not found.");
+        }
+
+        let invoiceType = await InvoiceType.findOne({
+            where: { sales_type: 'DEPOT SALES' },
+            transaction: t
+        });
+        if (!invoiceType) {
+            invoiceType = await InvoiceType.findOne({ transaction: t });
+        }
+        if (!invoiceType) {
+            invoiceType = await InvoiceType.create({
+                name: 'GST 5%',
+                sales_type: 'DEPOT SALES',
+                gst_percentage: 5,
+                sgst_percentage: 2.5,
+                cgst_percentage: 2.5,
+                igst_percentage: 5,
+                charity_value: 0.1,
+                tcs_percentage: 0
+            }, { transaction: t });
+        }
+
+        let importedCount = 0;
+
+        for (const inv of invoices) {
+            const partyName = String(inv.partyName || '').trim();
+            if (!partyName) continue;
+
+            let partyAccount = await Account.findOne({
+                where: { account_name: partyName },
+                transaction: t
+            });
+            if (!partyAccount) {
+                partyAccount = await Account.create({
+                    account_name: partyName,
+                    account_group: 'DEBTORS - DEPOT - PARTIES',
+                    addr1: inv.addr1 || inv.address || null,
+                    addr2: inv.addr2 || null,
+                    addr3: inv.addr3 || null,
+                    place: inv.place || null,
+                    tin_no: inv.cst_no || null,
+                    gst_no: inv.gst_no || (inv.cst_gst ? inv.cst_gst.split(',')[0] : '') || null
+                }, { transaction: t });
+            }
+
+            const detailsRows = [];
+            const rows = inv.rows && inv.rows.length > 0 ? inv.rows : [inv];
+
+            for (const r of rows) {
+                const prodName = String(r.product_name || r.count || '').trim();
+                let product = null;
+                if (prodName.includes('68')) {
+                    product = await Product.findOne({ where: { product_name: { [Op.like]: '%68%' } }, transaction: t });
+                } else if (prodName.includes('61')) {
+                    product = await Product.findOne({ where: { product_name: { [Op.like]: '%61%' } }, transaction: t });
+                }
+                if (!product && prodName) {
+                    product = await Product.findOne({ where: { product_name: prodName }, transaction: t });
+                }
+                if (!product) {
+                    product = await Product.findOne({ transaction: t });
+                }
+
+                const packs = num(r.packs || r.bags);
+                const totalKgs = num(r.total_kgs || r.kgs);
+                const avgContent = num(r.avg_content) || (packs > 0 && totalKgs > 0 ? totalKgs / packs : 0);
+                const assessableValue = num(r.assessable_value || r.assessableValue);
+                const charityAmt = num(r.charity_amt || r.charity);
+                const subTotal = num(r.sub_total || r.subTotal) || (assessableValue + charityAmt);
+                const gstAmt = num(r.gst_amt || r.gst);
+                const finalValue = num(r.final_value || r.finalValue || r.invoice_value) || (subTotal + gstAmt);
+                const rate = num(r.rate) || (totalKgs > 0 ? assessableValue / totalKgs : 0);
+
+                const gstPct = num(invoiceType.gst_percentage || 5);
+                const sgstPct = num(invoiceType.sgst_percentage || 2.5);
+                const cgstPct = num(invoiceType.cgst_percentage || 2.5);
+                const igstPct = num(invoiceType.igst_percentage || 5);
+
+                const isIgst = partyAccount.state && depotAccount.state && partyAccount.state.toLowerCase() !== depotAccount.state.toLowerCase();
+                const sgstAmt = isIgst ? 0 : gstAmt / 2;
+                const cgstAmt = isIgst ? 0 : gstAmt / 2;
+                const igstAmt = isIgst ? gstAmt : 0;
+
+                detailsRows.push({
+                    product_id: product ? product.id : null,
+                    product_description: prodName || (product ? product.product_name : ''),
+                    packs,
+                    total_kgs: totalKgs,
+                    avg_content: avgContent,
+                    rate,
+                    rate_per: 'KG',
+                    assessable_value: assessableValue,
+                    charity_amt: charityAmt,
+                    sub_total: subTotal,
+                    gst_amt: gstAmt,
+                    sgst_amt: sgstAmt,
+                    cgst_amt: cgstAmt,
+                    igst_amt: igstAmt,
+                    gst_per: gstPct,
+                    sgst_per: sgstPct,
+                    cgst_per: cgstPct,
+                    igst_per: igstPct,
+                    final_value: finalValue
+                });
+            }
+
+            const totalAssessable = detailsRows.reduce((sum, d) => sum + num(d.assessable_value), 0);
+            const totalCharity = detailsRows.reduce((sum, d) => sum + num(d.charity_amt), 0);
+            const totalGst = detailsRows.reduce((sum, d) => sum + num(d.gst_amt), 0);
+            const totalSgst = detailsRows.reduce((sum, d) => sum + num(d.sgst_amt), 0);
+            const totalCgst = detailsRows.reduce((sum, d) => sum + num(d.cgst_amt), 0);
+            const totalIgst = detailsRows.reduce((sum, d) => sum + num(d.igst_amt), 0);
+            const subTotal = detailsRows.reduce((sum, d) => sum + num(d.sub_total), 0);
+            const rawFinal = detailsRows.reduce((sum, d) => sum + num(d.final_value), 0);
+            const finalInvoiceValue = Math.round(rawFinal);
+            const roundOff = (finalInvoiceValue - rawFinal).toFixed(2);
+
+            const isTransfer = partyName.toUpperCase() === 'DEPOT - MUMBAI' || partyName.toUpperCase().includes('DEPOT TRANSFER');
+
+            const header = await DepotSalesHeader.create({
+                invoice_no: `TEMP-IMPORT-${Date.now()}-${Math.random()}`,
+                date: inv.date,
+                sales_type: isTransfer ? 'DEPOT TRANSFER' : 'DEPOT SALES',
+                invoice_type_id: invoiceType.id,
+                invoice_type: invoiceType.type_name || invoiceType.name || 'DEPOT SALES',
+                depot_id: depot_id,
+                party_id: partyAccount.id,
+                addr1: inv.addr1 || partyAccount.addr1 || null,
+                addr2: inv.addr2 || partyAccount.addr2 || null,
+                addr3: inv.addr3 || partyAccount.addr3 || null,
+                total_assessable: totalAssessable,
+                total_charity: totalCharity,
+                total_gst: totalGst,
+                total_sgst: totalSgst,
+                total_cgst: totalCgst,
+                total_igst: totalIgst,
+                sub_total: subTotal,
+                round_off: roundOff,
+                final_invoice_value: finalInvoiceValue
+            }, { transaction: t });
+
+            for (const d of detailsRows) {
+                await DepotSalesDetail.create({
+                    ...d,
+                    depot_sales_id: header.id
+                }, { transaction: t });
+            }
+
+            if (isTransfer) {
+                for (const d of detailsRows) {
+                    await DepotReceived.create({
+                        date: inv.date || new Date(),
+                        depot_id: partyAccount.id,
+                        product_id: d.product_id,
+                        invoice_no: header.invoice_no,
+                        total_kgs: d.total_kgs,
+                        type: 'INWARD',
+                        remarks: `TRANSFERRED FROM DEPOT ID: ${depot_id}`
+                    }, { transaction: t });
+                }
+            }
+
+            importedCount++;
+        }
+
+        await renumberDepotInvoices(t);
+        await t.commit();
+
+        res.json({
+            success: true,
+            message: `Bulk import completed successfully. Imported: ${importedCount} records.`
+        });
+    } catch (err) {
+        if (t) await t.rollback();
+        console.error("DEPOT SALES BULK IMPORT ERROR:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+};
+
 // --- 5. EXPORTS ---
 // --- masterController.js (Bottom of file) ---
 
 module.exports = {
     bulkImportSave,
+    bulkImportDepotSales,
     account: createMasterController(Account),
     broker: createMasterController(Broker),
     transport: createMasterController(Transport),

@@ -82,8 +82,8 @@ export const getNextDepotInvoiceSequence = (history, depotName, partyName) => {
     const currentDepot = String(depotName || '').toUpperCase().trim();
     const currentParty = String(partyName || '').toUpperCase().trim();
 
-    const isCurrentMumbai = currentDepot === 'DEPOT - MUMBAI';
-    const isCurrentKayaar = currentParty.includes('KAYAAR EXPORTS PRIVATE LIMITED');
+    const isCurrentMumbai = currentDepot.includes('DEPOT - MUMBAI') || currentDepot.includes('DEPOT MUMBAI') || currentParty.includes('DEPOT - MUMBAI') || currentParty.includes('DEPOT MUMBAI');
+    const isCurrentKayaar = currentDepot.includes('KAYAAR EXPORTS') || currentParty.includes('KAYAAR EXPORTS');
 
     const maxNo = history.reduce((max, item) => {
         const invNo = String(item.invoice_no || '').trim();
@@ -94,8 +94,8 @@ export const getNextDepotInvoiceSequence = (history, depotName, partyName) => {
         const itemDepot = String(item.Depot?.account_name || '').toUpperCase().trim();
         const itemParty = String(item.Party?.account_name || '').toUpperCase().trim();
 
-        const itemIsMumbai = itemDepot === 'DEPOT - MUMBAI';
-        const itemIsKayaar = itemParty.includes('KAYAAR EXPORTS PRIVATE LIMITED');
+        const itemIsMumbai = itemDepot.includes('DEPOT - MUMBAI') || itemDepot.includes('DEPOT MUMBAI') || itemParty.includes('DEPOT - MUMBAI') || itemParty.includes('DEPOT MUMBAI');
+        const itemIsKayaar = itemDepot.includes('KAYAAR EXPORTS') || itemParty.includes('KAYAAR EXPORTS');
 
         if (isCurrentMumbai) {
             if (itemIsMumbai) {

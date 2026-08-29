@@ -3,14 +3,18 @@ import { mastersAPI, transactionsAPI } from '../service/api';
 import { 
     Plus, Edit, Trash2, X, ChevronLeft, 
     ChevronRight, RefreshCw, Save, ShoppingCart, Search, Filter, 
-    Square, CheckSquare, MinusCircle, FileSignature, Loader2    
+    Square, CheckSquare, MinusCircle, FileSignature, Loader2,
+    Download, FileSpreadsheet
 } from 'lucide-react';
 import { useFilter } from '../context/FilterContext';
 import LocalSearchBar from './LocalSearchBar';
+import BulkImportModal from './BulkImportModal';
+import { downloadOrderTemplate } from '../service/excelTemplates';
 
 const SalesWithOrder = () => {
     const [list, setList] = useState([]);
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [isImportOpen, setIsImportOpen] = useState(false);
     const [loading, setLoading] = useState(false);
     const [submitLoading, setSubmitLoading] = useState(false);
     
@@ -263,6 +267,21 @@ const SalesWithOrder = () => {
                     <ShoppingCart className="text-blue-700" /> Sales Booking Master
                 </h1>
                 <div className="flex gap-2">
+                    <button
+                        type="button"
+                        onClick={downloadOrderTemplate}
+                        className="bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 px-4 py-2 rounded-lg font-bold text-xs uppercase shadow-sm transition-all flex items-center gap-1.5"
+                        title="Download Sample Excel Template"
+                    >
+                        <Download size={15} /> Template
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setIsImportOpen(true)}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg font-bold text-xs uppercase shadow-md transition-all flex items-center gap-1.5"
+                    >
+                        <FileSpreadsheet size={15} /> Import Excel
+                    </button>
                     <button onClick={handleAddNew} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg font-bold text-xs uppercase shadow-md transition-all flex items-center gap-1">
                         <Plus size={16} /> New Order
                     </button>
@@ -632,6 +651,18 @@ const SalesWithOrder = () => {
     </div>
   </div>
 )}
+            {/* Bulk Import Modal */}
+            <BulkImportModal
+                isOpen={isImportOpen}
+                onClose={() => setIsImportOpen(false)}
+                title="Import Sales Orders (With Order)"
+                subtitle="Upload an Excel file with Sales Booking Order details to bulk import"
+                onDownloadTemplate={downloadOrderTemplate}
+                onSave={async (rows) => {
+                    await transactionsAPI.orders.bulkImport(rows);
+                    await fetchRecords();
+                }}
+            />
         </div>
     );
 };

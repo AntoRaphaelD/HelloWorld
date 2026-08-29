@@ -3,14 +3,17 @@ import { mastersAPI, transactionsAPI } from '../service/api';
 import { 
     Plus, Edit, Trash2, X, ChevronLeft, 
     ChevronRight, RefreshCw, Save, Zap, Search, Filter, 
-    Square, CheckSquare, MinusCircle
+    Square, CheckSquare, MinusCircle, Download, FileSpreadsheet
 } from 'lucide-react';
 import { useFilter } from '../context/FilterContext';
 import LocalSearchBar from './LocalSearchBar';
+import BulkImportModal from './BulkImportModal';
+import { downloadDirectOrderTemplate } from '../service/excelTemplates';
 
 const SalesWithoutOrder = () => {
     const [list, setList] = useState([]);
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [isImportOpen, setIsImportOpen] = useState(false);
     const [loading, setLoading] = useState(false);
     const [submitLoading, setSubmitLoading] = useState(false);
     
@@ -257,6 +260,21 @@ const SalesWithoutOrder = () => {
                     <Zap className="text-blue-700" /> Direct Billing (Sales Without Order)
                 </h1>
                 <div className="flex gap-2">
+                    <button
+                        type="button"
+                        onClick={downloadDirectOrderTemplate}
+                        className="bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 px-4 py-2 rounded-lg font-bold text-xs uppercase shadow-sm transition-all flex items-center gap-1.5"
+                        title="Download Sample Excel Template"
+                    >
+                        <Download size={15} /> Template
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setIsImportOpen(true)}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg font-bold text-xs uppercase shadow-md transition-all flex items-center gap-1.5"
+                    >
+                        <FileSpreadsheet size={15} /> Import Excel
+                    </button>
                     <button onClick={handleAddNew} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg font-bold text-sm uppercase shadow-md transition-all flex items-center gap-1">
                         <Plus size={18} /> New Bill
                     </button>
@@ -566,6 +584,18 @@ const SalesWithoutOrder = () => {
                     </div>
                 </div>
             )}
+            {/* Bulk Import Modal */}
+            <BulkImportModal
+                isOpen={isImportOpen}
+                onClose={() => setIsImportOpen(false)}
+                title="Import Direct Orders (Without Order)"
+                subtitle="Upload an Excel file with Direct Sales details to bulk import"
+                onDownloadTemplate={downloadDirectOrderTemplate}
+                onSave={async (rows) => {
+                    await transactionsAPI.directInvoices.bulkImport(rows);
+                    await fetchRecords();
+                }}
+            />
         </div>
     );
 };

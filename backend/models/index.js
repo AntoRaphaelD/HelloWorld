@@ -226,8 +226,7 @@ const Product = sequelize.define('Product', {
 
   product_code: {
     type: DataTypes.STRING,
-    allowNull: false,
-    unique: true
+    allowNull: true
   },
 
   product_name: {
@@ -317,7 +316,19 @@ const Product = sequelize.define('Product', {
 
 }, {
   tableName: 'tbl_Products',
-  timestamps: true
+  timestamps: true,
+  hooks: {
+    beforeValidate: async (product) => {
+      if (!product.product_code || String(product.product_code).trim() === '') {
+        const lastProduct = await Product.findOne({
+          order: [['id', 'DESC']],
+          attributes: ['id', 'product_code']
+        });
+        const nextId = (lastProduct?.id || 0) + 1;
+        product.product_code = String(nextId);
+      }
+    }
+  }
 });
 
 // module.exports = Product;

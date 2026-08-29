@@ -185,8 +185,16 @@ const handleSave = async (e) => {
     setSubmitLoading(true);
 
     try {
+        const maxCode = list.reduce((max, item) => {
+            const num = parseInt(item.product_code, 10);
+            return !isNaN(num) ? Math.max(max, num) : max;
+        }, 0);
+        const resolvedCode = formData.product_code && String(formData.product_code).trim() !== ''
+            ? String(formData.product_code).trim()
+            : (maxCode + 1).toString();
+
         const payload = {
-            product_code: formData.product_code || '',
+            product_code: resolvedCode,
             product_name: formData.product_name || '',
             short_description: formData.short_description || '',
             commodity: formData.commodity || '',
