@@ -6,7 +6,7 @@ import {
     Save, FileText, Calculator, RefreshCw, X, Plus,
     Database, MinusCircle, Box, Layers, Activity, Lock,
     ShoppingCart, ChevronDown, Clock, Truck, User,
-    Search, Hash, Info, MapPin, Printer, FileJson,
+    Search, Hash, Info, MapPin, Printer, FileJson, FileSpreadsheet,
     ChevronLeft, ChevronRight, Trash2, Square, CheckSquare
 } from 'lucide-react';
 import jsPDF from 'jspdf';
@@ -95,17 +95,20 @@ const ModernPrintView = ({ data, listData, getHSN }) => {
 
             {/* 2. COMPANY DETAILS */}
             <div className="grid grid-cols-2 gap-8 mb-8">
-                <div>
-                    <h2 className="text-xl font-black">KAYAAR EXPORTS PRIVATE LIMITED</h2>
-                    <p className="text-xs leading-tight mt-1">
-                        D.No: 43/5, Railway Feeder Road<br />
-                        K.R. Nagar – 628503<br />
-                        Kovilpatti – Taluk<br />
-                        Tuticorin Dist, Tamilnadu, India
-                    </p>
-                    <p className="text-xs mt-3">Phone: 04632 – 248258, 9443238761</p>
-                    <p className="text-xs">Email: ttnkrgroup@gmail.com</p>
-                    <p className="text-xs font-bold mt-3">GSTIN: 33AAACK4468M1ZA</p>
+                <div className="flex items-start gap-4">
+                    <img src={logoImage} alt="Kayaar Exports Logo" className="w-20 h-20 object-contain rounded-xl border border-slate-200 p-1 bg-white shadow-sm shrink-0" />
+                    <div>
+                        <h2 className="text-xl font-black">KAYAAR EXPORTS PRIVATE LIMITED</h2>
+                        <p className="text-xs leading-tight mt-1">
+                            D.No: 43/5, Railway Feeder Road<br />
+                            K.R. Nagar – 628503<br />
+                            Kovilpatti – Taluk<br />
+                            Tuticorin Dist, Tamilnadu, India
+                        </p>
+                        <p className="text-xs mt-2">Phone: 04632 – 248258, 9443238761</p>
+                        <p className="text-xs">Email: ttnkrgroup@gmail.com</p>
+                        <p className="text-xs font-bold mt-2">GSTIN: 33AAACK4468M1ZA</p>
+                    </div>
                 </div>
 
                 {/* 3. CERTIFICATION + REGISTRATION */}
@@ -282,6 +285,7 @@ const InvoicePreparation = () => {
     const [importInvoices, setImportInvoices] = useState([]);
     const [importDespatches, setImportDespatches] = useState([]);
     const [importStep, setImportStep] = useState(1);
+    const [importGlobalTransportId, setImportGlobalTransportId] = useState('');
     // ==========================================
     // SEARCH FILTER ENGINE
     // ==========================================
@@ -887,6 +891,77 @@ const InvoicePreparation = () => {
         URL.revokeObjectURL(url);
     };
 
+    const exportToExcel = () => {
+        if (!formData) return;
+        const party = listData.parties.find(p => String(p.id) === String(formData.party_id)) || formData.Party || {};
+        const transport = listData.transports.find(t => String(t.id) === String(formData.transport_id)) || formData.Transport || {};
+
+        const wsData = [
+            ["KAYAAR EXPORTS PRIVATE LIMITED"],
+            ["TAX INVOICE"],
+            ["D.No: 43/5, Railway Feeder Road, K.R. Nagar - 628 503, Kovilpatti - Taluk, Tuticorin Dist., Tamilnadu, India"],
+            ["Phone: (04632) - 248258, 9443238761 | Email: ttnkrgroup@gmail.com | GSTIN: 33AAACK4468M1ZA"],
+            [],
+            ["Invoice No", formData.invoice_no || 'DRAFT', "", "Invoice Date", formData.date || ''],
+            ["E-Way Bill No", formData.ebill_no || '', "", "Vehicle No", formData.vehicle_no || ''],
+            ["Party Name", party.account_name || '', "", "Party GSTIN", party.gst_no || ''],
+            ["Delivery At", formData.delivery || '', "", "Transport", transport.account_name || ''],
+            [],
+            ["S.No", "Description of Goods", "HSN Code", "Bags/Packs", "Total Kgs", "From-To", "Rate/Kg", "Assessable Value"],
+            ...(gridRows.map((row, idx) => [
+                idx + 1,
+                row.product_description || (listData.products.find(p => String(p.id) === String(row.product_id))?.product_name || ''),
+                getHSN(row.product_id),
+                num(row.packs),
+                num(row.total_kgs),
+                `${row.from_no || ''} - ${row.to_no || ''}`,
+                num(row.rate),
+                num(row.assessable_value)
+            ])),
+            [],
+            ["", "", "", "", "", "Assessable Value", "", num(formData.total_assessable)],
+            ["", "", "", "", "", "Charity", "", num(formData.total_charity)],
+            ["", "", "", "", "", "Freight Charges", "", num(formData.freight_charges)],
+            ["", "", "", "", "", "Total GST", "", num(formData.total_gst) + num(formData.total_sgst) + num(formData.total_cgst) + num(formData.total_igst)],
+            ["", "", "", "", "", "Round Off", "", num(formData.round_off)],
+            ["", "", "", "", "", "Grand Total", "", num(formData.net_amount)],
+            [],
+            ["Amount Chargeable (in words):", numberToWords(num(formData.net_amount))]
+        ];
+
+        const ws = XLSX.utils.aoa_to_sheet(wsData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Invoice");
+        XLSX.writeFile(wb, `Kayaar_Exports_Invoice_${formData.invoice_no || 'Draft'}.xlsx`);
+    };
+
+    const exportFilteredInvoicesToExcel = () => {
+        if (!filteredInvoices.length) return;
+        const wsData = [
+            ["KAYAAR EXPORTS PRIVATE LIMITED"],
+            ["INVOICE REGISTER / LIST"],
+            ["GSTIN: 33AAACK4468M1ZA | Kovilpatti, Tamil Nadu"],
+            [],
+            ["Inv No", "Date", "Party Name", "Sales Type", "Vehicle No", "Assessable Val", "GST Total", "Grand Total", "Status"],
+            ...filteredInvoices.map(inv => [
+                inv.invoice_no || '',
+                inv.date || '',
+                inv.Party?.account_name || '',
+                inv.sales_type || '',
+                inv.vehicle_no || '',
+                num(inv.total_assessable),
+                num(inv.total_gst) + num(inv.total_sgst) + num(inv.total_cgst) + num(inv.total_igst),
+                num(inv.net_amount),
+                inv.is_approved ? 'Approved' : 'Pending'
+            ])
+        ];
+
+        const ws = XLSX.utils.aoa_to_sheet(wsData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Invoices");
+        XLSX.writeFile(wb, `Kayaar_Exports_Invoices_${new Date().toISOString().split('T')[0]}.xlsx`);
+    };
+
     // ==========================================
     // 2. MATH ENGINE (Strict Logic: H -> A -> Tax -> Deductions)
     // ==========================================
@@ -944,7 +1019,9 @@ const InvoicePreparation = () => {
         const totalBags = rows.reduce((sum, r) => sum + num(r.packs), 0);
         const load = formData.load_id ? listData.loads.find(l => l.id === parseInt(formData.load_id)) : null;
         let freightPerBag = 0;
-        if (load) {
+        if (num(hFreight) > 0) {
+            freightPerBag = totalBags > 0 ? num(hFreight) / totalBags : 0;
+        } else if (load) {
             freightPerBag = num(load.freight_per_bag) > 0
                 ? num(load.freight_per_bag)
                 : (num(load.no_of_bags) > 0 ? num(load.freight) / num(load.no_of_bags) : 0);
@@ -1573,7 +1650,7 @@ const InvoicePreparation = () => {
                             continue;
                         }
                         
-                        if (cleanInvNo.includes('total') || cleanPartyName.includes('total') || cleanPartyName === '607200') {
+                        if (cleanInvNo.includes('total') || cleanPartyName === 'total' || cleanPartyName === 'grand total' || cleanPartyName === 'sub total' || cleanPartyName === '607200') {
                             continue;
                         }
                         dataRows.push(row);
@@ -1658,7 +1735,9 @@ const InvoicePreparation = () => {
                                     product_name: row.product_name,
                                     no_of_bags: 0,
                                     freight: 0,
-                                    transport_id: ''
+                                    transport_id: '',
+                                    vehicle_no: 'TN 34 X 9117',
+                                    lr_date: inv.date
                                 });
                             }
                             const group = despatchMap.get(key);
@@ -1670,6 +1749,7 @@ const InvoicePreparation = () => {
 
                     setImportInvoices(parsedInvoices);
                     setImportDespatches(parsedDespatches);
+                    setImportGlobalTransportId('');
                     setImportStep(1);
                     setImportModalOpen(true);
 
@@ -1690,17 +1770,21 @@ const InvoicePreparation = () => {
     };
 
     const handleConfirmImport = async () => {
-        // Validation: Verify all despatches have a selected Transport
-        const missingTransport = importDespatches.some(d => !d.transport_id);
+        // Validation: Verify a Transport carrier is selected for the entire dataset
+        const finalDespatches = importDespatches.map(d => ({
+            ...d,
+            transport_id: d.transport_id || importGlobalTransportId
+        }));
+        const missingTransport = finalDespatches.some(d => !d.transport_id);
         if (missingTransport) {
-            alert("Please select a Transport Carrier for all dispatch batches before importing.");
+            alert("Please select a Transport Carrier for the entire import before confirming.");
             return;
         }
 
         setImportLoading(true);
         try {
             const payload = {
-                despatches: importDespatches,
+                despatches: finalDespatches,
                 invoices: importInvoices
             };
             const res = await transactionsAPI.invoices.bulkImportSave(payload);
@@ -1759,6 +1843,14 @@ const InvoicePreparation = () => {
                     >
                         <RefreshCw size={16} className={importLoading ? 'animate-spin' : ''} />
                         {importLoading ? 'IMPORTING...' : 'IMPORT EXCEL'}
+                    </button>
+                    <button
+                        onClick={exportFilteredInvoicesToExcel}
+                        disabled={filteredInvoices.length === 0}
+                        className="bg-teal-700 text-white px-6 py-2 rounded-xl font-bold shadow-lg hover:bg-teal-800 transition-all uppercase text-xs flex items-center gap-2 disabled:opacity-50"
+                    >
+                        <FileSpreadsheet size={16} />
+                        EXPORT EXCEL
                     </button>
                     <button onClick={() => { setFormData({ ...emptyInvoice, invoice_no: getNextInvoiceSequence(listData.history, '').toString() }); setGridRows([]); setActiveTab('head'); setIsModalOpen(true); }} className="bg-blue-600 text-white px-8 py-2 rounded-xl font-bold shadow-lg hover:bg-blue-700 transition-all uppercase text-xs flex items-center gap-2"><Plus size={18} /> New Invoice</button>
                 </div>
@@ -2178,6 +2270,14 @@ const InvoicePreparation = () => {
                                     <FileJson size={14} className="text-indigo-100" />
                                     EXPORT JSON
                                 </button>
+                                <button
+                                    onClick={exportToExcel}
+                                    disabled={gridRows.length === 0}
+                                    className="bg-emerald-600 text-white px-6 py-2 text-[11px] font-black rounded flex items-center gap-2 shadow hover:bg-emerald-700 transition-all active:scale-95 disabled:opacity-50"
+                                >
+                                    <FileSpreadsheet size={14} className="text-emerald-100" />
+                                    EXPORT EXCEL
+                                </button>
                             </div>
                             <div className="flex gap-3">
                                 {formData.id && (
@@ -2273,9 +2373,34 @@ const InvoicePreparation = () => {
                         <div className="flex-1 overflow-y-auto p-6 bg-slate-50/50 custom-scrollbar">
                             {importStep === 1 ? (
                                 <div className="space-y-4">
-                                    <div className="bg-blue-50 border border-blue-200 p-4 rounded-2xl text-xs text-blue-800 font-bold leading-relaxed mb-4">
-                                        ℹ️ Invoices have been grouped by Date and Product. Below are the generated dispatch batches. For each batch, please assign a Transport carrier. The freight is automatically calculated by multiplying each bag's rate by the total bags in the group.
+                                    <div className="bg-white p-5 rounded-2xl border-2 border-blue-300 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+                                        <div className="flex items-center gap-3.5">
+                                            <div className="p-3 bg-blue-100 text-blue-700 rounded-xl">
+                                                <Truck className="w-6 h-6" />
+                                            </div>
+                                            <div>
+                                                <div className="text-xs font-black uppercase text-slate-900 tracking-wider">Select Transport Carrier for All Records</div>
+                                                <div className="text-[11px] text-slate-500 font-medium">This carrier will be assigned to all dispatch batches and invoices generated from this file.</div>
+                                            </div>
+                                        </div>
+                                        <div className="w-full md:w-80">
+                                            <select
+                                                value={importGlobalTransportId}
+                                                onChange={(e) => {
+                                                    const tId = e.target.value;
+                                                    setImportGlobalTransportId(tId);
+                                                    setImportDespatches(prev => prev.map(d => ({ ...d, transport_id: tId })));
+                                                }}
+                                                className="w-full p-2.5 border-2 border-blue-400 focus:border-blue-600 rounded-xl outline-none bg-blue-50/50 focus:bg-white font-sans text-xs font-black text-slate-900 shadow-sm cursor-pointer"
+                                            >
+                                                <option value="">-- Choose Transport Carrier --</option>
+                                                {listData.transports.map(t => (
+                                                    <option key={t.id} value={t.id}>{t.transport_name}</option>
+                                                ))}
+                                            </select>
+                                        </div>
                                     </div>
+
                                     <div className="bg-white rounded-2xl border border-slate-300 shadow-sm overflow-hidden">
                                         <table className="w-full text-left text-xs font-mono">
                                             <thead className="bg-slate-900 text-white uppercase text-[10px] tracking-widest font-black">
@@ -2284,34 +2409,32 @@ const InvoicePreparation = () => {
                                                     <th className="p-4">Product</th>
                                                     <th className="p-4 text-center">Bags</th>
                                                     <th className="p-4 text-right">Calculated Freight</th>
-                                                    <th className="p-4 w-72">Select Transport Carrier</th>
+                                                    <th className="p-4 w-72">Assigned Transport Carrier</th>
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-slate-200">
-                                                {importDespatches.map((d, index) => (
-                                                    <tr key={d.key} className="hover:bg-slate-50">
-                                                        <td className="p-4 font-bold">{d.date}</td>
-                                                        <td className="p-4 font-black text-slate-700">{d.product_name}</td>
-                                                        <td className="p-4 text-center font-bold text-blue-600">{d.no_of_bags}</td>
-                                                        <td className="p-4 text-right font-black">₹{d.freight.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                                                        <td className="p-2">
-                                                            <select
-                                                                value={d.transport_id}
-                                                                onChange={(e) => {
-                                                                    const updated = [...importDespatches];
-                                                                    updated[index].transport_id = e.target.value;
-                                                                    setImportDespatches(updated);
-                                                                }}
-                                                                className="w-full p-2 border border-slate-300 rounded-lg outline-none bg-white font-sans text-xs font-bold"
-                                                            >
-                                                                <option value="">-- Choose Carrier --</option>
-                                                                {listData.transports.map(t => (
-                                                                    <option key={t.id} value={t.id}>{t.transport_name}</option>
-                                                                ))}
-                                                            </select>
-                                                        </td>
-                                                    </tr>
-                                                ))}
+                                                {importDespatches.map((d, index) => {
+                                                    const selectedTransport = listData.transports.find(t => String(t.id) === String(d.transport_id || importGlobalTransportId));
+                                                    return (
+                                                        <tr key={d.key} className="hover:bg-slate-50">
+                                                            <td className="p-4 font-bold">{d.date}</td>
+                                                            <td className="p-4 font-black text-slate-700">{d.product_name}</td>
+                                                            <td className="p-4 text-center font-bold text-blue-600">{d.no_of_bags}</td>
+                                                            <td className="p-4 text-right font-black">₹{d.freight.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                                                            <td className="p-4">
+                                                                {selectedTransport ? (
+                                                                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-bold border border-emerald-200">
+                                                                        <Truck size={13} /> {selectedTransport.transport_name}
+                                                                    </span>
+                                                                ) : (
+                                                                    <span className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-amber-50 text-amber-700 text-xs font-bold border border-amber-200">
+                                                                        ⚠️ Select above
+                                                                    </span>
+                                                                )}
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
                                             </tbody>
                                         </table>
                                     </div>

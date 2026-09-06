@@ -498,6 +498,92 @@ const renumberDepotInvoices = async (transaction) => {
     }
 };
 
+const syncRG1ProductionForDateAndProduct = async (date, productId, transaction) => {
+    if (!date || !productId) return;
+
+    try {
+        const [invRows] = await sequelize.query(`
+            SELECT COALESCE(SUM(d.total_kgs), 0) as total_invoice_kgs
+            FROM tbl_InvoiceDetails d
+            JOIN tbl_InvoiceHeaders h ON d.invoice_id = h.id
+            WHERE h.date = :date AND d.product_id = :productId
+        `, { replacements: { date, productId }, transaction });
+
+        const [directRows] = await sequelize.query(`
+            SELECT COALESCE(SUM(d.qty * d.bag_wt), 0) as total_direct_invoice_kgs
+            FROM tbl_DirectInvoiceDetails d
+            JOIN tbl_DirectInvoiceHeaders h ON d.direct_invoice_id = h.id
+            WHERE h.date = :date AND d.product_id = :productId
+            AND h.order_no NOT IN (
+                SELECT DISTINCT invd.order_no 
+                FROM tbl_InvoiceDetails invd 
+                JOIN tbl_InvoiceHeaders invh ON invd.invoice_id = invh.id 
+                WHERE invh.date = :date AND invd.order_type = 'WITHOUT_ORDER' AND invd.order_no IS NOT NULL
+            )
+        `, { replacements: { date, productId }, transaction });
+
+        const totalInvoiceKgs = num(invRows[0]?.total_invoice_kgs) + num(directRows[0]?.total_direct_invoice_kgs);
+
+        const product = await Product.findByPk(productId, { transaction });
+        if (!product) return;
+
+        const prevRecord = await RG1Production.findOne({
+            where: {
+                product_id: productId,
+                date: { [Op.lt]: date }
+            },
+            order: [['date', 'DESC'], ['id', 'DESC']],
+            transaction
+        });
+
+        const prevClosingKgs = prevRecord ? num(prevRecord.stock_kgs) : num(product.mill_stock);
+
+        let rg1 = await RG1Production.findOne({
+            where: { date, product_id: productId },
+            transaction
+        });
+
+        const defaultPacking = await PackingType.findOne({ transaction });
+        const packingTypeId = defaultPacking ? defaultPacking.id : 1;
+        const weightPerBag = num(product.weight_per_bag) || 55.0;
+
+        if (rg1) {
+            const prodKgs = num(rg1.production_kgs);
+            const stockKgs = prevClosingKgs + prodKgs - totalInvoiceKgs;
+            const stockBags = weightPerBag > 0 ? Math.floor(stockKgs / weightPerBag) : 0;
+            const stockLooseKgs = weightPerBag > 0 ? (stockKgs - (stockBags * weightPerBag)) : 0;
+
+            await rg1.update({
+                prev_closing_kgs: prevClosingKgs,
+                invoice_kgs: totalInvoiceKgs,
+                stock_kgs: stockKgs,
+                stock_bags: stockBags,
+                stock_loose_kgs: stockLooseKgs
+            }, { transaction });
+        } else {
+            const prodKgs = 0;
+            const stockKgs = prevClosingKgs + prodKgs - totalInvoiceKgs;
+            const stockBags = weightPerBag > 0 ? Math.floor(stockKgs / weightPerBag) : 0;
+            const stockLooseKgs = weightPerBag > 0 ? (stockKgs - (stockBags * weightPerBag)) : 0;
+
+            await RG1Production.create({
+                date,
+                product_id: productId,
+                packing_type_id: packingTypeId,
+                weight_per_bag: weightPerBag,
+                prev_closing_kgs: prevClosingKgs,
+                production_kgs: prodKgs,
+                invoice_kgs: totalInvoiceKgs,
+                stock_kgs: stockKgs,
+                stock_bags: stockBags,
+                stock_loose_kgs: stockLooseKgs
+            }, { transaction });
+        }
+    } catch (err) {
+        console.error("Error syncing RG1 Production:", err);
+    }
+};
+
 // SECOND: Overwrite the .create method with the dynamic formula logic
 invoiceCtrl.create = async (req, res) => {
     const t = await sequelize.transaction();
@@ -540,6 +626,7 @@ invoiceCtrl.create = async (req, res) => {
         for (const row of processedRows) {
             await InvoiceDetail.create({ ...row, invoice_id: header.id }, { transaction: t });
             await Product.decrement('mill_stock', { by: row.total_kgs, where: { id: row.product_id }, transaction: t });
+            await syncRG1ProductionForDateAndProduct(header.date, row.product_id, t);
         }
 
         // --- NEW DESPATCH REDUCTION ---
@@ -646,6 +733,10 @@ invoiceCtrl.update = async (req, res) => {
                 where: { id: row.product_id },
                 transaction: t
             });
+            await syncRG1ProductionForDateAndProduct(oldInvoice.date, row.product_id, t);
+            if (headerData.date && headerData.date !== oldInvoice.date) {
+                await syncRG1ProductionForDateAndProduct(headerData.date, row.product_id, t);
+            }
         }
 
         // --- NEW DESPATCH REDUCTION/ADJUSTMENT ---
@@ -740,6 +831,11 @@ invoiceCtrl.delete = async (req, res) => {
         }
         await InvoiceDetail.destroy({ where: { invoice_id: id }, transaction: t });
         await InvoiceHeader.destroy({ where: { id }, transaction: t });
+        for (const item of details) {
+            if (invoice) {
+                await syncRG1ProductionForDateAndProduct(invoice.date, item.product_id, t);
+            }
+        }
         await renumberInvoices(t);
         await t.commit();
         res.json({ success: true });
@@ -783,6 +879,9 @@ invoiceCtrl.bulkDelete = async (req, res) => {
 
             await InvoiceDetail.destroy({ where: { invoice_id: id }, transaction: t });
             await InvoiceHeader.destroy({ where: { id }, transaction: t });
+            for (const item of details) {
+                await syncRG1ProductionForDateAndProduct(invoice.date, item.product_id, t);
+            }
         }
 
         await t.commit();
@@ -1420,35 +1519,56 @@ depotSalesCtrl.create = async (req, res) => {
     try {
         const { Details, ...headerData } = req.body;
         headerData.invoice_no = `TEMP-CREATE-${Date.now()}-${Math.random()}`;
-        const isTransfer = headerData.sales_type === 'DEPOT TRANSFER';
 
         // 1. Create Header
         const header = await DepotSalesHeader.create({
             ...sanitizeData(headerData),
         }, { transaction: t });
 
-        // 2. Insert Details
+        // 2. Generate Sales Without Order (tbl_DirectInvoiceHeaders)
+        let nextDirectOrderNo = 1;
+        const lastDirectOrder = await DirectInvoiceHeader.findOne({
+            order: [[sequelize.literal('CAST(order_no AS UNSIGNED)'), 'DESC']],
+            transaction: t
+        });
+        if (lastDirectOrder && !isNaN(parseInt(lastDirectOrder.order_no))) {
+            nextDirectOrderNo = parseInt(lastDirectOrder.order_no) + 1;
+        }
+        const assignedOrderNo = String(nextDirectOrderNo);
+
+        const directHeader = await DirectInvoiceHeader.create({
+            order_no: assignedOrderNo,
+            date: headerData.date || new Date(),
+            party_id: headerData.party_id,
+            place: headerData.place || '',
+            status: 'OPEN',
+            is_cancelled: false,
+            final_invoice_value: headerData.final_invoice_value || 0,
+            depot_id: headerData.depot_id
+        }, { transaction: t });
+
+        // 3. Insert Details
         if (Details && Details.length > 0) {
             const detailRows = Details.map(item => ({
                 ...sanitizeData(item),
+                order_no: item.order_no || assignedOrderNo,
+                order_type: 'WITHOUT_ORDER',
                 depot_sales_id: header.id
             }));
 
             await DepotSalesDetail.bulkCreate(detailRows, { transaction: t });
 
-            // 3. Handle Depot Transfer Logic
-            if (isTransfer) {
-                for (const row of detailRows) {
-                    await DepotReceived.create({
-                        date: headerData.date || new Date(),
-                        depot_id: headerData.party_id, // The receiving depot
-                        product_id: row.product_id,
-                        invoice_no: header.invoice_no,
-                        total_kgs: row.total_kgs,
-                        type: 'INWARD',
-                        remarks: `TRANSFERRED FROM DEPOT ID: ${headerData.depot_id}`
-                    }, { transaction: t });
-                }
+            for (const row of detailRows) {
+                await DirectInvoiceDetail.create({
+                    direct_invoice_id: directHeader.id,
+                    product_id: row.product_id,
+                    qty: row.packs,
+                    bag_wt: row.avg_content,
+                    total_kgs: row.total_kgs,
+                    rate_cr: row.rate,
+                    packing_type: row.packing_type || 'HDPE BAGS',
+                    packs: row.packs
+                }, { transaction: t });
             }
         }
 
@@ -1585,13 +1705,28 @@ const bulkImportSave = async (req, res) => {
     try {
         const { despatches = [], invoices = [] } = req.body;
 
+        // Determine starting load_no for Despatch Entries (strictly sequential starting from 1)
+        let nextLoadNo = 1;
+        const lastDespatch = await DespatchEntry.findOne({
+            order: [[sequelize.literal('CAST(load_no AS UNSIGNED)'), 'DESC']],
+            transaction: t
+        });
+        if (lastDespatch && !isNaN(parseInt(lastDespatch.load_no))) {
+            nextLoadNo = parseInt(lastDespatch.load_no) + 1;
+        }
+
         const despatchMap = new Map();
         
         for (const d of despatches) {
+            const assignedLoadNo = String(nextLoadNo++);
             const despatchRecord = await DespatchEntry.create({
-                load_no: `LD-APR-${d.date.replace(/-/g, '')}-${d.product_name.replace(/\s+/g, '')}-${Math.floor(Math.random() * 1000)}`,
+                load_no: assignedLoadNo,
                 load_date: d.date,
                 transport_id: d.transport_id || null,
+                vehicle_no: d.vehicle_no || 'TN 34 X 9117',
+                lr_no: d.lr_no || '',
+                lr_date: d.date,
+                delivery: d.delivery || '',
                 no_of_bags: d.no_of_bags,
                 freight: d.freight,
                 original_no_of_bags: d.no_of_bags,
@@ -1605,6 +1740,7 @@ const bulkImportSave = async (req, res) => {
         if (!invoiceType) {
             invoiceType = await InvoiceType.create({
                 name: 'GST 5%',
+                sales_type: 'GST SALES',
                 gst_percentage: 5,
                 sgst_percentage: 2.5,
                 cgst_percentage: 2.5,
@@ -1614,50 +1750,48 @@ const bulkImportSave = async (req, res) => {
             }, { transaction: t });
         }
 
-        // Gather all invoice numbers to overwrite and clean them up first before starting the import loop
-        const invoiceNumbersToDelete = new Set();
-        for (const inv of invoices) {
-            let finalInvoiceNo = inv.excelInvNo;
-            const partyNameUpper = String(inv.partyName || '').toUpperCase().trim();
-            if (partyNameUpper === 'DEPOT - MUMBAI') {
-                if (!finalInvoiceNo.startsWith('DM-')) finalInvoiceNo = `DM-${finalInvoiceNo}`;
-            } else if (partyNameUpper.includes('KAYAAR EXPORTS') || partyNameUpper.includes('KAYAAR EXPORTS PRIVATE LIMITED')) {
-                if (!finalInvoiceNo.startsWith('DI-')) finalInvoiceNo = `DI-${finalInvoiceNo}`;
-            }
-            invoiceNumbersToDelete.add(finalInvoiceNo);
+        // Determine starting order_no for Sales With Order (tbl_OrderHeaders) starting from 1
+        let nextOrderNo = 1;
+        const lastOrder = await OrderHeader.findOne({
+            order: [[sequelize.literal('CAST(order_no AS UNSIGNED)'), 'DESC']],
+            transaction: t
+        });
+        if (lastOrder && !isNaN(parseInt(lastOrder.order_no))) {
+            nextOrderNo = parseInt(lastOrder.order_no) + 1;
         }
 
-        if (invoiceNumbersToDelete.size > 0) {
-            const existingInvoices = await InvoiceHeader.findAll({
-                where: { invoice_no: Array.from(invoiceNumbersToDelete) },
-                transaction: t
-            });
-            for (const existingInvoice of existingInvoices) {
-                const existingDetails = await InvoiceDetail.findAll({ where: { invoice_id: existingInvoice.id }, transaction: t });
-                for (const item of existingDetails) {
-                    await Product.increment('mill_stock', { by: item.total_kgs, where: { id: item.product_id }, transaction: t });
-                }
-                await DepotReceived.destroy({ where: { invoice_no: existingInvoice.invoice_no }, transaction: t });
-                await InvoiceDetail.destroy({ where: { invoice_id: existingInvoice.id }, transaction: t });
-                await InvoiceHeader.destroy({ where: { id: existingInvoice.id }, transaction: t });
-            }
+        // Determine starting order_no for Sales Without Order (tbl_DirectInvoiceHeaders) starting from 1
+        let nextDirectOrderNo = 1;
+        const lastDirectOrder = await DirectInvoiceHeader.findOne({
+            order: [[sequelize.literal('CAST(order_no AS UNSIGNED)'), 'DESC']],
+            transaction: t
+        });
+        if (lastDirectOrder && !isNaN(parseInt(lastDirectOrder.order_no))) {
+            nextDirectOrderNo = parseInt(lastDirectOrder.order_no) + 1;
         }
 
         let importedCount = 0;
-        let skippedCount = 0;
+        const affectedRg1Keys = new Set();
 
         for (const inv of invoices) {
+            const partyName = String(inv.partyName || '').trim();
+            const partyNameUpper = partyName.toUpperCase();
+            const isDepotMumbai = partyNameUpper === 'DEPOT - MUMBAI' || partyNameUpper.startsWith('DEPOT');
+            const isKayaarExports = partyNameUpper.includes('KAYAAR EXPORT');
+            const isDirectSales = isDepotMumbai || isKayaarExports;
+            const salesType = isDirectSales ? 'DIRECT SALES' : 'GST SALES';
+
             let account = await Account.findOne({
-                where: { account_name: inv.partyName },
+                where: { account_name: partyName },
                 transaction: t
             });
             if (!account) {
                 account = await Account.create({
-                    account_name: inv.partyName,
+                    account_name: partyName,
                     account_group: 'DEBTORS - YARN SALES',
                     address: inv.address,
                     place: inv.place,
-                    gst_no: inv.cst_gst.split(',')[0] || ''
+                    gst_no: (inv.cst_gst ? inv.cst_gst.split(',')[0] : '') || ''
                 }, { transaction: t });
             }
 
@@ -1667,9 +1801,12 @@ const bulkImportSave = async (req, res) => {
                 const prodName = String(r.product_name).trim();
                 let product = null;
                 if (prodName.includes('68')) {
-                    product = await Product.findByPk(1, { transaction: t });
+                    product = await Product.findOne({ where: { product_name: { [Op.like]: '%68%' } }, transaction: t });
                 } else if (prodName.includes('61')) {
-                    product = await Product.findByPk(5, { transaction: t });
+                    product = await Product.findOne({ where: { product_name: { [Op.like]: '%61%' } }, transaction: t });
+                }
+                if (!product && prodName) {
+                    product = await Product.findOne({ where: { product_name: prodName }, transaction: t });
                 }
                 if (!product) {
                     product = await Product.findOne({ transaction: t });
@@ -1693,37 +1830,93 @@ const bulkImportSave = async (req, res) => {
             const matchedDespatch = despatchMap.get(matchKey);
             const loadId = matchedDespatch ? matchedDespatch.id : null;
 
-            const totalKgs = detailsPayload.reduce((sum, d) => sum + d.total_kgs, 0);
-            const netAmount = Math.ceil(inv.rows.reduce((sum, r) => sum + num(r.value), 0));
-
             const { processedRows, totals } = calculateInvoiceBreakdown({
                 Details: detailsPayload,
                 config: invoiceType,
                 freight_charges: inv.rows.reduce((sum, r) => sum + num(r.freight), 0),
-                sales_type: inv.partyName === 'DEPOT - MUMBAI' || inv.partyName.includes('KAYAAR EXPORTS') ? 'GST SALES' : 'CST SALES'
+                sales_type: salesType
             });
 
             // Handle DI and DM prefixes according to business logic
-            let finalInvoiceNo = inv.excelInvNo;
-            const partyNameUpper = String(inv.partyName || '').toUpperCase().trim();
-            if (partyNameUpper === 'DEPOT - MUMBAI') {
-                if (!finalInvoiceNo.startsWith('DM-')) {
-                    finalInvoiceNo = `DM-${finalInvoiceNo}`;
+            let rawInvNo = String(inv.excelInvNo || '').trim();
+            let finalInvoiceNo = rawInvNo;
+            if (isDepotMumbai) {
+                const stripped = rawInvNo.replace(/^DM-?/i, '');
+                finalInvoiceNo = `DM-${stripped}`;
+            } else if (isKayaarExports) {
+                const stripped = rawInvNo.replace(/^DI-?/i, '');
+                finalInvoiceNo = `DI-${stripped}`;
+            }
+
+            // Create Sales Without Order vs Sales With Order
+            let assignedOrderNo = '';
+            let assignedOrderType = '';
+
+            if (isDirectSales) {
+                assignedOrderNo = String(nextDirectOrderNo++);
+                assignedOrderType = 'WITHOUT_ORDER';
+
+                const directHeader = await DirectInvoiceHeader.create({
+                    order_no: assignedOrderNo,
+                    date: inv.date,
+                    party_id: account.id,
+                    place: inv.place || '',
+                    vehicle_no: 'TN 34 X 9117',
+                    status: 'OPEN',
+                    is_cancelled: false,
+                    final_invoice_value: Math.ceil(totals.net)
+                }, { transaction: t });
+
+                for (const r of detailsPayload) {
+                    await DirectInvoiceDetail.create({
+                        direct_invoice_id: directHeader.id,
+                        product_id: r.product_id,
+                        qty: r.packs,
+                        bag_wt: r.avg_content,
+                        total_kgs: r.total_kgs,
+                        rate_cr: r.rate,
+                        packing_type: 'HDPE BAGS',
+                        packs: r.packs
+                    }, { transaction: t });
                 }
-            } else if (partyNameUpper.includes('KAYAAR EXPORTS') || partyNameUpper.includes('KAYAAR EXPORTS PRIVATE LIMITED')) {
-                if (!finalInvoiceNo.startsWith('DI-')) {
-                    finalInvoiceNo = `DI-${finalInvoiceNo}`;
+            } else {
+                assignedOrderNo = String(nextOrderNo++);
+                assignedOrderType = 'WITH_ORDER';
+
+                const orderHeader = await OrderHeader.create({
+                    order_no: assignedOrderNo,
+                    date: inv.date,
+                    party_id: account.id,
+                    place: inv.place || '',
+                    status: 'OPEN',
+                    is_cancelled: false
+                }, { transaction: t });
+
+                for (const r of detailsPayload) {
+                    await OrderDetail.create({
+                        order_id: orderHeader.id,
+                        product_id: r.product_id,
+                        qty: r.packs,
+                        bag_wt: r.avg_content,
+                        rate_cr: r.rate,
+                        rate_per: 0,
+                        packs: r.packs,
+                        packing_type: 'HDPE BAGS'
+                    }, { transaction: t });
                 }
             }
 
+            // Create Invoice Header
             const header = await InvoiceHeader.create({
                 invoice_no: finalInvoiceNo,
                 date: inv.date,
-                sales_type: inv.partyName === 'DEPOT - MUMBAI' || inv.partyName.includes('KAYAAR EXPORTS') ? 'GST SALES' : 'CST SALES',
+                sales_type: salesType,
                 invoice_type_id: invoiceType.id,
                 party_id: account.id,
                 load_id: loadId,
                 address: inv.address,
+                vehicle_no: 'TN 34 X 9117',
+                delivery: inv.place || '',
                 total_assessable: totals.assess,
                 total_charity: totals.charity,
                 freight_charges: totals.freight,
@@ -1745,25 +1938,25 @@ const bulkImportSave = async (req, res) => {
             }, { transaction: t });
 
             for (const row of processedRows) {
-                await InvoiceDetail.create({ ...row, invoice_id: header.id }, { transaction: t });
+                await InvoiceDetail.create({
+                    ...row,
+                    order_no: assignedOrderNo,
+                    order_type: assignedOrderType,
+                    invoice_id: header.id
+                }, { transaction: t });
                 await Product.decrement('mill_stock', { by: row.total_kgs, where: { id: row.product_id }, transaction: t });
-            }
-
-            if (inv.partyName === 'DEPOT - MUMBAI') {
-                for (const row of processedRows) {
-                    await DepotReceived.create({
-                        date: inv.date,
-                        depot_id: account.id,
-                        invoice_no: header.invoice_no,
-                        product_id: row.product_id,
-                        packs: row.packs,
-                        total_kgs: row.total_kgs,
-                        rate: row.rate
-                    }, { transaction: t });
-                }
+                affectedRg1Keys.add(`${inv.date}__${row.product_id}`);
             }
 
             importedCount++;
+        }
+
+        for (const key of affectedRg1Keys) {
+            const [date, productIdStr] = key.split('__');
+            const productId = parseInt(productIdStr);
+            if (date && productId) {
+                await syncRG1ProductionForDateAndProduct(date, productId, t);
+            }
         }
 
         await t.commit();
@@ -1819,6 +2012,16 @@ const bulkImportDepotSales = async (req, res) => {
             }, { transaction: t });
         }
 
+        // Determine starting order_no for Sales Without Order (tbl_DirectInvoiceHeaders) starting from 1
+        let nextDirectOrderNo = 1;
+        const lastDirectOrder = await DirectInvoiceHeader.findOne({
+            order: [[sequelize.literal('CAST(order_no AS UNSIGNED)'), 'DESC']],
+            transaction: t
+        });
+        if (lastDirectOrder && !isNaN(parseInt(lastDirectOrder.order_no))) {
+            nextDirectOrderNo = parseInt(lastDirectOrder.order_no) + 1;
+        }
+
         let importedCount = 0;
 
         for (const inv of invoices) {
@@ -1871,14 +2074,6 @@ const bulkImportDepotSales = async (req, res) => {
                 const rate = num(r.rate) || (totalKgs > 0 ? assessableValue / totalKgs : 0);
 
                 const gstPct = num(invoiceType.gst_percentage || 5);
-                const sgstPct = num(invoiceType.sgst_percentage || 2.5);
-                const cgstPct = num(invoiceType.cgst_percentage || 2.5);
-                const igstPct = num(invoiceType.igst_percentage || 5);
-
-                const isIgst = partyAccount.state && depotAccount.state && partyAccount.state.toLowerCase() !== depotAccount.state.toLowerCase();
-                const sgstAmt = isIgst ? 0 : gstAmt / 2;
-                const cgstAmt = isIgst ? 0 : gstAmt / 2;
-                const igstAmt = isIgst ? gstAmt : 0;
 
                 detailsRows.push({
                     product_id: product ? product.id : null,
@@ -1892,13 +2087,13 @@ const bulkImportDepotSales = async (req, res) => {
                     charity_amt: charityAmt,
                     sub_total: subTotal,
                     gst_amt: gstAmt,
-                    sgst_amt: sgstAmt,
-                    cgst_amt: cgstAmt,
-                    igst_amt: igstAmt,
+                    sgst_amt: 0,
+                    cgst_amt: 0,
+                    igst_amt: 0,
                     gst_per: gstPct,
-                    sgst_per: sgstPct,
-                    cgst_per: cgstPct,
-                    igst_per: igstPct,
+                    sgst_per: 0,
+                    cgst_per: 0,
+                    igst_per: 0,
                     final_value: finalValue
                 });
             }
@@ -1906,20 +2101,44 @@ const bulkImportDepotSales = async (req, res) => {
             const totalAssessable = detailsRows.reduce((sum, d) => sum + num(d.assessable_value), 0);
             const totalCharity = detailsRows.reduce((sum, d) => sum + num(d.charity_amt), 0);
             const totalGst = detailsRows.reduce((sum, d) => sum + num(d.gst_amt), 0);
-            const totalSgst = detailsRows.reduce((sum, d) => sum + num(d.sgst_amt), 0);
-            const totalCgst = detailsRows.reduce((sum, d) => sum + num(d.cgst_amt), 0);
-            const totalIgst = detailsRows.reduce((sum, d) => sum + num(d.igst_amt), 0);
+            const totalSgst = 0;
+            const totalCgst = 0;
+            const totalIgst = 0;
             const subTotal = detailsRows.reduce((sum, d) => sum + num(d.sub_total), 0);
             const rawFinal = detailsRows.reduce((sum, d) => sum + num(d.final_value), 0);
             const finalInvoiceValue = Math.round(rawFinal);
             const roundOff = (finalInvoiceValue - rawFinal).toFixed(2);
 
-            const isTransfer = partyName.toUpperCase() === 'DEPOT - MUMBAI' || partyName.toUpperCase().includes('DEPOT TRANSFER');
+            // Generate corresponding Sales Without Order (tbl_DirectInvoiceHeaders & tbl_DirectInvoiceDetails)
+            const assignedOrderNo = String(nextDirectOrderNo++);
+            const directHeader = await DirectInvoiceHeader.create({
+                order_no: assignedOrderNo,
+                date: inv.date || new Date(),
+                party_id: partyAccount.id,
+                place: inv.place || '',
+                status: 'OPEN',
+                is_cancelled: false,
+                final_invoice_value: finalInvoiceValue,
+                depot_id: depot_id
+            }, { transaction: t });
+
+            for (const d of detailsRows) {
+                await DirectInvoiceDetail.create({
+                    direct_invoice_id: directHeader.id,
+                    product_id: d.product_id,
+                    qty: d.packs,
+                    bag_wt: d.avg_content,
+                    total_kgs: d.total_kgs,
+                    rate_cr: d.rate,
+                    packing_type: 'HDPE BAGS',
+                    packs: d.packs
+                }, { transaction: t });
+            }
 
             const header = await DepotSalesHeader.create({
                 invoice_no: `TEMP-IMPORT-${Date.now()}-${Math.random()}`,
                 date: inv.date,
-                sales_type: isTransfer ? 'DEPOT TRANSFER' : 'DEPOT SALES',
+                sales_type: 'DEPOT SALES',
                 invoice_type_id: invoiceType.id,
                 invoice_type: invoiceType.type_name || invoiceType.name || 'DEPOT SALES',
                 depot_id: depot_id,
@@ -1941,22 +2160,10 @@ const bulkImportDepotSales = async (req, res) => {
             for (const d of detailsRows) {
                 await DepotSalesDetail.create({
                     ...d,
+                    order_no: assignedOrderNo,
+                    order_type: 'WITHOUT_ORDER',
                     depot_sales_id: header.id
                 }, { transaction: t });
-            }
-
-            if (isTransfer) {
-                for (const d of detailsRows) {
-                    await DepotReceived.create({
-                        date: inv.date || new Date(),
-                        depot_id: partyAccount.id,
-                        product_id: d.product_id,
-                        invoice_no: header.invoice_no,
-                        total_kgs: d.total_kgs,
-                        type: 'INWARD',
-                        remarks: `TRANSFERRED FROM DEPOT ID: ${depot_id}`
-                    }, { transaction: t });
-                }
             }
 
             importedCount++;

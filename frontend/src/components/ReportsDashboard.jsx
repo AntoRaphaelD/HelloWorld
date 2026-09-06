@@ -2,13 +2,26 @@ import React, { useState, useMemo } from 'react';
 import {
   FileText, Printer, Download, Search, ClipboardCheck,
   Zap, Factory, Truck, ShoppingBag, Landmark, Box, Loader2, AlertCircle,
-  FileDown, FileJson
+  FileDown, FileJson, FileSpreadsheet
 } from 'lucide-react';
 import { reportsAPI } from '../service/api';
+import * as XLSX from 'xlsx';
+import logoImage from '../assets/logo.jpeg';
 
 // PDF Generation Libraries
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+
+const imageUrlToDataUrl = async (url) => {
+  const response = await fetch(url);
+  const blob = await response.blob();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+};
 
 const ReportsDashboard = () => {
   const [selectedReport, setSelectedReport] = useState(null);
@@ -142,26 +155,67 @@ const ReportsDashboard = () => {
 
   // ================= EXPORT LOGIC =================
 
-  // 1. PDF Export
-  const exportToPDF = () => {
+  // 1. Excel Export (.xlsx)
+  const exportToExcel = () => {
+    if (!selectedReport || reportData.length === 0) return;
+    const config = REPORT_CONFIGS[selectedReport.id];
+
+    const wsData = [
+      ["KAYAAR EXPORTS PRIVATE LIMITED"],
+      [`${config.title} (${dateRange.from} to ${dateRange.to})`],
+      ["GSTIN: 33AAACK4468M1ZA | Kovilpatti, Tamil Nadu"],
+      [],
+      config.headers,
+      ...reportData.map(row => config.renderRow(row))
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Report");
+    XLSX.writeFile(wb, `Kayaar_Exports_${selectedReport.id}_report_${dateRange.from}_to_${dateRange.to}.xlsx`);
+  };
+
+  // 2. PDF Export
+  const exportToPDF = async () => {
     if (!selectedReport || reportData.length === 0) return;
     const doc = new jsPDF('landscape');
     const config = REPORT_CONFIGS[selectedReport.id];
-    doc.setFontSize(20); doc.text(config.title, 14, 22);
-    doc.setFontSize(10); doc.text(`Period: ${dateRange.from} to ${dateRange.to}`, 14, 30);
+
+    let logoDataUrl = '';
+    try {
+      logoDataUrl = await imageUrlToDataUrl(logoImage);
+    } catch (e) {
+      console.warn("Logo load error:", e);
+    }
+
+    if (logoDataUrl) {
+      doc.addImage(logoDataUrl, 'JPEG', 14, 10, 18, 18);
+    }
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(16);
+    doc.text("KAYAAR EXPORTS PRIVATE LIMITED", logoDataUrl ? 36 : 14, 17);
+
+    doc.setFontSize(10);
+    doc.setTextColor(80, 80, 80);
+    doc.text(config.title, logoDataUrl ? 36 : 14, 24);
+
+    doc.setFontSize(8.5);
+    doc.text(`Period: ${dateRange.from} to ${dateRange.to}`, doc.internal.pageSize.getWidth() - 14, 24, { align: 'right' });
+
     const tableRows = reportData.map(row => config.renderRow(row));
     autoTable(doc, {
-      startY: 40,
+      startY: 32,
       head: [config.headers],
       body: tableRows,
       theme: 'grid',
-      headStyles: { fillColor: [15, 23, 42] },
+      headStyles: { fillColor: [15, 23, 42], fontSize: 9, fontStyle: 'bold' },
       styles: { fontSize: 8 }
     });
-    doc.save(`${selectedReport.id}_report.pdf`);
+    doc.save(`Kayaar_Exports_${selectedReport.id}_report.pdf`);
   };
 
-  // 2. JSON Export
+  // 3. JSON Export
   const exportToJSON = () => {
     if (!reportData.length) return;
 
@@ -173,7 +227,7 @@ const ReportsDashboard = () => {
     // Create temporary link and click it
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${selectedReport.id}_data_${dateRange.from}.json`;
+    link.download = `Kayaar_Exports_${selectedReport.id}_data_${dateRange.from}.json`;
     document.body.appendChild(link);
     link.click();
 
@@ -187,27 +241,40 @@ const ReportsDashboard = () => {
     , [selectedReport]);
 
   return (
-    <div className="p-8 max-w-[1600px] mx-auto min-h-screen bg-slate-50/50">
-      <div className="mb-8 flex justify-between items-end">
-        <div>
-          <h2 className="text-3xl font-black text-slate-900 uppercase tracking-tighter">
-            Intelligence <span className="text-blue-600">Analytics</span>
-          </h2>
-          <p className="text-slate-400 font-bold uppercase text-[10px] tracking-[0.4em]">Report Engine v3.1</p>
+    <div className="p-8 max-w-[1600px] mx-auto min-h-screen bg-slate-50/50 font-sans">
+      {/* Branding & Analytics Header */}
+      <div className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+        <div className="flex items-center gap-4">
+          <img src={logoImage} alt="Kayaar Exports Logo" className="w-14 h-14 object-contain rounded-2xl border border-slate-200 p-1.5 bg-white shadow-sm" />
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-black uppercase text-blue-600 tracking-wider">KAYAAR EXPORTS PRIVATE LIMITED</span>
+            </div>
+            <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">
+              Intelligence <span className="text-blue-600">Analytics</span>
+            </h2>
+            <p className="text-slate-400 font-bold uppercase text-[9px] tracking-[0.2em]">GSTIN: 33AAACK4468M1ZA | Kovilpatti, Tamil Nadu</p>
+          </div>
         </div>
 
         {/* Action Buttons */}
         {reportData.length > 0 && (
-          <div className="flex gap-3">
+          <div className="flex gap-2.5 flex-wrap items-center">
+            <button
+              onClick={exportToExcel}
+              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-md shadow-emerald-200 active:scale-95"
+            >
+              <FileSpreadsheet size={16} /> Export Excel
+            </button>
             <button
               onClick={exportToJSON}
-              className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg shadow-amber-200"
+              className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-md shadow-amber-200 active:scale-95"
             >
               <FileJson size={16} /> Export JSON
             </button>
             <button
               onClick={exportToPDF}
-              className="flex items-center gap-2 bg-rose-600 hover:bg-rose-700 text-white px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg shadow-rose-200"
+              className="flex items-center gap-2 bg-rose-600 hover:bg-rose-700 text-white px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-md shadow-rose-200 active:scale-95"
             >
               <FileDown size={16} /> Export PDF
             </button>

@@ -193,23 +193,13 @@ const DepotSalesInvoice = () => {
         });
     }, [listData.types, formData.sales_type]);
     useEffect(() => {
-
-        if (!formData.invoice_type_id) return;
+        if (!formData.invoice_type_id || formData.id) return;
 
         setGridRows(prev =>
             runCalculations(prev, formData.invoice_type_id, formData)
         );
-
     }, [formData.invoice_type_id]);
-    useEffect(() => {
 
-        if (gridRows.length === 0) return;
-        // This effect might be redundant if the one above handles it.
-        setGridRows(prev =>
-            runCalculations(prev, formData.invoice_type_id)
-        );
-
-    }, []);
     // ==========================================
     // 2. MATH ENGINE - FREIGHT NOW SYNCED FROM DETAILS
     // ==========================================
@@ -283,9 +273,9 @@ const DepotSalesInvoice = () => {
                 total_kgs: totalKgs,
                 assessable_value: accessibleValue, charity_amt: charity,
                 gst_amt: gstAmount,
-                sgst_amt: sgstPer > 0 ? gstAmount / 2 : 0,
-                cgst_amt: cgstPer > 0 ? gstAmount / 2 : 0,
-                igst_amt: igstPer > 0 ? gstAmount : 0,
+                sgst_amt: 0,
+                cgst_amt: 0,
+                igst_amt: 0,
                 vat_amt: vat, cenvat_amt: cenvat, duty_amt: duty, cess_amt: cess,
                 hr_sec_cess_amt: hcess, tcs_amt: tcs,
                 discount_amt: discAmt, sub_total: basis, final_value: rowTotal
@@ -303,10 +293,10 @@ const DepotSalesInvoice = () => {
             total_cenvat: money(hTotals.cenvat),
             total_duty: money(hTotals.duty), total_cess: money(hTotals.cess),
             total_hr_sec_cess: money(hTotals.hcess),
-            total_gst: igstPer > 0 ? 0 : money(hTotals.gst),
-            total_sgst: sgstPer > 0 ? money(hTotals.gst / 2) : 0,
-            total_cgst: cgstPer > 0 ? money(hTotals.gst / 2) : 0,
-            total_igst: igstPer > 0 ? money(hTotals.gst) : 0,
+            total_gst: money(hTotals.gst),
+            total_sgst: 0,
+            total_cgst: 0,
+            total_igst: 0,
             total_tcs: money(hTotals.tcs),
             total_discount: money(hTotals.disc),
             total_other: money(hTotals.other),
@@ -921,8 +911,7 @@ const DepotSalesInvoice = () => {
 
             setFormData(formatted);
             const rows = full.DepotSalesDetails || [];
-            const recalculated = runCalculations(rows, full.invoice_type_id, full);
-            setGridRows(recalculated);
+            setGridRows(rows);
             setIsModalOpen(true);
         } catch (err) {
             console.error("Error loading depot sales invoice:", err);
@@ -1087,7 +1076,8 @@ const DepotSalesInvoice = () => {
                             place = String(row[17] || '').trim();
                         }
 
-                        if (!partyName || partyName.toLowerCase().includes('total')) continue;
+                        const cleanParty = partyName.trim().toLowerCase();
+                        if (!cleanParty || cleanParty === 'total' || cleanParty === 'grand total' || cleanParty === 'sub total') continue;
 
                         const rate = totalKgs > 0 ? (assessableValue / totalKgs) : 0;
                         const avgContent = packs > 0 && totalKgs > 0 ? (totalKgs / packs) : 0;
