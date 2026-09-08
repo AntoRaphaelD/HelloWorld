@@ -55,26 +55,340 @@ const imageUrlToDataUrl = async (url) => {
         reader.readAsDataURL(blob);
     });
 };
+const fmtIN = (val, digits = 2) => {
+    const n = Number(val);
+    if (isNaN(n)) return digits === 0 ? '0' : '0.00';
+    return n.toLocaleString('en-IN', {
+        minimumFractionDigits: digits,
+        maximumFractionDigits: digits
+    });
+};
+
+const fmtInvoiceDate = (dateVal) => {
+    if (!dateVal) return '';
+    const d = new Date(dateVal);
+    if (isNaN(d.getTime())) return String(dateVal);
+    const day = String(d.getDate()).padStart(2, '0');
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const month = months[d.getMonth()];
+    const yr = String(d.getFullYear()).slice(-2);
+    return `${day}-${month}-${yr}`;
+};
+
 const numberToWords = (amount) => {
-    if (!amount || amount === 0) return "Zero Rupees Only";
-    const ones = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
-    const tens = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
-    const convert = (n) => {
+    const numVal = Math.round(Number(amount) || 0);
+    if (numVal === 0) return "ZERO RUPEES ONLY.";
+
+    const ones = ["", "ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE", "TEN",
+        "ELEVEN", "TWELVE", "THIRTEEN", "FOURTEEN", "FIFTEEN", "SIXTEEN", "SEVENTEEN", "EIGHTEEN", "NINETEEN"];
+    const tens = ["", "", "TWENTY", "THIRTY", "FORTY", "FIFTY", "SIXTY", "SEVENTY", "EIGHTY", "NINETY"];
+
+    const convertChunk = (n) => {
+        if (n === 0) return "";
         if (n < 20) return ones[n];
         if (n < 100) return tens[Math.floor(n / 10)] + (n % 10 ? " " + ones[n % 10] : "");
-        if (n < 1000) return ones[Math.floor(n / 100)] + " Hundred" + (n % 100 ? " and " + convert(n % 100) : "");
+        if (n < 1000) return ones[Math.floor(n / 100)] + " HUNDRED" + (n % 100 ? " AND " + convertChunk(n % 100) : "");
         return "";
     };
+
     let str = "";
-    const crore = Math.floor(amount / 10000000);
-    const lakh = Math.floor((amount % 10000000) / 100000);
-    const thousand = Math.floor((amount % 100000) / 1000);
-    const hundred = amount % 1000;
-    if (crore) str += convert(crore) + " Crore ";
-    if (lakh) str += convert(lakh) + " Lakh ";
-    if (thousand) str += convert(thousand) + " Thousand ";
-    if (hundred) str += convert(hundred);
-    return str.trim() + " Rupees Only";
+    const crore = Math.floor(numVal / 10000000);
+    const lakh = Math.floor((numVal % 10000000) / 100000);
+    const thousand = Math.floor((numVal % 100000) / 1000);
+    const hundred = numVal % 1000;
+
+    if (crore) str += convertChunk(crore) + " CRORE ";
+    if (lakh) str += convertChunk(lakh) + (lakh > 1 ? " LAKHS " : " LAKH ");
+    if (thousand) str += convertChunk(thousand) + " THOUSAND ";
+    if (hundred) {
+        if (hundred < 100 && str.trim().length > 0) {
+            str += "AND " + convertChunk(hundred) + " ";
+        } else {
+            str += convertChunk(hundred) + " ";
+        }
+    }
+
+    return str.trim() + " ONLY.";
+};
+
+// =====================================================
+// EXACT TAX INVOICE PRINT VIEW (DEPOT SALES)
+// =====================================================
+const ModernPrintView = ({ data, listData, getHSN }) => {
+    if (!data) return null;
+
+    const party = listData?.parties?.find(p => String(p.id) === String(data.party_id)) || data.Party || {};
+    const config = listData?.types?.find(t => String(t.id) === String(data.invoice_type_id)) || {};
+    const gstPer = num(config.gst_percentage);
+    let cgstPer = num(config.cgst_percentage);
+    let sgstPer = num(config.sgst_percentage);
+    let igstPer = num(config.igst_percentage);
+    const tcsPer = num(config.tcs_percentage);
+
+    if (igstPer === 0 && cgstPer === 0 && sgstPer === 0 && gstPer > 0) {
+        cgstPer = gstPer / 2;
+        sgstPer = gstPer / 2;
+    }
+
+    const totalGst = num(data.total_gst);
+    let totalCgst = num(data.total_cgst);
+    let totalSgst = num(data.total_sgst);
+    let totalIgst = num(data.total_igst);
+
+    if (igstPer === 0 && totalCgst === 0 && totalSgst === 0 && totalGst > 0) {
+        totalCgst = totalGst / 2;
+        totalSgst = totalGst / 2;
+    }
+
+    const items = (data.Details || data.InvoiceDetails || []).filter(Boolean);
+    const totalBags = items.reduce((sum, r) => sum + num(r.packs), 0);
+    const totalWeight = items.reduce((sum, r) => sum + num(r.total_kgs), 0);
+    const totalAssessable = items.reduce((sum, r) => sum + num(r.assessable_value || (num(r.total_kgs) * num(r.rate))), 0);
+
+    const productDescs = [...new Set(items.map(r => r.product_description || (listData?.products?.find(p => String(p.id) === String(r.product_id))?.short_description)).filter(Boolean))];
+    const hsnCodes = [...new Set(items.map(r => (getHSN ? getHSN(r.product_id) : '') || r.hsn || '').filter(Boolean))];
+    const netAmount = num(data.final_invoice_value || data.net_amount || data.sub_total || totalAssessable);
+
+    return (
+        <div id="printable-invoice-wrapper" className="p-4 bg-white text-black font-sans max-w-[210mm] mx-auto text-xs leading-normal">
+            {/* Top Row: Checkboxes & TAX INVOICE Title */}
+            <div className="relative mb-2">
+                <div className="text-center pt-2">
+                    <h1 className="text-xl font-bold tracking-wider">TAX INVOICE</h1>
+                </div>
+                <div className="absolute right-0 top-0 text-[10px] font-bold space-y-0.5">
+                    <div className="flex items-center gap-1.5">
+                        <span className="w-3.5 h-3.5 border border-black inline-block"></span>
+                        <span>ORIGINAL FOR BUYER</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                        <span className="w-3.5 h-3.5 border border-black inline-block"></span>
+                        <span>DUPLICATE FOR TRANSPORTER</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                        <span className="w-3.5 h-3.5 border border-black inline-block"></span>
+                        <span>TRIPLICATE FOR FILE COPY</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                        <span className="w-3.5 h-3.5 border border-black inline-block"></span>
+                        <span>EXTRA COPY</span>
+                    </div>
+                </div>
+            </div>
+
+            {/* Main Outer Box */}
+            <div className="border border-black">
+                {/* 1. Company Details Header Box */}
+                <div className="border-b border-black p-3 relative flex justify-between items-start">
+                    <div className="flex-1 text-center pr-24 pl-10">
+                        <h2 className="text-base font-black uppercase tracking-wide">KAYAAR EXPORTS PRIVATE LIMITED</h2>
+                        <p className="text-[11px] leading-tight mt-0.5">
+                            D.No: 43/5, Railway Feeder Road,<br />
+                            K.R. Nagar -628 503, Kovilpatti -Taluk<br />
+                            Tuticorin Dist., Tamilnadu, India
+                        </p>
+                        <p className="text-[11px] font-medium mt-0.5">(04632) - 248258, 94432 38761</p>
+                        <p className="text-[11px] font-medium">E-Mail : ttnkrgroup@gmail.com</p>
+                        <p className="text-[11px] font-bold mt-0.5">GSTIN : 33AAACK4468M1ZA</p>
+                    </div>
+
+                    {/* OEKO-TEX framed badge */}
+                    <div className="border border-black p-1.5 text-center text-[9px] w-44 shrink-0 bg-white">
+                        <div className="font-bold text-[10px]">OEKO-TEX ®</div>
+                        <div className="text-[7.5px] uppercase font-bold text-slate-700">CONFIDENCE IN TEXTILES</div>
+                        <div className="font-bold text-[9px]">STANDARD 100</div>
+                        <div className="text-[8px] font-bold">18.HIN.60427 HOHENSTEIN HTTI</div>
+                        <div className="text-[7px] leading-tight">Tested for harmful substances</div>
+                        <div className="text-[7px]">www.oeko-tex.com/standard100</div>
+                    </div>
+
+                    {/* PAN & CIN bottom row of company box */}
+                    <div className="absolute bottom-1 left-3 right-3 flex justify-between text-[10px] font-bold">
+                        <span>PAN : AAACK4468M</span>
+                        <span>CIN : U51101TN1991PTC020933</span>
+                    </div>
+                </div>
+
+                {/* 2. Party & Invoice Meta (2-Column Grid) */}
+                <div className="border-b border-black grid grid-cols-12 min-h-[110px]">
+                    {/* Left Column: Party Name & Address */}
+                    <div className="col-span-7 p-2.5 border-r border-black flex flex-col justify-between">
+                        <div>
+                            <div className="font-bold text-[11px]">Party Name & Address</div>
+                            <div className="font-black text-sm uppercase mt-0.5">{party.account_name || data.party_name || '-'}</div>
+                            <div className="text-[11px] leading-tight mt-1 uppercase">
+                                {data.addr1 && <div>{data.addr1}</div>}
+                                {data.addr2 && <div>{data.addr2}</div>}
+                                {data.addr3 && <div>{data.addr3}</div>}
+                            </div>
+                        </div>
+                        <div className="font-bold text-[11px] mt-2">
+                            GST No: <span className="font-mono">{party.gst_no || data.gst_no || '-'}</span>
+                        </div>
+                    </div>
+
+                    {/* Right Column: Invoice Meta Table */}
+                    <div className="col-span-5 p-2 text-[11px]">
+                        <table className="w-full">
+                            <tbody>
+                                <tr>
+                                    <td className="font-bold py-0.5">Invoice No</td>
+                                    <td className="font-bold py-0.5 w-4">:</td>
+                                    <td className="font-bold py-0.5 text-right font-mono">{data.invoice_no || '-'}</td>
+                                </tr>
+                                <tr>
+                                    <td className="font-bold py-0.5">Invoice Dt</td>
+                                    <td className="font-bold py-0.5">:</td>
+                                    <td className="font-bold py-0.5 text-right">{fmtInvoiceDate(data.date)}</td>
+                                </tr>
+                                <tr>
+                                    <td className="font-bold py-0.5">E-Way Bill No</td>
+                                    <td className="font-bold py-0.5">:</td>
+                                    <td className="font-bold py-0.5 text-right font-mono">{data.ebill_no || '-'}</td>
+                                </tr>
+                                <tr>
+                                    <td className="font-bold py-0.5">Vehicle No</td>
+                                    <td className="font-bold py-0.5">:</td>
+                                    <td className="font-bold py-0.5 text-right uppercase font-mono">{data.vehicle_no || '-'}</td>
+                                </tr>
+                                <tr>
+                                    <td className="font-bold py-0.5">Delivery At</td>
+                                    <td className="font-bold py-0.5">:</td>
+                                    <td className="font-bold py-0.5 text-right uppercase">{data.delivery || '-'}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                {/* 3. Description Header Bar */}
+                <div className="border-b border-black grid grid-cols-12 text-[11px] font-bold text-center">
+                    <div className="col-span-7 py-1 border-r border-black">DESCRIPTION OF GOODS</div>
+                    <div className="col-span-5 py-1"></div>
+                </div>
+
+                {/* 4. Column Headers */}
+                <div className="border-b border-black grid grid-cols-12 text-[11px] font-bold text-center">
+                    <div className="col-span-2 py-1.5 border-r border-black">No of Bags</div>
+                    <div className="col-span-2 py-1.5 border-r border-black">Net Weight</div>
+                    <div className="col-span-3 py-1.5 border-r border-black">S.L No</div>
+                    <div className="col-span-2 py-1.5 border-r border-black">Rate Per Kgs</div>
+                    <div className="col-span-3 py-1.5">Assessable Value</div>
+                </div>
+
+                {/* 5. Item Rows (No extra aggregation row inside table) */}
+                <div className="border-b border-black">
+                    {items.map((item, idx) => {
+                        const rowWeight = num(item.total_kgs);
+                        const rowAssessable = num(item.assessable_value || (rowWeight * num(item.rate)));
+                        const assessableRatePerKg = rowWeight > 0 ? (rowAssessable / rowWeight) : num(item.rate);
+                        return (
+                            <div key={idx} className="grid grid-cols-12 text-[11px] py-1 border-b border-black/20 last:border-b-0">
+                                <div className="col-span-2 text-center font-bold border-r border-black px-1">{item.packs}</div>
+                                <div className="col-span-2 text-center font-bold border-r border-black px-1">{fmtIN(rowWeight, 2)}</div>
+                                <div className="col-span-3 text-center border-r border-black px-1 font-mono">{[item.from_no, item.to_no].filter(Boolean).join(' - ') || item.sl_no || '-'}</div>
+                                <div className="col-span-2 text-right font-bold border-r border-black px-2">{fmtIN(assessableRatePerKg, 2)}</div>
+                                <div className="col-span-3 text-right font-bold px-3">{fmtIN(rowAssessable, 2)}</div>
+                            </div>
+                        );
+                    })}
+                </div>
+
+                {/* 6. Split Box: Description (Left) & Taxes/Charges (Right) */}
+                <div className="border-b border-black grid grid-cols-12 min-h-[140px]">
+                    {/* Left Column */}
+                    <div className="col-span-7 p-3 border-r border-black flex flex-col justify-between">
+                        <div>
+                            {productDescs.map((desc, i) => (
+                                <div key={i} className="font-black text-xs uppercase mb-1">{desc}</div>
+                            ))}
+                            <div className="font-bold text-[11px] mt-2">
+                                HSN CODE: {hsnCodes.join(', ') || '52052790'}
+                            </div>
+                        </div>
+                        <div className="text-[10px] font-normal pt-4">
+                            Whether the Tax Payable on Reverse Charges Basis ? &nbsp;&nbsp;&nbsp;&nbsp; Yes / No
+                        </div>
+                    </div>
+
+                    {/* Right Column (Taxes, Charges & Net Amount) */}
+                    <div className="col-span-5 text-[11px]">
+                        <table className="w-full">
+                            <tbody>
+                                <tr className="border-b border-black/20">
+                                    <td className="p-1.5 pl-3 font-bold">TOTAL ASSESSABLE AMOUNT</td>
+                                    <td className="p-1.5 pr-3 text-right font-bold">{fmtIN(data.total_assessable || totalAssessable, 2)}</td>
+                                </tr>
+                                {num(data.total_charity) > 0 && (
+                                    <tr className="border-b border-black/20">
+                                        <td className="p-1.5 pl-3 font-bold">CHARITY</td>
+                                        <td className="p-1.5 pr-3 text-right font-bold">{fmtIN(data.total_charity, 2)}</td>
+                                    </tr>
+                                )}
+                                {num(data.freight || data.freight_charges) > 0 && (
+                                    <tr className="border-b border-black/20">
+                                        <td className="p-1.5 pl-3 font-bold">FREIGHT</td>
+                                        <td className="p-1.5 pr-3 text-right font-bold">{fmtIN(data.freight || data.freight_charges, 2)}</td>
+                                    </tr>
+                                )}
+                                <tr className="border-b border-black/20">
+                                    <td className="p-1.5 pl-3 font-medium">C.G.S.T &nbsp;&nbsp; : &nbsp; {cgstPer.toFixed(2)} %</td>
+                                    <td className="p-1.5 pr-3 text-right font-medium">{totalCgst > 0 ? fmtIN(totalCgst, 2) : ''}</td>
+                                </tr>
+                                <tr className="border-b border-black/20">
+                                    <td className="p-1.5 pl-3 font-medium">S.G.S.T &nbsp;&nbsp; : &nbsp; {sgstPer.toFixed(2)} %</td>
+                                    <td className="p-1.5 pr-3 text-right font-medium">{totalSgst > 0 ? fmtIN(totalSgst, 2) : ''}</td>
+                                </tr>
+                                <tr className="border-b border-black/20">
+                                    <td className="p-1.5 pl-3 font-medium">I.G.S.T &nbsp;&nbsp; : &nbsp; {igstPer.toFixed(2)} %</td>
+                                    <td className="p-1.5 pr-3 text-right font-medium">{totalIgst > 0 ? fmtIN(totalIgst, 2) : ''}</td>
+                                </tr>
+                                <tr className="border-t border-b border-black font-bold">
+                                    <td className="p-1.5 pl-3"></td>
+                                    <td className="p-1.5 pr-3 text-right">{fmtIN(data.sub_total || (totalAssessable + num(data.total_charity) + num(data.freight || data.freight_charges) + num(data.total_gst) + num(data.total_cgst) + num(data.total_sgst) + num(data.total_igst)), 2)}</td>
+                                </tr>
+                                <tr className="border-b border-black">
+                                    <td className="p-1.5 pl-3 font-medium">TCS &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; : &nbsp; {tcsPer.toFixed(3)} %</td>
+                                    <td className="p-1.5 pr-3 text-right font-medium">{fmtIN(data.total_tcs || 0, 2)}</td>
+                                </tr>
+                                <tr className="font-black text-xs">
+                                    <td className="p-2 pl-3">Net Amount</td>
+                                    <td className="p-2 pr-3 text-right">{fmtIN(netAmount, 2)}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                {/* 7. Rupees in Words Full Bar */}
+                <div className="border-b border-black p-2 text-[11px] font-bold">
+                    <span className="mr-3">Rupees :</span>
+                    <span className="uppercase tracking-wide">{numberToWords(netAmount)}</span>
+                </div>
+
+                {/* 8. Declarations & Signatures Box */}
+                <div className="grid grid-cols-12 min-h-[100px]">
+                    {/* Left Column */}
+                    <div className="col-span-7 p-2.5 border-r border-black flex flex-col justify-between">
+                        <div className="text-[10px] leading-tight text-slate-800">
+                            Certified that the particulars given above are true and Correct and Amount indicated represents the price actually charged and that there are no following of additional consideration directly or indirectly from the buyer
+                        </div>
+                        <div className="font-bold text-[10px] mt-1">E.& O.E</div>
+                        <div className="flex justify-between text-[11px] font-bold mt-6 px-4">
+                            <span>Prepared by</span>
+                            <span>Checked by</span>
+                        </div>
+                    </div>
+
+                    {/* Right Column */}
+                    <div className="col-span-5 p-2.5 flex flex-col justify-between text-center">
+                        <div className="font-bold text-[11px]">For KAYAAR EXPORTS PRIVATE LIMITED</div>
+                        <div className="font-bold text-[11px] mt-12">Director/Authorised Signatory</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
 };
 
 
@@ -181,6 +495,19 @@ const DepotSalesInvoice = () => {
     const [pageSize, setPageSize] = useState(10);
     const [isSelectionMode, setIsSelectionMode] = useState(false);
     const [selectedIds, setSelectedIds] = useState([]);
+    const [printData, setPrintData] = useState(null);
+
+    const getHSN = useCallback((productId) => {
+        const product = listData.products.find(p => String(p.id) === String(productId));
+        return product?.printing_tariff_desc || '';
+    }, [listData.products]);
+
+    const handlePrint = (item) => {
+        setPrintData(item);
+        setTimeout(() => {
+            window.print();
+        }, 800);
+    };
 
     // Add this near your other useMemo/useEffect hooks
     const filteredInvoiceTypes = useMemo(() => {
@@ -215,9 +542,15 @@ const DepotSalesInvoice = () => {
         };
 
         const gstPer = num(config.gst_percentage);
-        const sgstPer = num(config.sgst_percentage);
-        const cgstPer = num(config.cgst_percentage);
+        let sgstPer = num(config.sgst_percentage);
+        let cgstPer = num(config.cgst_percentage);
         const igstPer = num(config.igst_percentage);
+
+        if (igstPer === 0 && sgstPer === 0 && cgstPer === 0 && gstPer > 0) {
+            sgstPer = gstPer / 2;
+            cgstPer = gstPer / 2;
+        }
+
         const splitGstPer = sgstPer + cgstPer;
         const taxPercentage = igstPer > 0 ? igstPer : (splitGstPer > 0 ? splitGstPer : gstPer);
 
@@ -260,25 +593,52 @@ const DepotSalesInvoice = () => {
             const discAmt = (num(item.discount_percentage) * basis) / 100;
             const rowTotal = basis - discAmt;
 
-            hTotals.assess += accessibleValue; hTotals.charity += charity; hTotals.freight += num(item.freight_amt);
-            hTotals.gst += gstAmount; hTotals.tcs += tcs; hTotals.gross += totalInvoiceAmount;
-            hTotals.vat += vat; hTotals.cenvat += cenvat; hTotals.duty += duty;
-            hTotals.cess += cess; hTotals.hcess += hcess; hTotals.other += num(item.other_amt);
-            hTotals.disc += discAmt; hTotals.net += rowTotal;
+            const igstAmount = igstPer > 0 ? gstAmount : 0;
+            const sgstAmount = igstPer > 0 ? 0 : (sgstPer > 0 ? (gstAmount * sgstPer / taxPercentage) : (gstAmount / 2));
+            const cgstAmount = igstPer > 0 ? 0 : (cgstPer > 0 ? (gstAmount * cgstPer / taxPercentage) : (gstAmount / 2));
+
+            hTotals.assess += accessibleValue;
+            hTotals.charity += charity;
+            hTotals.freight += num(item.freight_amt);
+            hTotals.gst += gstAmount;
+            hTotals.cgst += cgstAmount;
+            hTotals.sgst += sgstAmount;
+            hTotals.igst += igstAmount;
+            hTotals.tcs += tcs;
+            hTotals.gross += totalInvoiceAmount;
+            hTotals.vat += vat;
+            hTotals.cenvat += cenvat;
+            hTotals.duty += duty;
+            hTotals.cess += cess;
+            hTotals.hcess += hcess;
+            hTotals.other += num(item.other_amt);
+            hTotals.disc += discAmt;
+            hTotals.net += rowTotal;
 
             return {
                 ...item,
                 packs: packs,
                 avg_content: bagWt,
                 total_kgs: totalKgs,
-                assessable_value: accessibleValue, charity_amt: charity,
-                gst_amt: gstAmount,
-                sgst_amt: 0,
-                cgst_amt: 0,
-                igst_amt: 0,
-                vat_amt: vat, cenvat_amt: cenvat, duty_amt: duty, cess_amt: cess,
-                hr_sec_cess_amt: hcess, tcs_amt: tcs,
-                discount_amt: discAmt, sub_total: basis, final_value: rowTotal
+                assessable_value: accessibleValue,
+                charity_amt: charity,
+                gst_per: gstPer,
+                sgst_per: sgstPer,
+                cgst_per: cgstPer,
+                igst_per: igstPer,
+                gst_amt: igstPer > 0 ? 0 : gstAmount,
+                sgst_amt: sgstAmount,
+                cgst_amt: cgstAmount,
+                igst_amt: igstAmount,
+                vat_amt: vat,
+                cenvat_amt: cenvat,
+                duty_amt: duty,
+                cess_amt: cess,
+                hr_sec_cess_amt: hcess,
+                tcs_amt: tcs,
+                discount_amt: discAmt,
+                sub_total: basis,
+                final_value: rowTotal
             };
         });
 
@@ -291,12 +651,13 @@ const DepotSalesInvoice = () => {
             total_charity: money(hTotals.charity),
             total_vat: money(hTotals.vat),
             total_cenvat: money(hTotals.cenvat),
-            total_duty: money(hTotals.duty), total_cess: money(hTotals.cess),
+            total_duty: money(hTotals.duty),
+            total_cess: money(hTotals.cess),
             total_hr_sec_cess: money(hTotals.hcess),
-            total_gst: money(hTotals.gst),
-            total_sgst: 0,
-            total_cgst: 0,
-            total_igst: 0,
+            total_gst: igstPer > 0 ? 0 : money(hTotals.gst),
+            total_sgst: money(hTotals.sgst),
+            total_cgst: money(hTotals.cgst),
+            total_igst: money(hTotals.igst),
             total_tcs: money(hTotals.tcs),
             total_discount: money(hTotals.disc),
             total_other: money(hTotals.other),
@@ -315,33 +676,51 @@ const DepotSalesInvoice = () => {
         const data = formData;
         const pageWidth = doc.internal.pageSize.getWidth();
         const pageHeight = doc.internal.pageSize.getHeight();
-        const margin = 7;
+        const margin = 8;
         const right = pageWidth - margin;
         const contentWidth = pageWidth - (margin * 2);
-        const midX = margin + 115;
+        const midX = margin + 114;
 
-        const fmt = (v, digits = 0) => {
-            const rounded = digits === 0 ? Math.round(num(v)) : num(v);
-            return rounded.toLocaleString('en-IN', {
+        const fmt = (v, digits = 2) => {
+            const n = Number(v);
+            if (isNaN(n)) return digits === 0 ? '0' : '0.00';
+            return n.toLocaleString('en-IN', {
                 minimumFractionDigits: digits,
                 maximumFractionDigits: digits
             });
         };
-        const fmtDate = (value) => {
-            if (!value) return '';
-            const date = new Date(value);
-            if (Number.isNaN(date.getTime())) return String(value);
-            return date.toLocaleDateString('en-GB');
-        };
+
         const safe = (value, fallback = '') => {
             const text = value === null || value === undefined ? '' : String(value).trim();
             return text || fallback;
         };
+
         const party = listData.parties.find(p => String(p.id) === String(data.party_id)) || data.Party || {};
-        const depot = listData.depots.find(d => String(d.id) === String(data.depot_id)) || data.Depot || {};
-        const transport = listData.transports.find(t => String(t.id) === String(data.transport_id)) || data.Transport || {};
-        const firstRow = gridRows[0] || {};
-        const lineRows = gridRows.length ? gridRows : [{}];
+        const config = listData.types.find(t => String(t.id) === String(data.invoice_type_id)) || {};
+        const gstPer = num(config.gst_percentage);
+        let cgstPer = num(config.cgst_percentage);
+        let sgstPer = num(config.sgst_percentage);
+        let igstPer = num(config.igst_percentage);
+        const tcsPer = num(config.tcs_percentage);
+
+        if (igstPer === 0 && cgstPer === 0 && sgstPer === 0 && gstPer > 0) {
+            cgstPer = gstPer / 2;
+            sgstPer = gstPer / 2;
+        }
+
+        const totalGst = num(data.total_gst);
+        let totalCgst = num(data.total_cgst);
+        let totalSgst = num(data.total_sgst);
+        let totalIgst = num(data.total_igst);
+
+        if (igstPer === 0 && totalCgst === 0 && totalSgst === 0 && totalGst > 0) {
+            totalCgst = totalGst / 2;
+            totalSgst = totalGst / 2;
+        }
+
+        const items = gridRows.length ? gridRows : (data.Details || data.InvoiceDetails || []);
+        const totalAssessable = items.reduce((sum, r) => sum + num(r.assessable_value || (num(r.total_kgs) * num(r.rate))), 0);
+
         const getHSN = (productId) => {
             const product = listData.products.find(p => String(p.id) === String(productId));
             return product?.printing_tariff_desc || '';
@@ -350,153 +729,159 @@ const DepotSalesInvoice = () => {
             const product = listData.products.find(p => String(p.id) === String(productId));
             return product?.short_description || '';
         };
-        const gridOrderNos = gridRows.map(row => String(row.order_no || '').trim().toUpperCase()).filter(Boolean);
-        const matchedInvoice = listData.invoices?.find(inv => 
-            (inv.invoice_no && gridOrderNos.includes(String(inv.invoice_no).trim().toUpperCase())) ||
-            (inv.lr_no && data.lr_no && String(inv.lr_no).trim().toUpperCase() === String(data.lr_no).trim().toUpperCase()) ||
-            (inv.vehicle_no && data.vehicle_no && String(inv.vehicle_no).trim().toUpperCase() === String(data.vehicle_no).trim().toUpperCase())
-        );
-        const matchedDirectInvoice = listData.directInvoices?.find(inv => 
-            (inv.invoice_no && gridOrderNos.includes(String(inv.invoice_no).trim().toUpperCase())) ||
-            (inv.lr_no && data.lr_no && String(inv.lr_no).trim().toUpperCase() === String(data.lr_no).trim().toUpperCase()) ||
-            (inv.vehicle_no && data.vehicle_no && String(inv.vehicle_no).trim().toUpperCase() === String(data.vehicle_no).trim().toUpperCase())
-        );
-        const matchedLoad = listData.loads?.find(l => 
-            (l.lr_no && data.lr_no && String(l.lr_no).trim().toUpperCase() === String(data.lr_no).trim().toUpperCase()) ||
-            (l.vehicle_no && data.vehicle_no && String(l.vehicle_no).trim().toUpperCase() === String(data.vehicle_no).trim().toUpperCase())
-        );
-        const deliveryLocation = matchedInvoice?.delivery 
-            || matchedDirectInvoice?.delivery 
-            || matchedLoad?.delivery 
-            || data.delivery 
-            || depot.account_name 
-            || data.country 
-            || '';
-        const hsnCodes = [...new Set(gridRows.map(row => getHSN(row.product_id)).filter(Boolean))];
-        const totalGst = num(data.total_gst) + num(data.total_sgst) + num(data.total_cgst) + num(data.total_igst);
-        const ratePerKg = (item) => {
-            const netWeight = num(item.total_kgs);
-            return netWeight ? num(item.assessable_value) / netWeight : 0;
-        };
 
-        const labelValue = (label, value, x, y, labelW = 28) => {
-            doc.setFont("helvetica", "bold");
-            doc.text(label, x, y);
-            doc.text(":", x + labelW, y);
-            doc.text(safe(value, "-"), x + labelW + 5, y);
-        };
-        const checkbox = (label, x, y) => {
-            doc.rect(x, y - 3, 3.5, 3.5);
-            doc.setFont("helvetica", "bold");
-            doc.text(label, x + 5, y);
-        };
+        const productDescs = [...new Set(items.map(r => r.product_description || getProductShortDesc(r.product_id)).filter(Boolean))];
+        const hsnCodes = [...new Set(items.map(r => getHSN(r.product_id)).filter(Boolean))];
+        const netAmount = num(data.final_invoice_value || data.net_amount || data.sub_total || totalAssessable);
 
         doc.setTextColor(0);
         doc.setDrawColor(0);
-        doc.setLineWidth(0.25);
+        doc.setLineWidth(0.2);
+
+        // 1. Top Checkboxes & TAX INVOICE Title
         doc.setFont("helvetica", "bold");
-        let logoDataUrl = '';
-        try {
-            logoDataUrl = await imageUrlToDataUrl(logoImage);
-        } catch (error) {
-            console.warn("Depot invoice logo could not be loaded:", error);
-        }
+        doc.setFontSize(13);
+        doc.text("TAX INVOICE", pageWidth / 2, 17, { align: "center" });
 
-        doc.setFontSize(6.5);
-        checkbox("ORIGINAL FOR BUYER", 145, 10);
-        checkbox("DUPLICATE FOR TRANSPORTER", 145, 15);
-        checkbox("TRIPLICATE FOR FILE COPY", 145, 20);
-        checkbox("EXTRA COPY", 145, 25);
+        const checkbox = (label, x, y) => {
+            doc.rect(x, y - 2.8, 3, 3);
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(6.5);
+            doc.text(label, x + 4.5, y);
+        };
 
-        doc.setFontSize(11);
-        doc.text("TAX INVOICE", pageWidth / 2, 22, { align: "center" });
+        checkbox("ORIGINAL FOR BUYER", right - 48, 8);
+        checkbox("DUPLICATE FOR TRANSPORTER", right - 48, 12);
+        checkbox("TRIPLICATE FOR FILE COPY", right - 48, 16);
+        checkbox("EXTRA COPY", right - 48, 20);
 
-        let y = 36;
-        const headerHeight = 52;
-        doc.rect(margin, y, contentWidth, headerHeight);
-        if (logoDataUrl) {
-            doc.addImage(logoDataUrl, "JPEG", margin + 12, y + 8, 38, 38);
-        }
+        // 2. Company Header Box
+        let y = 23;
+        const companyHeight = 44;
+        doc.rect(margin, y, contentWidth, companyHeight);
 
-        doc.setFontSize(10);
-        doc.text("KAYAAR EXPORTS PRIVATE LIMITED", margin + 62, y + 8);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(10.5);
+        doc.text("KAYAAR EXPORTS PRIVATE LIMITED", margin + (contentWidth / 2) - 15, y + 6, { align: "center" });
+
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(7.5);
+        doc.text("D.No: 43/5, Railway Feeder Road,", margin + (contentWidth / 2) - 15, y + 10.5, { align: "center" });
+        doc.text("K.R. Nagar -628 503, Kovilpatti -Taluk", margin + (contentWidth / 2) - 15, y + 14.5, { align: "center" });
+        doc.text("Tuticorin Dist., Tamilnadu, India", margin + (contentWidth / 2) - 15, y + 18.5, { align: "center" });
+        doc.text("(04632) - 248258, 94432 38761", margin + (contentWidth / 2) - 15, y + 23, { align: "center" });
+        doc.text("E-Mail : ttnkrgroup@gmail.com", margin + (contentWidth / 2) - 15, y + 27, { align: "center" });
+
+        doc.setFont("helvetica", "bold");
         doc.setFontSize(8);
-        doc.text("D.No: 43/5, Railway Feeder Road,", margin + 71, y + 13);
-        doc.text("K.R. Nagar - 628 503, Kovilpatti - Taluk", margin + 65, y + 18);
-        doc.text("Tuticorin Dist., Tamilnadu, India", margin + 72, y + 23);
-        doc.text("(04632) - 248258, 9443238761", margin + 75, y + 29);
-        doc.text("E-Mail : ttnkrgroup@gmail.com", margin + 74, y + 34);
-        doc.text("GSTIN : 33AAACK4468M1ZA", margin + 78, y + 40);
+        doc.text("GSTIN : 33AAACK4468M1ZA", margin + (contentWidth / 2) - 15, y + 32, { align: "center" });
 
-        const certX = right - 48;
-        doc.rect(certX, y + 4, 41, 34);
-        doc.setFontSize(7);
-        doc.text("OEKO-TEX", certX + 20.5, y + 10, { align: "center" });
+        // OEKO-TEX Box on right
+        const certX = right - 46;
+        const certW = 43;
+        const certH = 30;
+        doc.rect(certX, y + 3, certW, certH);
+        doc.setFontSize(7.5);
+        doc.setFont("helvetica", "bold");
+        doc.text("OEKO-TEX ®", certX + (certW / 2), y + 7.5, { align: "center" });
         doc.setFontSize(5.5);
-        doc.text("CONFIDENCE IN TEXTILES", certX + 20.5, y + 14, { align: "center" });
+        doc.setFont("helvetica", "normal");
+        doc.text("CONFIDENCE IN TEXTILES", certX + (certW / 2), y + 11.5, { align: "center" });
         doc.setFontSize(7);
-        doc.text("STANDARD 100", certX + 20.5, y + 19, { align: "center" });
+        doc.setFont("helvetica", "bold");
+        doc.text("STANDARD 100", certX + (certW / 2), y + 16, { align: "center" });
         doc.setFontSize(6);
-        doc.text("18.HIN.60427 HOHENSTEIN HTTI", certX + 20.5, y + 25, { align: "center" });
+        doc.setFont("helvetica", "normal");
+        doc.text("18.HIN.60427 HOHENSTEIN HTTI", certX + (certW / 2), y + 20.5, { align: "center" });
         doc.setFontSize(5.2);
-        doc.text("Tested for harmful substances", certX + 20.5, y + 31, { align: "center" });
-        doc.text("www.oeko-tex.com/standard100", certX + 20.5, y + 35, { align: "center" });
+        doc.text("Tested for harmful substances", certX + (certW / 2), y + 25, { align: "center" });
+        doc.text("www.oeko-tex.com/standard100", certX + (certW / 2), y + 29, { align: "center" });
 
-        doc.setFontSize(7);
-        doc.text("PAN : AAACK4468M", margin + 3, y + 49);
-        doc.text("CIN : U51101TN1991PTC020933", right - 64, y + 49);
+        // PAN & CIN bottom row
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(7.5);
+        doc.text("PAN : AAACK4468M", margin + 3, y + 40.5);
+        doc.text("CIN : U51101TN1991PTC020933", right - 3, y + 40.5, { align: "right" });
 
-        y += headerHeight;
-        const detailsHeight = 45;
-        doc.rect(margin, y, contentWidth, detailsHeight);
-        doc.line(midX, y, midX, y + detailsHeight);
+        // 3. Party Details & Invoice Details Box
+        y += companyHeight;
+        const partyHeight = 38;
+        doc.rect(margin, y, contentWidth, partyHeight);
+        doc.line(midX, y, midX, y + partyHeight);
 
-        doc.setFontSize(8);
-        doc.text("Party Name & Address", margin + 3, y + 6);
+        // Left Side: Party
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(7.5);
+        doc.text("Party Name & Address", margin + 3, y + 5);
+
         doc.setFontSize(9);
-        doc.text(safe(party.account_name, safe(data.party_name, "N/A")).toUpperCase(), margin + 8, y + 13);
-        doc.setFontSize(7);
+        doc.text(safe(party.account_name || data.party_name, "N/A").toUpperCase(), margin + 3, y + 10);
+
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(7.5);
         const addressLines = [data.addr1, data.addr2, data.addr3].filter(Boolean);
-        (addressLines.length ? addressLines : [""]).slice(0, 4).forEach((line, index) => {
-            doc.text(safe(line).toUpperCase(), margin + 8, y + 20 + (index * 5));
+        addressLines.slice(0, 3).forEach((line, idx) => {
+            doc.text(safe(line).toUpperCase(), margin + 3, y + 14.5 + (idx * 4.2));
         });
-        doc.text(`GST No: ${safe(party.gst_no || data.gst_no, "N/A")}`, margin + 8, y + 39);
 
-        const infoX = midX + 7;
-        doc.setFontSize(8);
-        labelValue("Invoice No", data.invoice_no, infoX, y + 8);
-        labelValue("Invoice Dt", fmtDate(data.date), infoX, y + 15);
-        labelValue("Vehicle No", data.vehicle_no, infoX, y + 22);
-        labelValue("Delivery At", deliveryLocation, infoX, y + 29);
+        doc.setFont("helvetica", "bold");
+        doc.text(`GST No: ${safe(party.gst_no || data.gst_no, "N/A")}`, margin + 3, y + 33.5);
 
-        y += detailsHeight;
-        doc.rect(margin, y, contentWidth, 9);
+        // Right Side: Invoice Meta
+        const metaX = midX + 3;
+        const metaValX = right - 3;
+        const labelRow = (lbl, val, rowY, isBoldVal = true) => {
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(7.5);
+            doc.text(lbl, metaX, rowY);
+            doc.text(":", metaX + 26, rowY);
+            doc.setFont("helvetica", isBoldVal ? "bold" : "normal");
+            doc.text(safe(val, "-"), metaValX, rowY, { align: "right" });
+        };
+
+        labelRow("Invoice No", data.invoice_no, y + 6);
+        labelRow("Invoice Dt", fmtInvoiceDate(data.date), y + 12);
+        labelRow("E-Way Bill No", data.ebill_no, y + 18);
+        labelRow("Vehicle No", safe(data.vehicle_no).toUpperCase(), y + 24);
+        labelRow("Delivery At", safe(data.delivery).toUpperCase(), y + 30);
+
+        // 4. Description Bar & Table Header
+        y += partyHeight;
+        doc.rect(margin, y, contentWidth, 6.5);
+        doc.setFont("helvetica", "bold");
         doc.setFontSize(8);
-        doc.text("DESCRIPTION OF GOODS", pageWidth / 2, y + 6, { align: "center" });
-        y += 9;
+        doc.text("DESCRIPTION OF GOODS", margin + (midX - margin) / 2, y + 4.5, { align: "center" });
+
+        y += 6.5;
+        const colW = [24, 30, 44, 34, contentWidth - (24 + 30 + 44 + 34)]; // sums to contentWidth (194)
+        const tableBody = (items.length ? items : [{}]).map(item => {
+            const rowWeight = num(item.total_kgs);
+            const rowAssessable = num(item.assessable_value || (rowWeight * num(item.rate)));
+            const assessableRatePerKg = rowWeight > 0 ? (rowAssessable / rowWeight) : num(item.rate);
+            return [
+                String(item.packs || ''),
+                fmt(rowWeight, 2),
+                [item.from_no, item.to_no].filter(Boolean).join(" - ") || item.sl_no || '-',
+                fmt(assessableRatePerKg, 2),
+                fmt(rowAssessable, 2)
+            ];
+        });
 
         autoTable(doc, {
             startY: y,
             margin: { left: margin, right: margin },
             tableWidth: contentWidth,
-            head: [["Product", "No of Bags", "Net Weight", "S.L No", "Rate Per Kgs", "Assessable Value"]],
-            body: lineRows.map(item => [
-                getProductShortDesc(item.product_id),
-                fmt(item.packs, 0),
-                fmt(item.total_kgs, 2),
-                [safe(item.from_no), safe(item.to_no)].filter(Boolean).join(" - "),
-                fmt(ratePerKg(item), 2),
-                fmt(item.assessable_value, 0)
-            ]),
+            head: [["No of Bags", "Net Weight", "S.L No", "Rate Per Kgs", "Assessable Value"]],
+            body: tableBody,
             theme: "grid",
             styles: {
                 font: "helvetica",
                 fontSize: 8,
                 textColor: 0,
                 lineColor: 0,
-                lineWidth: 0.25,
+                lineWidth: 0.2,
                 cellPadding: 2,
-                minCellHeight: 9,
+                minCellHeight: 7,
                 valign: "middle"
             },
             headStyles: {
@@ -507,122 +892,120 @@ const DepotSalesInvoice = () => {
                 fontSize: 7.5
             },
             bodyStyles: {
-                halign: "center",
-                fontStyle: "bold"
+                fontStyle: "bold",
+                halign: "center"
             },
             columnStyles: {
-                0: { cellWidth: 55, halign: "left" },
-                1: { cellWidth: 22 },
-                2: { cellWidth: 26 },
-                3: { cellWidth: 40 },
-                4: { cellWidth: 23, halign: "right" },
-                5: { cellWidth: contentWidth - 166, halign: "right" }
+                0: { cellWidth: colW[0], halign: "center" },
+                1: { cellWidth: colW[1], halign: "center" },
+                2: { cellWidth: colW[2], halign: "center" },
+                3: { cellWidth: colW[3], halign: "right" },
+                4: { cellWidth: colW[4], halign: "right" }
             }
         });
 
         y = doc.lastAutoTable.finalY;
-        const summaryTop = y;
 
-        const config = listData.types.find(t => String(t.id) === String(data.invoice_type_id)) || {};
-        const cgstPer = num(config.cgst_percentage);
-        const sgstPer = num(config.sgst_percentage);
-        const igstPer = num(config.igst_percentage);
-        const tcsPer = num(config.tcs_percentage);
+        // 5. Split Box: Description & Taxes
+        const splitH = 58;
+        doc.rect(margin, y, contentWidth, splitH);
+        doc.line(midX, y, midX, y + splitH);
 
-        const taxRows = [];
-        if (num(data.total_charity) > 0) {
-            taxRows.push(["Charity", data.total_charity]);
-        }
-        if (num(data.freight) > 0) {
-            taxRows.push(["Freight", data.freight]);
-        }
-        taxRows.push([`CGST @ ${(cgstPer || 0).toFixed(2)}%`, data.total_cgst || 0]);
-        taxRows.push([`SGST @ ${(sgstPer || 0).toFixed(2)}%`, data.total_sgst || 0]);
-        taxRows.push([`IGST @ ${(igstPer || 0).toFixed(2)}%`, data.total_igst || 0]);
-        if (num(data.total_vat) > 0) {
-            taxRows.push(["VAT", data.total_vat]);
-        }
-        if (num(data.total_cenvat) > 0) {
-            taxRows.push(["CENVAT", data.total_cenvat]);
-        }
-        if (num(data.total_duty) > 0) {
-            taxRows.push(["DUTY", data.total_duty]);
-        }
-        if (num(data.total_cess) > 0) {
-            taxRows.push(["CESS", data.total_cess]);
-        }
-        if (num(data.total_hr_sec_cess) > 0) {
-            taxRows.push(["HECESS", data.total_hr_sec_cess]);
-        }
-        if (num(data.total_other) > 0) {
-            taxRows.push(["Other Charges", data.total_other]);
-        }
-        
-        // Total before TCS
-        taxRows.push(["Total", data.sub_total]);
-        
-        taxRows.push([`TCS @ ${(tcsPer || 0).toFixed(2)}%`, data.total_tcs || 0]);
-        if (num(data.round_off) !== 0) {
-            taxRows.push(["Round Off", data.round_off]);
-        }
-
-        const summaryHeight = Math.max(38, 14 + (taxRows.length * 6));
-        doc.rect(margin, summaryTop, contentWidth, summaryHeight);
-        doc.line(midX, summaryTop, midX, summaryTop + summaryHeight);
-
-        doc.setFontSize(10);
-        doc.text(safe(firstRow.product_description, "DESCRIPTION").toUpperCase(), margin + 3, summaryTop + 9);
-        doc.setFontSize(8);
-        doc.text(`HSN CODE: ${hsnCodes.join(", ") || "N/A"}`, margin + 3, summaryTop + 34);
-
-        const taxLabelX = midX + 4;
-        const taxValueX = right - 5;
-        doc.setFontSize(8);
-        taxRows.forEach(([label, value], index) => {
-            const rowY = summaryTop + 9 + (index * 6);
-            
-            // Draw a dividing line before Total and before TCS
-            if (label === "Total" || label.startsWith("TCS")) {
-                doc.line(midX, rowY - 4, right, rowY - 4);
-            }
-
-            doc.setFont("helvetica", ["CGST", "SGST", "IGST", "Total", "TCS"].some(k => label.includes(k)) ? "bold" : "normal");
-            doc.text(label, taxLabelX, rowY);
-            doc.text(fmt(value, 2), taxValueX, rowY, { align: "right" });
+        // Left Side: Goods Description
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8.5);
+        let descY = y + 6;
+        productDescs.forEach(desc => {
+            doc.text(safe(desc).toUpperCase(), margin + 3, descY);
+            descY += 4.5;
         });
 
-        y = summaryTop + summaryHeight;
-        doc.rect(margin, y, contentWidth, 30);
-        doc.setFontSize(8);
-        doc.setFont("helvetica", "bold");
-        doc.text("Amount Chargeable (in words)", margin + 3, y + 7);
-        doc.setFont("helvetica", "normal");
-        doc.text(doc.splitTextToSize(numberToWords(Math.round(num(data.final_invoice_value))), 105), margin + 3, y + 13);
-        doc.setFont("helvetica", "bold");
-        doc.text("Grand Total", right - 48, y + 11);
-        doc.setFontSize(10);
-        doc.text(fmt(data.final_invoice_value, 2), right - 3, y + 11, { align: "right" });
+        doc.setFontSize(7.5);
+        doc.text(`HSN CODE: ${hsnCodes.join(", ") || "52052790"}`, margin + 3, y + 20);
 
-        y += 30;
-        doc.rect(margin, y, contentWidth, 24);
-        doc.setFont("helvetica", "bold");
+        doc.setFont("helvetica", "normal");
         doc.setFontSize(7);
-        doc.text("Declaration:", margin + 3, y + 6);
+        doc.text("Whether the Tax Payable on Reverse Charges Basis ?    Yes / No", margin + 3, y + splitH - 4);
+
+        // Right Side: Tax & Charge Rows
+        const rightLabelX = midX + 3;
+        const rightValX = right - 3;
+        let taxY = y + 5;
+        const taxLineHeight = 5.2;
+
+        const renderTaxRow = (lbl, val, isBold = false) => {
+            doc.setFont("helvetica", isBold ? "bold" : "normal");
+            doc.setFontSize(7.5);
+            doc.text(lbl, rightLabelX, taxY);
+            if (val !== undefined && val !== null && val !== '') {
+                doc.text(fmt(val, 2), rightValX, taxY, { align: "right" });
+            }
+            taxY += taxLineHeight;
+        };
+
+        renderTaxRow("TOTAL ASSESSABLE", data.total_assessable || totalAssessable, true);
+        if (num(data.total_charity) > 0) {
+            renderTaxRow("CHARITY", data.total_charity, true);
+        }
+        if (num(data.freight || data.freight_charges) > 0) {
+            renderTaxRow("FREIGHT", data.freight || data.freight_charges, true);
+        }
+        renderTaxRow(`C.G.S.T   :   ${cgstPer.toFixed(2)} %`, totalCgst > 0 ? totalCgst : '');
+        renderTaxRow(`S.G.S.T   :   ${sgstPer.toFixed(2)} %`, totalSgst > 0 ? totalSgst : '');
+        renderTaxRow(`I.G.S.T   :   ${igstPer.toFixed(2)} %`, totalIgst > 0 ? totalIgst : '');
+
+        // Subtotal divider line with clean spacing
+        taxY += 1;
+        doc.line(midX, taxY - 1.5, right, taxY - 1.5);
+        taxY += 2;
+        renderTaxRow("", data.sub_total || (totalAssessable + num(data.total_charity) + num(data.freight || data.freight_charges) + num(data.total_gst) + num(data.total_cgst) + num(data.total_sgst) + num(data.total_igst)), true);
+
+        renderTaxRow(`TCS         :   ${tcsPer.toFixed(3)} %`, data.total_tcs || 0);
+
+        // Net Amount divider line with generous clearance
+        taxY += 1;
+        doc.line(midX, taxY - 1.5, right, taxY - 1.5);
+        taxY += 3.8;
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8.5);
+        doc.text("Net Amount", rightLabelX, taxY);
+        doc.text(fmt(netAmount, 2), rightValX, taxY, { align: "right" });
+
+        // 6. Rupees in Words Box
+        y += splitH;
+        const wordsH = 8;
+        doc.rect(margin, y, contentWidth, wordsH);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(7.5);
+        doc.text("Rupees :", margin + 3, y + 5.5);
+        doc.text(numberToWords(netAmount), margin + 18, y + 5.5);
+
+        // 7. Declaration & Signatures Box
+        y += wordsH;
+        const signH = 34;
+        doc.rect(margin, y, contentWidth, signH);
+        doc.line(midX, y, midX, y + signH);
+
+        // Left Side Declaration
         doc.setFont("helvetica", "normal");
         doc.setFontSize(6.5);
-        const declarationText = "We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.";
-        doc.text(doc.splitTextToSize(declarationText, 110), margin + 3, y + 11);
+        const decText = "Certified that the particulars given above are true and Correct and Amount indicated represents the price actually charged and that there are no following of additional consideration directly or indirectly from the buyer";
+        doc.text(doc.splitTextToSize(decText, midX - margin - 6), margin + 3, y + 4.5);
 
         doc.setFont("helvetica", "bold");
         doc.setFontSize(7);
-        doc.text("For KAYAAR EXPORTS PRIVATE LIMITED", right - 5, y + 9, { align: "right" });
-        doc.text("Authorised Signatory", right - 5, y + 21, { align: "right" });
+        doc.text("E.& O.E", margin + 3, y + 17);
 
-        doc.setFontSize(6.5);
-        doc.setFont("helvetica", "normal");
-        doc.text(`Generated on ${new Date().toLocaleString('en-GB')} | Subject to Kovilpatti jurisdiction`, pageWidth / 2, pageHeight - 7, { align: "center" });
+        doc.text("Prepared by", margin + 15, y + signH - 4);
+        doc.text("Checked by", margin + 65, y + signH - 4);
 
-        doc.save(`${data.invoice_no || 'draft'}.pdf`);
+        // Right Side Signature
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(7.5);
+        doc.text("For KAYAAR EXPORTS PRIVATE LIMITED", midX + (right - midX) / 2, y + 5.5, { align: "center" });
+        doc.text("Director/Authorised Signatory", midX + (right - midX) / 2, y + signH - 4, { align: "center" });
+
+        doc.save(`${data.invoice_no || 'invoice'}.pdf`);
     };
     const exportToJSON = () => {
         // 1. Find the Depot Name from the list based on selection
@@ -1721,6 +2104,13 @@ const DepotSalesInvoice = () => {
                         </div>
                         <div className="bg-[#D9E5F7] p-3 border-t border-slate-400 flex justify-between gap-3 px-6 shadow-inner">
                             <div className="flex gap-2">
+                                <button
+                                    onClick={() => handlePrint({ ...formData, Details: gridRows, InvoiceDetails: gridRows })}
+                                    disabled={gridRows.length === 0}
+                                    className="bg-indigo-600 text-white px-5 py-2 text-[11px] font-black rounded flex items-center gap-2 shadow hover:bg-indigo-700 transition-all"
+                                >
+                                    <Printer size={16} /> PRINT INVOICE
+                                </button>
                                 <button onClick={exportToPDF} disabled={gridRows.length === 0} className="bg-emerald-600 text-white px-6 py-2 text-[11px] font-black rounded flex items-center gap-2 shadow hover:bg-emerald-700">
                                     <FileText size={16} /> DOWNLOAD PDF
                                 </button>
@@ -1875,6 +2265,40 @@ const DepotSalesInvoice = () => {
                 </div>
             )}
             {/* 🟢 END: EXCEL IMPORT MODAL */}
+
+            {/* PRINT CONTAINER - OFF-SCREEN BUT VISIBLE TO PRINTER */}
+            {printData && (
+                <div id="printable-invoice-wrapper">
+                    <ModernPrintView data={printData} listData={listData} getHSN={getHSN} />
+                </div>
+            )}
+
+            {/* PRINT STYLES - CLEAN A4 BILL ONLY */}
+            <style>{`
+                @media print {
+                    body * {
+                        visibility: hidden !important;
+                    }
+                    #printable-invoice-wrapper,
+                    #printable-invoice-wrapper * {
+                        visibility: visible !important;
+                    }
+                    #printable-invoice-wrapper {
+                        position: absolute !important;
+                        top: 0 !important;
+                        left: 0 !important;
+                        width: 100% !important;
+                        max-width: 100% !important;
+                        margin: 0 !important;
+                        padding: 0 !important;
+                        background: white !important;
+                    }
+                    @page {
+                        size: A4 portrait;
+                        margin: 8mm;
+                    }
+                }
+            `}</style>
         </div>
     );
 }

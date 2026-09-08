@@ -39,198 +39,339 @@ const imageUrlToDataUrl = async (url) => {
 
 
 // =====================================================
-// INDIAN RUPEES TO WORDS (Professional GST Requirement)
+// INDIAN RUPEES TO WORDS & FORMATTERS
 // =====================================================
+const fmtIN = (val, digits = 2) => {
+    const n = Number(val);
+    if (isNaN(n)) return digits === 0 ? '0' : '0.00';
+    return n.toLocaleString('en-IN', {
+        minimumFractionDigits: digits,
+        maximumFractionDigits: digits
+    });
+};
+
+const fmtInvoiceDate = (dateVal) => {
+    if (!dateVal) return '';
+    const d = new Date(dateVal);
+    if (isNaN(d.getTime())) return String(dateVal);
+    const day = String(d.getDate()).padStart(2, '0');
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const month = months[d.getMonth()];
+    const yr = String(d.getFullYear()).slice(-2);
+    return `${day}-${month}-${yr}`;
+};
+
 const numberToWords = (amount) => {
-    if (!amount || amount === 0) return "Zero Rupees Only";
+    const numVal = Math.round(Number(amount) || 0);
+    if (numVal === 0) return "ZERO RUPEES ONLY.";
 
-    const ones = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten",
-        "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
-    const tens = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
+    const ones = ["", "ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE", "TEN",
+        "ELEVEN", "TWELVE", "THIRTEEN", "FOURTEEN", "FIFTEEN", "SIXTEEN", "SEVENTEEN", "EIGHTEEN", "NINETEEN"];
+    const tens = ["", "", "TWENTY", "THIRTY", "FORTY", "FIFTY", "SIXTY", "SEVENTY", "EIGHTY", "NINETY"];
 
-    const convert = (n) => {
+    const convertChunk = (n) => {
+        if (n === 0) return "";
         if (n < 20) return ones[n];
         if (n < 100) return tens[Math.floor(n / 10)] + (n % 10 ? " " + ones[n % 10] : "");
-        if (n < 1000) return ones[Math.floor(n / 100)] + " Hundred" + (n % 100 ? " and " + convert(n % 100) : "");
+        if (n < 1000) return ones[Math.floor(n / 100)] + " HUNDRED" + (n % 100 ? " AND " + convertChunk(n % 100) : "");
         return "";
     };
 
     let str = "";
-    const crore = Math.floor(amount / 10000000);
-    const lakh = Math.floor((amount % 10000000) / 100000);
-    const thousand = Math.floor((amount % 100000) / 1000);
-    const hundred = amount % 1000;
+    const crore = Math.floor(numVal / 10000000);
+    const lakh = Math.floor((numVal % 10000000) / 100000);
+    const thousand = Math.floor((numVal % 100000) / 1000);
+    const hundred = numVal % 1000;
 
-    if (crore) str += convert(crore) + " Crore ";
-    if (lakh) str += convert(lakh) + " Lakh ";
-    if (thousand) str += convert(thousand) + " Thousand ";
-    if (hundred) str += convert(hundred);
+    if (crore) str += convertChunk(crore) + " CRORE ";
+    if (lakh) str += convertChunk(lakh) + (lakh > 1 ? " LAKHS " : " LAKH ");
+    if (thousand) str += convertChunk(thousand) + " THOUSAND ";
+    if (hundred) {
+        if (hundred < 100 && str.trim().length > 0) {
+            str += "AND " + convertChunk(hundred) + " ";
+        } else {
+            str += convertChunk(hundred) + " ";
+        }
+    }
 
-    return str.trim() + " Rupees Only";
+    return str.trim() + " ONLY.";
 };
 
 // =====================================================
-// PREMIUM PRINT VIEW - EXACTLY AS PER YOUR SPECIFICATION
+// EXACT TAX INVOICE PRINT VIEW (MATCHES SPECIFICATION)
 // =====================================================
 const ModernPrintView = ({ data, listData, getHSN }) => {
     if (!data) return null;
 
-    const getProduct = (pid) => listData.products.find(p => p.id === pid);
-    const netAmount = num(data.net_amount);
+    const party = listData?.parties?.find(p => String(p.id) === String(data.party_id)) || data.Party || {};
+    const config = listData?.types?.find(t => String(t.id) === String(data.invoice_type_id)) || {};
+    const gstPer = num(config.gst_percentage);
+    let cgstPer = num(config.cgst_percentage);
+    let sgstPer = num(config.sgst_percentage);
+    let igstPer = num(config.igst_percentage);
+    const tcsPer = num(config.tcs_percentage);
+
+    if (igstPer === 0 && cgstPer === 0 && sgstPer === 0 && gstPer > 0) {
+        cgstPer = gstPer / 2;
+        sgstPer = gstPer / 2;
+    }
+
+    const totalGst = num(data.total_gst);
+    let totalCgst = num(data.total_cgst);
+    let totalSgst = num(data.total_sgst);
+    let totalIgst = num(data.total_igst);
+
+    if (igstPer === 0 && totalCgst === 0 && totalSgst === 0 && totalGst > 0) {
+        totalCgst = totalGst / 2;
+        totalSgst = totalGst / 2;
+    }
+
+    const items = (data.Details || data.InvoiceDetails || []).filter(Boolean);
+    const totalBags = items.reduce((sum, r) => sum + num(r.packs), 0);
+    const totalWeight = items.reduce((sum, r) => sum + num(r.total_kgs), 0);
+    const totalAssessable = items.reduce((sum, r) => sum + num(r.assessable_value || (num(r.total_kgs) * num(r.rate))), 0);
+    const avgRate = totalWeight > 0 ? (totalAssessable / totalWeight) : 0;
+
+    const productDescs = [...new Set(items.map(r => r.product_description || (listData?.products?.find(p => String(p.id) === String(r.product_id))?.short_description)).filter(Boolean))];
+    const hsnCodes = [...new Set(items.map(r => (getHSN ? getHSN(r.product_id) : '') || r.hsn || '').filter(Boolean))];
+    const netAmount = num(data.net_amount || data.sub_total || totalAssessable);
 
     return (
-        <div id="printable-invoice-wrapper" className="p-8 bg-white text-slate-800 font-sans border border-slate-900 max-w-[210mm] mx-auto shadow-xl">
-            {/* 1. HEADER */}
-            <div className="flex justify-between items-start border-b-2 border-gray-300 pb-6 mb-6">
-                <div>
-                    <h1 className="text-5xl font-black text-blue-600 tracking-tighter">TAX INVOICE</h1>
-                    <div className="mt-2 inline-block bg-blue-100 text-blue-700 text-xs font-bold px-5 py-1 rounded">Original for Buyer</div>
+        <div id="printable-invoice-wrapper" className="p-4 bg-white text-black font-sans max-w-[210mm] mx-auto text-xs leading-normal">
+            {/* Top Row: Checkboxes & TAX INVOICE Title */}
+            <div className="relative mb-2">
+                <div className="text-center pt-2">
+                    <h1 className="text-xl font-bold tracking-wider">TAX INVOICE</h1>
                 </div>
-                <div className="text-right text-xs">
-                    <div className="font-bold">Duplicate for Transporter</div>
-                    <div className="font-bold">Triplicate for File Copy</div>
-                    <div className="font-bold">Extra Copy</div>
+                <div className="absolute right-0 top-0 text-[10px] font-bold space-y-0.5">
+                    <div className="flex items-center gap-1.5">
+                        <span className="w-3.5 h-3.5 border border-black inline-block"></span>
+                        <span>ORIGINAL FOR BUYER</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                        <span className="w-3.5 h-3.5 border border-black inline-block"></span>
+                        <span>DUPLICATE FOR TRANSPORTER</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                        <span className="w-3.5 h-3.5 border border-black inline-block"></span>
+                        <span>TRIPLICATE FOR FILE COPY</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                        <span className="w-3.5 h-3.5 border border-black inline-block"></span>
+                        <span>EXTRA COPY</span>
+                    </div>
                 </div>
             </div>
 
-            {/* 2. COMPANY DETAILS */}
-            <div className="grid grid-cols-2 gap-8 mb-8">
-                <div className="flex items-start gap-4">
-                    <img src={logoImage} alt="Kayaar Exports Logo" className="w-20 h-20 object-contain rounded-xl border border-slate-200 p-1 bg-white shadow-sm shrink-0" />
-                    <div>
-                        <h2 className="text-xl font-black">KAYAAR EXPORTS PRIVATE LIMITED</h2>
-                        <p className="text-xs leading-tight mt-1">
-                            D.No: 43/5, Railway Feeder Road<br />
-                            K.R. Nagar – 628503<br />
-                            Kovilpatti – Taluk<br />
-                            Tuticorin Dist, Tamilnadu, India
+            {/* Main Outer Box */}
+            <div className="border border-black">
+                {/* 1. Company Details Header Box */}
+                <div className="border-b border-black p-3 relative flex justify-between items-start">
+                    <div className="flex-1 text-center pr-24 pl-10">
+                        <h2 className="text-base font-black uppercase tracking-wide">KAYAAR EXPORTS PRIVATE LIMITED</h2>
+                        <p className="text-[11px] leading-tight mt-0.5">
+                            D.No: 43/5, Railway Feeder Road,<br />
+                            K.R. Nagar -628 503, Kovilpatti -Taluk<br />
+                            Tuticorin Dist., Tamilnadu, India
                         </p>
-                        <p className="text-xs mt-2">Phone: 04632 – 248258, 9443238761</p>
-                        <p className="text-xs">Email: ttnkrgroup@gmail.com</p>
-                        <p className="text-xs font-bold mt-2">GSTIN: 33AAACK4468M1ZA</p>
+                        <p className="text-[11px] font-medium mt-0.5">(04632) - 248258, 94432 38761</p>
+                        <p className="text-[11px] font-medium">E-Mail : ttnkrgroup@gmail.com</p>
+                        <p className="text-[11px] font-bold mt-0.5">GSTIN : 33AAACK4468M1ZA</p>
+                    </div>
+
+                    {/* OEKO-TEX framed badge */}
+                    <div className="border border-black p-1.5 text-center text-[9px] w-44 shrink-0 bg-white">
+                        <div className="font-bold text-[10px]">OEKO-TEX ®</div>
+                        <div className="text-[7.5px] uppercase font-bold text-slate-700">CONFIDENCE IN TEXTILES</div>
+                        <div className="font-bold text-[9px]">STANDARD 100</div>
+                        <div className="text-[8px] font-bold">18.HIN.60427 HOHENSTEIN HTTI</div>
+                        <div className="text-[7px] leading-tight">Tested for harmful substances</div>
+                        <div className="text-[7px]">www.oeko-tex.com/standard100</div>
+                    </div>
+
+                    {/* PAN & CIN bottom row of company box */}
+                    <div className="absolute bottom-1 left-3 right-3 flex justify-between text-[10px] font-bold">
+                        <span>PAN : AAACK4468M</span>
+                        <span>CIN : U51101TN1991PTC020933</span>
                     </div>
                 </div>
 
-                {/* 3. CERTIFICATION + REGISTRATION */}
-                <div className="text-right">
-                    <div className="border border-gray-300 bg-gray-50 p-4 rounded-xl inline-block text-xs">
-                        <div className="font-black text-emerald-700">OEKO-TEX Standard 100</div>
-                        <div className="text-[10px]">Tested for harmful substances</div>
-                        <div className="text-[10px]">www.oeko-tex.com/standard100</div>
+                {/* 2. Party & Invoice Meta (2-Column Grid) */}
+                <div className="border-b border-black grid grid-cols-12 min-h-[110px]">
+                    {/* Left Column: Party Name & Address */}
+                    <div className="col-span-7 p-2.5 border-r border-black flex flex-col justify-between">
+                        <div>
+                            <div className="font-bold text-[11px]">Party Name & Address</div>
+                            <div className="font-black text-sm uppercase mt-0.5">{party.account_name || data.party_name || '-'}</div>
+                            <div className="text-[11px] leading-tight mt-1 uppercase">
+                                {data.addr1 && <div>{data.addr1}</div>}
+                                {data.addr2 && <div>{data.addr2}</div>}
+                                {data.addr3 && <div>{data.addr3}</div>}
+                            </div>
+                        </div>
+                        <div className="font-bold text-[11px] mt-2">
+                            GST No: <span className="font-mono">{party.gst_no || data.gst_no || '-'}</span>
+                        </div>
                     </div>
-                    <div className="mt-6 text-xs">
-                        <div>PAN: <span className="font-mono">AAACK4468M</span></div>
-                        <div>CIN: <span className="font-mono">U51101TN1991PTC020933</span></div>
+
+                    {/* Right Column: Invoice Meta Table */}
+                    <div className="col-span-5 p-2 text-[11px]">
+                        <table className="w-full">
+                            <tbody>
+                                <tr>
+                                    <td className="font-bold py-0.5">Invoice No</td>
+                                    <td className="font-bold py-0.5 w-4">:</td>
+                                    <td className="font-bold py-0.5 text-right font-mono">{data.invoice_no || '-'}</td>
+                                </tr>
+                                <tr>
+                                    <td className="font-bold py-0.5">Invoice Dt</td>
+                                    <td className="font-bold py-0.5">:</td>
+                                    <td className="font-bold py-0.5 text-right">{fmtInvoiceDate(data.date)}</td>
+                                </tr>
+                                <tr>
+                                    <td className="font-bold py-0.5">E-Way Bill No</td>
+                                    <td className="font-bold py-0.5">:</td>
+                                    <td className="font-bold py-0.5 text-right font-mono">{data.ebill_no || '-'}</td>
+                                </tr>
+                                <tr>
+                                    <td className="font-bold py-0.5">Vehicle No</td>
+                                    <td className="font-bold py-0.5">:</td>
+                                    <td className="font-bold py-0.5 text-right uppercase font-mono">{data.vehicle_no || '-'}</td>
+                                </tr>
+                                <tr>
+                                    <td className="font-bold py-0.5">Delivery At</td>
+                                    <td className="font-bold py-0.5">:</td>
+                                    <td className="font-bold py-0.5 text-right uppercase">{data.delivery || '-'}</td>
+                                </tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
-            </div>
 
-            {/* 5. PARTY DETAILS + 6. INVOICE INFO */}
-            <div className="grid grid-cols-2 gap-12 mb-10 border border-slate-300 p-6 rounded-2xl">
-                <div>
-                    <div className="uppercase text-blue-700 text-[10px] font-black tracking-widest mb-1">Bill To</div>
-                    <div className="font-black text-lg">{data.Party?.account_name}</div>
-                    <div className="text-xs mt-2 leading-tight">
-                        {data.addr1}<br />
-                        {data.addr2}<br />
-                        {data.addr3}
-                    </div>
-                    <div className="mt-4 text-xs font-bold">GST No: <span className="font-mono">{data.Party?.gst_no || 'N/A'}</span></div>
+                {/* 3. Description Header Bar */}
+                <div className="border-b border-black grid grid-cols-12 text-[11px] font-bold text-center">
+                    <div className="col-span-7 py-1 border-r border-black">DESCRIPTION OF GOODS</div>
+                    <div className="col-span-5 py-1"></div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-6 text-xs">
-                    <div>
-                        <div className="font-black text-slate-500">Invoice No</div>
-                        <div className="font-mono text-2xl font-black">{data.invoice_no}</div>
-                    </div>
-                    <div>
-                        <div className="font-black text-slate-500">Invoice Date</div>
-                        <div className="font-bold text-lg">{data.date}</div>
-                    </div>
-                    <div>
-                        <div className="font-black text-slate-500">E-Way Bill No</div>
-                        <div className="font-mono">{data.ebill_no || 'PENDING'}</div>
-                    </div>
-                    <div>
-                        <div className="font-black text-slate-500">Vehicle No</div>
-                        <div className="font-bold uppercase">{data.vehicle_no || 'N/A'}</div>
-                    </div>
-                    <div>
-                        <div className="font-black text-slate-500">Delivery At</div>
-                        <div className="font-medium">{data.delivery || 'MUMBAI'}</div>
-                    </div>
+                {/* 4. Column Headers */}
+                <div className="border-b border-black grid grid-cols-12 text-[11px] font-bold text-center">
+                    <div className="col-span-2 py-1.5 border-r border-black">No of Bags</div>
+                    <div className="col-span-2 py-1.5 border-r border-black">Net Weight</div>
+                    <div className="col-span-3 py-1.5 border-r border-black">S.L No</div>
+                    <div className="col-span-2 py-1.5 border-r border-black">Rate Per Kgs</div>
+                    <div className="col-span-3 py-1.5">Assessable Value</div>
                 </div>
-            </div>
 
-            {/* 7. PRODUCT TABLE */}
-            <table className="w-full border-collapse mb-8 text-xs">
-                <thead>
-                    <tr className="bg-gray-100 text-gray-800 font-bold text-[10px] border-b">
-                        <th className="py-4 px-4 text-left border-r border-slate-700">Description of Goods</th>
-                        <th className="py-4 px-4 text-center border-r border-slate-700">No of Bags</th>
-                        <th className="py-4 px-4 text-center border-r border-slate-700">Net Weight</th>
-                        <th className="py-4 px-4 text-center border-r border-slate-700">S.L No</th>
-                        <th className="py-4 px-4 text-right border-r border-slate-700">Rate Per Kgs</th>
-                        <th className="py-4 px-4 text-right">Assessable Value</th>
-                    </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                    {(data.Details || data.InvoiceDetails || []).map((item, idx) => {
-                        const prod = getProduct(item.product_id);
+                {/* 5. Item Rows */}
+                <div className="border-b border-black">
+                    {items.map((item, idx) => {
+                        const rowWeight = num(item.total_kgs);
+                        const rowAssessable = num(item.assessable_value || (rowWeight * num(item.rate)));
+                        const assessableRatePerKg = rowWeight > 0 ? (rowAssessable / rowWeight) : num(item.rate);
                         return (
-                            <tr key={idx} className="text-[11px]">
-                                <td className="py-4 px-4">
-                                    <div className="font-black uppercase">{item.product_description}</div>
-                                    <div className="text-[10px] text-slate-500">HSN: {getHSN(item.product_id)}</div>
-                                </td>
-                                <td className="py-4 px-4 text-center font-bold">{item.packs}</td>
-                                <td className="py-4 px-4 text-center font-black">{item.total_kgs}</td>
-                                <td className="py-4 px-4 text-center">{item.from_no} - {item.to_no}</td>
-                                <td className="py-4 px-4 text-right font-bold">₹{item.rate}</td>
-                                <td className="py-4 px-4 text-right font-black">{num(item.assessable_value).toLocaleString('en-IN')}</td>
-                            </tr>
+                            <div key={idx} className="grid grid-cols-12 text-[11px] py-1 border-b border-black/20 last:border-b-0">
+                                <div className="col-span-2 text-center font-bold border-r border-black px-1">{item.packs}</div>
+                                <div className="col-span-2 text-center font-bold border-r border-black px-1">{fmtIN(rowWeight, 2)}</div>
+                                <div className="col-span-3 text-center border-r border-black px-1 font-mono">{[item.from_no, item.to_no].filter(Boolean).join(' - ') || item.sl_no || '-'}</div>
+                                <div className="col-span-2 text-right font-bold border-r border-black px-2">{fmtIN(assessableRatePerKg, 2)}</div>
+                                <div className="col-span-3 text-right font-bold px-3">{fmtIN(rowAssessable, 2)}</div>
+                            </div>
                         );
                     })}
-                </tbody>
-            </table>
+                </div>
 
-            {/* 9. TOTALS (Exact match to your screenshot) */}
-            <div className="flex justify-end">
-                <div className="w-96">
-                    <div className="space-y-2 text-sm border-b pb-4">
-                        <div className="flex justify-between"><span>Assessable Value</span><span className="font-mono">₹{num(data.total_assessable).toLocaleString('en-IN')}</span></div>
-                        <div className="flex justify-between"><span>Charity</span><span className="font-mono">₹{num(data.total_charity).toLocaleString('en-IN')}</span></div>
-                        <div className="flex justify-between"><span>Freight Charges</span><span className="font-mono">₹{num(data.freight_charges).toLocaleString('en-IN')}</span></div>
-                        <div className="flex justify-between border-t pt-3 font-bold"><span>GST Total</span><span className="font-mono">₹{num(data.total_gst).toLocaleString('en-IN')}</span></div>
+                {/* 6. Split Box: Description (Left) & Taxes/Charges (Right) */}
+                <div className="border-b border-black grid grid-cols-12 min-h-[140px]">
+                    {/* Left Column */}
+                    <div className="col-span-7 p-3 border-r border-black flex flex-col justify-between">
+                        <div>
+                            {productDescs.map((desc, i) => (
+                                <div key={i} className="font-black text-xs uppercase mb-1">{desc}</div>
+                            ))}
+                            <div className="font-bold text-[11px] mt-2">
+                                HSN CODE: {hsnCodes.join(', ') || '52052790'}
+                            </div>
+                        </div>
+                        <div className="text-[10px] font-normal pt-4">
+                            Whether the Tax Payable on Reverse Charges Basis ? &nbsp;&nbsp;&nbsp;&nbsp; Yes / No
+                        </div>
                     </div>
 
-                    {/* GRAND TOTAL - BLACK BOX LIKE YOUR SCREENSHOT */}
-                    <div className="mt-6 bg-blue-50 border border-blue-200 rounded-2xl px-8 py-5 flex justify-between items-center">
-                        <span className="text-lg font-bold text-blue-700 tracking-widest">GRAND TOTAL</span>
-                        <span className="text-3xl font-black font-mono text-blue-700">₹{netAmount.toLocaleString('en-IN')}</span>
-                    </div>
-
-                    {/* Amount in Words */}
-                    <div className="mt-8 text-xs font-bold text-slate-700">
-                        Amount Chargeable (in words):<br />
-                        <span className="font-mono text-blue-700 text-sm">{numberToWords(netAmount)}</span>
+                    {/* Right Column (Taxes, Charges & Net Amount) */}
+                    <div className="col-span-5 text-[11px]">
+                        <table className="w-full">
+                            <tbody>
+                                <tr className="border-b border-black/20">
+                                    <td className="p-1.5 pl-3 font-bold">TOTAL ASSESSABLE AMOUNT</td>
+                                    <td className="p-1.5 pr-3 text-right font-bold">{fmtIN(data.total_assessable || totalAssessable, 2)}</td>
+                                </tr>
+                                {num(data.total_charity) > 0 && (
+                                    <tr className="border-b border-black/20">
+                                        <td className="p-1.5 pl-3 font-bold">CHARITY</td>
+                                        <td className="p-1.5 pr-3 text-right font-bold">{fmtIN(data.total_charity, 2)}</td>
+                                    </tr>
+                                )}
+                                {num(data.freight_charges) > 0 && (
+                                    <tr className="border-b border-black/20">
+                                        <td className="p-1.5 pl-3 font-bold">FREIGHT</td>
+                                        <td className="p-1.5 pr-3 text-right font-bold">{fmtIN(data.freight_charges, 2)}</td>
+                                    </tr>
+                                )}
+                                <tr className="border-b border-black/20">
+                                    <td className="p-1.5 pl-3 font-medium">C.G.S.T &nbsp;&nbsp; : &nbsp; {cgstPer.toFixed(2)} %</td>
+                                    <td className="p-1.5 pr-3 text-right font-medium">{totalCgst > 0 ? fmtIN(totalCgst, 2) : ''}</td>
+                                </tr>
+                                <tr className="border-b border-black/20">
+                                    <td className="p-1.5 pl-3 font-medium">S.G.S.T &nbsp;&nbsp; : &nbsp; {sgstPer.toFixed(2)} %</td>
+                                    <td className="p-1.5 pr-3 text-right font-medium">{totalSgst > 0 ? fmtIN(totalSgst, 2) : ''}</td>
+                                </tr>
+                                <tr className="border-b border-black/20">
+                                    <td className="p-1.5 pl-3 font-medium">I.G.S.T &nbsp;&nbsp; : &nbsp; {igstPer.toFixed(2)} %</td>
+                                    <td className="p-1.5 pr-3 text-right font-medium">{totalIgst > 0 ? fmtIN(totalIgst, 2) : ''}</td>
+                                </tr>
+                                <tr className="border-t border-b border-black font-bold">
+                                    <td className="p-1.5 pl-3"></td>
+                                    <td className="p-1.5 pr-3 text-right">{fmtIN(data.sub_total || (totalAssessable + num(data.total_charity) + num(data.freight_charges) + num(data.total_gst) + num(data.total_cgst) + num(data.total_sgst) + num(data.total_igst)), 2)}</td>
+                                </tr>
+                                <tr className="border-b border-black">
+                                    <td className="p-1.5 pl-3 font-medium">TCS &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; : &nbsp; {tcsPer.toFixed(3)} %</td>
+                                    <td className="p-1.5 pr-3 text-right font-medium">{fmtIN(data.total_tcs || 0, 2)}</td>
+                                </tr>
+                                <tr className="font-black text-xs">
+                                    <td className="p-2 pl-3">Net Amount</td>
+                                    <td className="p-2 pr-3 text-right">{fmtIN(netAmount, 2)}</td>
+                                </tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
-            </div>
 
-            {/* Declaration & Signatures */}
-            <div className="mt-16 text-[10px] italic text-slate-500">
-                We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.
-            </div>
-
-            <div className="grid grid-cols-2 mt-12 text-xs">
-                <div>
-                    <div className="border border-dashed border-slate-400 w-52 h-24 rounded"></div>
-                    <p className="mt-3">Receiver's Signature</p>
+                {/* 7. Rupees in Words Full Bar */}
+                <div className="border-b border-black p-2 text-[11px] font-bold">
+                    <span className="mr-3">Rupees :</span>
+                    <span className="uppercase tracking-wide">{numberToWords(netAmount)}</span>
                 </div>
-                <div className="text-right">
-                    <p className="font-black">For KAYAAR EXPORTS PRIVATE LIMITED</p>
-                    <p className="mt-10">Authorised Signatory</p>
+
+                {/* 8. Declarations & Signatures Box */}
+                <div className="grid grid-cols-12 min-h-[100px]">
+                    {/* Left Column */}
+                    <div className="col-span-7 p-2.5 border-r border-black flex flex-col justify-between">
+                        <div className="text-[10px] leading-tight text-slate-800">
+                            Certified that the particulars given above are true and Correct and Amount indicated represents the price actually charged and that there are no following of additional consideration directly or indirectly from the buyer
+                        </div>
+                        <div className="font-bold text-[10px] mt-1">E.& O.E</div>
+                        <div className="flex justify-between text-[11px] font-bold mt-6 px-4">
+                            <span>Prepared by</span>
+                            <span>Checked by</span>
+                        </div>
+                    </div>
+
+                    {/* Right Column */}
+                    <div className="col-span-5 p-2.5 flex flex-col justify-between text-center">
+                        <div className="font-bold text-[11px]">For KAYAAR EXPORTS PRIVATE LIMITED</div>
+                        <div className="font-bold text-[11px] mt-12">Director/Authorised Signatory</div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -372,494 +513,334 @@ const InvoicePreparation = () => {
         return prod?.short_description || '';
     };
     const exportToPDF = async () => {
-        {
-            const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-            const data = formData;
-            const pageWidth = doc.internal.pageSize.getWidth();
-            const pageHeight = doc.internal.pageSize.getHeight();
-            const margin = 7;
-            const right = pageWidth - margin;
-            const contentWidth = pageWidth - (margin * 2);
-            const midX = margin + 115;
-
-            const fmt = (v, digits = 0) => {
-                const rounded = digits === 0 ? Math.round(num(v)) : num(v);
-                return rounded.toLocaleString('en-IN', {
-                    minimumFractionDigits: digits,
-                    maximumFractionDigits: digits
-                });
-            };
-            const fmtDate = (value) => {
-                if (!value) return '';
-                const date = new Date(value);
-                if (Number.isNaN(date.getTime())) return String(value);
-                return date.toLocaleDateString('en-GB');
-            };
-            const safe = (value, fallback = '') => {
-                const text = value === null || value === undefined ? '' : String(value).trim();
-                return text || fallback;
-            };
-            const party = listData.parties.find(p => String(p.id) === String(data.party_id)) || data.Party || {};
-            const transport = listData.transports.find(t => String(t.id) === String(data.transport_id)) || data.Transport || {};
-            const firstRow = gridRows[0] || {};
-            const hsnCodes = [...new Set(gridRows.map(row => getHSN(row.product_id)).filter(Boolean))];
-            const totalGst = num(data.total_gst) + num(data.total_sgst) + num(data.total_cgst) + num(data.total_igst);
-            const lineRows = gridRows.length ? gridRows : [{}];
-            const ratePerKg = (item) => {
-                const netWeight = num(item.total_kgs);
-                return netWeight ? num(item.assessable_value) / netWeight : 0;
-            };
-
-            const labelValue = (label, value, x, y, labelW = 28) => {
-                doc.setFont("helvetica", "bold");
-                doc.text(label, x, y);
-                doc.text(":", x + labelW, y);
-                doc.text(safe(value, "-"), x + labelW + 5, y);
-            };
-            const checkbox = (label, x, y) => {
-                doc.rect(x, y - 3, 3.5, 3.5);
-                doc.setFont("helvetica", "bold");
-                doc.text(label, x + 5, y);
-            };
-
-            doc.setTextColor(0);
-            doc.setDrawColor(0);
-            doc.setLineWidth(0.25);
-            doc.setFont("helvetica", "bold");
-            let logoDataUrl = '';
-            try {
-                logoDataUrl = await imageUrlToDataUrl(logoImage);
-            } catch (error) {
-                console.warn("Invoice logo could not be loaded:", error);
-            }
-
-            doc.setFontSize(6.5);
-            checkbox("ORIGINAL FOR BUYER", 145, 10);
-            checkbox("DUPLICATE FOR TRANSPORTER", 145, 15);
-            checkbox("TRIPLICATE FOR FILE COPY", 145, 20);
-            checkbox("EXTRA COPY", 145, 25);
-
-            doc.setFontSize(11);
-            doc.text("TAX INVOICE", pageWidth / 2, 22, { align: "center" });
-
-            let y = 36;
-            const headerHeight = 52;
-            doc.rect(margin, y, contentWidth, headerHeight);
-            if (logoDataUrl) {
-                doc.addImage(logoDataUrl, "JPEG", margin + 12, y + 8, 38, 38);
-            }
-
-            doc.setFontSize(10);
-            doc.text("KAYAAR EXPORTS PRIVATE LIMITED", margin + 62, y + 8);
-            doc.setFontSize(8);
-            doc.text("D.No: 43/5, Railway Feeder Road,", margin + 71, y + 13);
-            doc.text("K.R. Nagar - 628 503, Kovilpatti - Taluk", margin + 65, y + 18);
-            doc.text("Tuticorin Dist., Tamilnadu, India", margin + 72, y + 23);
-            doc.text("(04632) - 248258, 9443238761", margin + 75, y + 29);
-            doc.text("E-Mail : ttnkrgroup@gmail.com", margin + 74, y + 34);
-            doc.text("GSTIN : 33AAACK4468M1ZA", margin + 78, y + 40);
-
-            const certX = right - 48;
-            doc.rect(certX, y + 4, 41, 34);
-            doc.setFontSize(7);
-            doc.text("OEKO-TEX", certX + 20.5, y + 10, { align: "center" });
-            doc.setFontSize(5.5);
-            doc.text("CONFIDENCE IN TEXTILES", certX + 20.5, y + 14, { align: "center" });
-            doc.setFontSize(7);
-            doc.text("STANDARD 100", certX + 20.5, y + 19, { align: "center" });
-            doc.setFontSize(6);
-            doc.text("18.HIN.60427 HOHENSTEIN HTTI", certX + 20.5, y + 25, { align: "center" });
-            doc.setFontSize(5.2);
-            doc.text("Tested for harmful substances", certX + 20.5, y + 31, { align: "center" });
-            doc.text("www.oeko-tex.com/standard100", certX + 20.5, y + 35, { align: "center" });
-
-            doc.setFontSize(7);
-            doc.text("PAN : AAACK4468M", margin + 3, y + 49);
-            doc.text("CIN : U51101TN1991PTC020933", right - 64, y + 49);
-
-            y += headerHeight;
-            const detailsHeight = 45;
-            doc.rect(margin, y, contentWidth, detailsHeight);
-            doc.line(midX, y, midX, y + detailsHeight);
-
-            doc.setFontSize(8);
-            doc.text("Party Name & Address", margin + 3, y + 6);
-            doc.setFontSize(9);
-            doc.text(safe(party.account_name, safe(data.party_name, "N/A")).toUpperCase(), margin + 8, y + 13);
-            doc.setFontSize(7);
-            const addressLines = [data.addr1, data.addr2, data.addr3].filter(Boolean);
-            (addressLines.length ? addressLines : [""]).slice(0, 4).forEach((line, index) => {
-                doc.text(safe(line).toUpperCase(), margin + 8, y + 20 + (index * 5));
-            });
-            doc.text(`GST No: ${safe(party.gst_no || data.gst_no, "N/A")}`, margin + 8, y + 39);
-
-            const infoX = midX + 7;
-            doc.setFontSize(8);
-            labelValue("Invoice No", data.invoice_no, infoX, y + 8);
-            labelValue("Invoice Dt", fmtDate(data.date), infoX, y + 15);
-            labelValue("E-Way Bill No", data.ebill_no, infoX, y + 22);
-            labelValue("Vehicle No", data.vehicle_no, infoX, y + 29);
-            labelValue("Delivery At", data.delivery, infoX, y + 36);
-
-            y += detailsHeight;
-            doc.rect(margin, y, contentWidth, 9);
-            doc.setFontSize(8);
-            doc.text("DESCRIPTION OF GOODS", pageWidth / 2, y + 6, { align: "center" });
-            y += 9;
-
-            autoTable(doc, {
-                startY: y,
-                margin: { left: margin, right: margin },
-                tableWidth: contentWidth,
-                head: [["Product", "No of Bags", "Net Weight", "S.L No", "Rate Per Kgs", "Assessable Value"]],
-                body: lineRows.map(item => [
-                    getProductShortDesc(item.product_id),
-                    fmt(item.packs, 0),
-                    fmt(item.total_kgs, 2),
-                    [safe(item.from_no), safe(item.to_no)].filter(Boolean).join(" - "),
-                    fmt(ratePerKg(item), 2),
-                    fmt(item.assessable_value, 0)
-                ]),
-                theme: "grid",
-                styles: {
-                    font: "helvetica",
-                    fontSize: 8,
-                    textColor: 0,
-                    lineColor: 0,
-                    lineWidth: 0.25,
-                    cellPadding: 2,
-                    minCellHeight: 9,
-                    valign: "middle"
-                },
-                headStyles: {
-                    fillColor: [255, 255, 255],
-                    textColor: 0,
-                    fontStyle: "bold",
-                    halign: "center",
-                    fontSize: 7.5
-                },
-                bodyStyles: {
-                    halign: "center",
-                    fontStyle: "bold"
-                },
-                columnStyles: {
-                    0: { cellWidth: 55, halign: "left" },
-                    1: { cellWidth: 22 },
-                    2: { cellWidth: 26 },
-                    3: { cellWidth: 40 },
-                    4: { cellWidth: 23, halign: "right" },
-                    5: { cellWidth: contentWidth - 166, halign: "right" }
-                }
-            });
-
-            y = doc.lastAutoTable.finalY;
-            const summaryTop = y;
-            const taxLabelX = midX + 4;
-            const taxValueX = right - 5;
-
-            const config = listData.types.find(t => String(t.id) === String(data.invoice_type_id)) || {};
-            const cgstPer = num(config.cgst_percentage);
-            const sgstPer = num(config.sgst_percentage);
-            const igstPer = num(config.igst_percentage);
-            const tcsPer = num(config.tcs_percentage);
-
-            const taxRows = [];
-            if (num(data.total_charity) > 0) {
-                taxRows.push(["Charity", data.total_charity]);
-            }
-            if (num(data.freight_charges) > 0) {
-                taxRows.push(["Freight Charges", data.freight_charges]);
-            }
-            taxRows.push([`CGST @ ${(cgstPer || 0).toFixed(2)}%`, data.total_cgst || 0]);
-            taxRows.push([`SGST @ ${(sgstPer || 0).toFixed(2)}%`, data.total_sgst || 0]);
-            taxRows.push([`IGST @ ${(igstPer || 0).toFixed(2)}%`, data.total_igst || 0]);
-            if (num(data.total_vat) > 0) {
-                taxRows.push(["VAT", data.total_vat]);
-            }
-            if (num(data.total_cenvat) > 0) {
-                taxRows.push(["CENVAT", data.total_cenvat]);
-            }
-            if (num(data.total_duty) > 0) {
-                taxRows.push(["DUTY", data.total_duty]);
-            }
-            if (num(data.total_cess) > 0) {
-                taxRows.push(["CESS", data.total_cess]);
-            }
-            if (num(data.total_hr_sec_cess) > 0) {
-                taxRows.push(["HECESS", data.total_hr_sec_cess]);
-            }
-            if (num(data.total_other) > 0) {
-                taxRows.push(["Other Charges", data.total_other]);
-            }
-            
-            // Total before TCS
-            taxRows.push(["Total", data.sub_total]);
-            
-            taxRows.push([`TCS @ ${(tcsPer || 0).toFixed(2)}%`, data.total_tcs || 0]);
-            if (num(data.round_off) !== 0) {
-                taxRows.push(["Round Off", data.round_off]);
-            }
-
-            const summaryHeight = Math.max(38, 14 + (taxRows.length * 6));
-            doc.rect(margin, summaryTop, contentWidth, summaryHeight);
-            doc.line(midX, summaryTop, midX, summaryTop + summaryHeight);
-
-            doc.setFontSize(10);
-            doc.text(safe(firstRow.product_description, "DESCRIPTION").toUpperCase(), margin + 3, summaryTop + 9);
-            doc.setFontSize(8);
-            doc.text(`HSN CODE: ${hsnCodes.join(", ") || "N/A"}`, margin + 3, summaryTop + 34);
-
-            doc.setFontSize(8);
-            taxRows.forEach(([label, value], index) => {
-                const rowY = summaryTop + 9 + (index * 6);
-                
-                // Draw a dividing line before Total and before TCS
-                if (label === "Total" || label.startsWith("TCS")) {
-                    doc.line(midX, rowY - 4, right, rowY - 4);
-                }
-
-                doc.setFont("helvetica", ["CGST", "SGST", "IGST", "Total", "TCS"].some(k => label.includes(k)) ? "bold" : "normal");
-                doc.text(label, taxLabelX, rowY);
-                doc.text(fmt(value, 2), taxValueX, rowY, { align: "right" });
-            });
-
-            y = summaryTop + summaryHeight;
-            doc.rect(margin, y, contentWidth, 30);
-            doc.setFontSize(8);
-            doc.setFont("helvetica", "bold");
-            doc.text("Amount Chargeable (in words)", margin + 3, y + 7);
-            doc.setFont("helvetica", "normal");
-            doc.text(doc.splitTextToSize(numberToWords(Math.round(num(data.net_amount))), 105), margin + 3, y + 13);
-            doc.setFont("helvetica", "bold");
-            doc.text("Grand Total", right - 48, y + 11);
-            doc.setFontSize(10);
-            doc.text(fmt(data.net_amount, 2), right - 3, y + 11, { align: "right" });
-
-            y += 30;
-            doc.rect(margin, y, contentWidth, 24);
-            doc.setFont("helvetica", "bold");
-            doc.setFontSize(7);
-            doc.text("Declaration:", margin + 3, y + 6);
-            doc.setFont("helvetica", "normal");
-            doc.setFontSize(6.5);
-            const declarationText = "We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.";
-            doc.text(doc.splitTextToSize(declarationText, 110), margin + 3, y + 11);
-
-            doc.setFont("helvetica", "bold");
-            doc.setFontSize(7);
-            doc.text("For KAYAAR EXPORTS PRIVATE LIMITED", right - 5, y + 9, { align: "right" });
-            doc.text("Authorised Signatory", right - 5, y + 21, { align: "right" });
-
-            doc.setFontSize(6.5);
-            doc.setFont("helvetica", "normal");
-            doc.text(`Generated on ${new Date().toLocaleString('en-GB')} | Subject to Kovilpatti jurisdiction`, pageWidth / 2, pageHeight - 7, { align: "center" });
-
-            doc.save(`${data.invoice_no || 'draft'}.pdf`);
-            return;
-        }
         const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
         const data = formData;
         const pageWidth = doc.internal.pageSize.getWidth();
-        const margin = 12;
+        const pageHeight = doc.internal.pageSize.getHeight();
+        const margin = 8;
+        const right = pageWidth - margin;
         const contentWidth = pageWidth - (margin * 2);
-        let y = margin + 10;
+        const midX = margin + 114;
 
-        const fmt = (v, digits = 2) => num(v).toFixed(digits);
+        const fmt = (v, digits = 2) => {
+            const n = Number(v);
+            if (isNaN(n)) return digits === 0 ? '0' : '0.00';
+            return n.toLocaleString('en-IN', {
+                minimumFractionDigits: digits,
+                maximumFractionDigits: digits
+            });
+        };
 
-        doc.setTextColor(0);
-        doc.setFont("helvetica");
-
-
-        // 1. HEADER
-        doc.setFontSize(36);
-        doc.setFont("helvetica", "bold");
-        doc.setTextColor("#1d4ed8"); // Blue-700
-        doc.text("TAX INVOICE", margin, y);
-        doc.setTextColor(0);
-        doc.setFontSize(8);
-        doc.text("Original for Buyer", margin, y + 5);
-        y += 15;
-
-
-        // 2. COMPANY & PARTY DETAILS
-        doc.setFontSize(14);
-        doc.setFont("helvetica", "bold");
-        doc.text("KAYAAR EXPORTS PRIVATE LIMITED", margin, y);
-        doc.setFontSize(9);
-        doc.setFont("helvetica", "normal");
-        y += 5;
-        doc.text("D.No: 43/5, Railway Feeder Road, K.R. Nagar – 628503", margin, y);
-        y += 4;
-        doc.text("Kovilpatti – Taluk, Tuticorin Dist, Tamilnadu, India", margin, y);
-        y += 4;
-        doc.text("Phone: 04632 – 248258, 9443238761 | Email: ttnkrgroup@gmail.com", margin, y);
-        y += 6;
-        doc.setFont("helvetica", "bold");
-        doc.text("GSTIN: 33AAACK4468M1ZA", margin, y);
-        y += 10;
-
-
-        // 3. INVOICE & BILLING INFO
-        doc.setDrawColor(203, 213, 225); // slate-300
-        doc.setLineWidth(0.5);
-        doc.line(margin, y, pageWidth - margin, y);
-        y += 8;
-
+        const safe = (value, fallback = '') => {
+            const text = value === null || value === undefined ? '' : String(value).trim();
+            return text || fallback;
+        };
 
         const party = listData.parties.find(p => String(p.id) === String(data.party_id)) || data.Party || {};
-        doc.setFontSize(8);
-        doc.setTextColor(100, 116, 139); // slate-500
-        doc.text("BILL TO:", margin, y);
-        doc.setFontSize(12);
+        const config = listData.types.find(t => String(t.id) === String(data.invoice_type_id)) || {};
+        const gstPer = num(config.gst_percentage);
+        let cgstPer = num(config.cgst_percentage);
+        let sgstPer = num(config.sgst_percentage);
+        let igstPer = num(config.igst_percentage);
+        const tcsPer = num(config.tcs_percentage);
+
+        if (igstPer === 0 && cgstPer === 0 && sgstPer === 0 && gstPer > 0) {
+            cgstPer = gstPer / 2;
+            sgstPer = gstPer / 2;
+        }
+
+        const totalGst = num(data.total_gst);
+        let totalCgst = num(data.total_cgst);
+        let totalSgst = num(data.total_sgst);
+        let totalIgst = num(data.total_igst);
+
+        if (igstPer === 0 && totalCgst === 0 && totalSgst === 0 && totalGst > 0) {
+            totalCgst = totalGst / 2;
+            totalSgst = totalGst / 2;
+        }
+
+        const items = gridRows.length ? gridRows : (data.Details || data.InvoiceDetails || []);
+        const totalBags = items.reduce((sum, r) => sum + num(r.packs), 0);
+        const totalWeight = items.reduce((sum, r) => sum + num(r.total_kgs), 0);
+        const totalAssessable = items.reduce((sum, r) => sum + num(r.assessable_value || (num(r.total_kgs) * num(r.rate))), 0);
+        const avgRate = totalWeight > 0 ? (totalAssessable / totalWeight) : 0;
+
+        const productDescs = [...new Set(items.map(r => r.product_description || getProductShortDesc(r.product_id)).filter(Boolean))];
+        const hsnCodes = [...new Set(items.map(r => getHSN(r.product_id)).filter(Boolean))];
+        const netAmount = num(data.net_amount || data.sub_total || totalAssessable);
+
         doc.setTextColor(0);
+        doc.setDrawColor(0);
+        doc.setLineWidth(0.2);
+
+        // 1. Top Checkboxes & TAX INVOICE Title
         doc.setFont("helvetica", "bold");
-        doc.text(party.account_name || "N/A", margin, y + 5);
-        doc.setFontSize(9);
+        doc.setFontSize(13);
+        doc.text("TAX INVOICE", pageWidth / 2, 17, { align: "center" });
+
+        const checkbox = (label, x, y) => {
+            doc.rect(x, y - 2.8, 3, 3);
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(6.5);
+            doc.text(label, x + 4.5, y);
+        };
+
+        checkbox("ORIGINAL FOR BUYER", right - 48, 8);
+        checkbox("DUPLICATE FOR TRANSPORTER", right - 48, 12);
+        checkbox("TRIPLICATE FOR FILE COPY", right - 48, 16);
+        checkbox("EXTRA COPY", right - 48, 20);
+
+        // 2. Company Header Box
+        let y = 23;
+        const companyHeight = 44;
+        doc.rect(margin, y, contentWidth, companyHeight);
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(10.5);
+        doc.text("KAYAAR EXPORTS PRIVATE LIMITED", margin + (contentWidth / 2) - 15, y + 6, { align: "center" });
+
         doc.setFont("helvetica", "normal");
-        const address = [data.addr1, data.addr2, data.addr3].filter(Boolean).join(', ');
-        doc.text(address, margin, y + 10);
+        doc.setFontSize(7.5);
+        doc.text("D.No: 43/5, Railway Feeder Road,", margin + (contentWidth / 2) - 15, y + 10.5, { align: "center" });
+        doc.text("K.R. Nagar -628 503, Kovilpatti -Taluk", margin + (contentWidth / 2) - 15, y + 14.5, { align: "center" });
+        doc.text("Tuticorin Dist., Tamilnadu, India", margin + (contentWidth / 2) - 15, y + 18.5, { align: "center" });
+        doc.text("(04632) - 248258, 94432 38761", margin + (contentWidth / 2) - 15, y + 23, { align: "center" });
+        doc.text("E-Mail : ttnkrgroup@gmail.com", margin + (contentWidth / 2) - 15, y + 27, { align: "center" });
+
         doc.setFont("helvetica", "bold");
-        doc.text(`GST No: ${party.gst_no || 'N/A'}`, margin, y + 15);
-
-
-        const infoX = pageWidth / 2 + 10;
         doc.setFontSize(8);
-        doc.setTextColor(100, 116, 139);
-        doc.text("INVOICE NO:", infoX, y);
-        doc.text("INVOICE DATE:", infoX, y + 7);
-        doc.text("E-WAY BILL NO:", infoX, y + 14);
-        doc.text("VEHICLE NO:", infoX, y + 21);
+        doc.text("GSTIN : 33AAACK4468M1ZA", margin + (contentWidth / 2) - 15, y + 32, { align: "center" });
 
-
-        doc.setFontSize(10);
-        doc.setTextColor(0);
+        // OEKO-TEX Box on right
+        const certX = right - 46;
+        const certW = 43;
+        const certH = 30;
+        doc.rect(certX, y + 3, certW, certH);
+        doc.setFontSize(7.5);
         doc.setFont("helvetica", "bold");
-        doc.text(data.invoice_no, infoX + 35, y);
-        doc.text(data.date, infoX + 35, y + 7);
-        doc.text(data.ebill_no || 'PENDING', infoX + 35, y + 14);
-        doc.text(data.vehicle_no || 'N/A', infoX + 35, y + 21);
+        doc.text("OEKO-TEX ®", certX + (certW / 2), y + 7.5, { align: "center" });
+        doc.setFontSize(5.5);
+        doc.setFont("helvetica", "normal");
+        doc.text("CONFIDENCE IN TEXTILES", certX + (certW / 2), y + 11.5, { align: "center" });
+        doc.setFontSize(7);
+        doc.setFont("helvetica", "bold");
+        doc.text("STANDARD 100", certX + (certW / 2), y + 16, { align: "center" });
+        doc.setFontSize(6);
+        doc.setFont("helvetica", "normal");
+        doc.text("18.HIN.60427 HOHENSTEIN HTTI", certX + (certW / 2), y + 20.5, { align: "center" });
+        doc.setFontSize(5.2);
+        doc.text("Tested for harmful substances", certX + (certW / 2), y + 25, { align: "center" });
+        doc.text("www.oeko-tex.com/standard100", certX + (certW / 2), y + 29, { align: "center" });
 
+        // PAN & CIN bottom row
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(7.5);
+        doc.text("PAN : AAACK4468M", margin + 3, y + 40.5);
+        doc.text("CIN : U51101TN1991PTC020933", right - 3, y + 40.5, { align: "right" });
 
-        y += 30;
-        doc.line(margin, y, pageWidth - margin, y);
+        // 3. Party Details & Invoice Details Box
+        y += companyHeight;
+        const partyHeight = 38;
+        doc.rect(margin, y, contentWidth, partyHeight);
+        doc.line(midX, y, midX, y + partyHeight);
 
+        // Left Side: Party
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(7.5);
+        doc.text("Party Name & Address", margin + 3, y + 5);
 
-        // 4. PRODUCT TABLE
+        doc.setFontSize(9);
+        doc.text(safe(party.account_name || data.party_name, "N/A").toUpperCase(), margin + 3, y + 10);
+
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(7.5);
+        const addressLines = [data.addr1, data.addr2, data.addr3].filter(Boolean);
+        addressLines.slice(0, 3).forEach((line, idx) => {
+            doc.text(safe(line).toUpperCase(), margin + 3, y + 14.5 + (idx * 4.2));
+        });
+
+        doc.setFont("helvetica", "bold");
+        doc.text(`GST No: ${safe(party.gst_no || data.gst_no, "N/A")}`, margin + 3, y + 33.5);
+
+        // Right Side: Invoice Meta
+        const metaX = midX + 3;
+        const metaValX = right - 3;
+        const labelRow = (lbl, val, rowY, isBoldVal = true) => {
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(7.5);
+            doc.text(lbl, metaX, rowY);
+            doc.text(":", metaX + 26, rowY);
+            doc.setFont("helvetica", isBoldVal ? "bold" : "normal");
+            doc.text(safe(val, "-"), metaValX, rowY, { align: "right" });
+        };
+
+        labelRow("Invoice No", data.invoice_no, y + 6);
+        labelRow("Invoice Dt", fmtInvoiceDate(data.date), y + 12);
+        labelRow("E-Way Bill No", data.ebill_no, y + 18);
+        labelRow("Vehicle No", safe(data.vehicle_no).toUpperCase(), y + 24);
+        labelRow("Delivery At", safe(data.delivery).toUpperCase(), y + 30);
+
+        // 4. Description Bar & Table Header
+        y += partyHeight;
+        doc.rect(margin, y, contentWidth, 6.5);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8);
+        doc.text("DESCRIPTION OF GOODS", margin + (midX - margin) / 2, y + 4.5, { align: "center" });
+
+        y += 6.5;
+        const colW = [24, 30, 44, 34, contentWidth - (24 + 30 + 44 + 34)]; // sums to contentWidth (194)
+        const tableBody = (items.length ? items : [{}]).map(item => {
+            const rowWeight = num(item.total_kgs);
+            const rowAssessable = num(item.assessable_value || (rowWeight * num(item.rate)));
+            const assessableRatePerKg = rowWeight > 0 ? (rowAssessable / rowWeight) : num(item.rate);
+            return [
+                String(item.packs || ''),
+                fmt(rowWeight, 2),
+                [item.from_no, item.to_no].filter(Boolean).join(" - ") || item.sl_no || '-',
+                fmt(assessableRatePerKg, 2),
+                fmt(rowAssessable, 2)
+            ];
+        });
+
         autoTable(doc, {
-            startY: y + 2,
+            startY: y,
             margin: { left: margin, right: margin },
-            head: [
-                ["Description of Goods", "No of Bags", "Net Weight", "S.L No", "Rate Per Kgs", "Assessable Value"]
-            ],
-            body: gridRows.map(item => [
-                { content: `${item.product_description}\nHSN: ${getHSN(item.product_id)}`, styles: { fontStyle: 'bold' } },
-                { content: num(item.packs).toLocaleString('en-IN'), styles: { halign: 'center' } },
-                { content: num(item.total_kgs).toLocaleString('en-IN', { minimumFractionDigits: 2 }), styles: { halign: 'center', fontStyle: 'bold' } },
-                { content: fmt(item.packs, 0), styles: { halign: 'center' } },
-                { content: fmt(item.total_kgs, 2), styles: { halign: 'center', fontStyle: 'bold' } },
-                { content: `${item.from_no || ''} - ${item.to_no || ''}`, styles: { halign: 'center' } },
-                { content: `₹${num(item.rate).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, styles: { halign: 'right' } },
-                { content: num(item.assessable_value).toLocaleString('en-IN', { minimumFractionDigits: 2 }), styles: { halign: 'right', fontStyle: 'bold' } },
-                { content: `Rs. ${fmt(item.rate, 2)}`, styles: { halign: 'right' } },
-                { content: fmt(item.assessable_value, 2), styles: { halign: 'right', fontStyle: 'bold' } }
-            ]),
+            tableWidth: contentWidth,
+            head: [["No of Bags", "Net Weight", "S.L No", "Rate Per Kgs", "Assessable Value"]],
+            body: tableBody,
             theme: "grid",
             styles: {
                 font: "helvetica",
                 fontSize: 8,
                 textColor: 0,
                 lineColor: 0,
-                lineColor: [203, 213, 225],
                 lineWidth: 0.2,
                 cellPadding: 2,
+                minCellHeight: 7,
                 valign: "middle"
             },
             headStyles: {
-                fillColor: [241, 245, 249], // slate-100
-                textColor: 29,
+                fillColor: [255, 255, 255],
                 textColor: 0,
-                fontSize: 8,
-                fontStyle: "bold"
+                fontStyle: "bold",
+                halign: "center",
+                fontSize: 7.5
+            },
+            bodyStyles: {
+                fontStyle: "bold",
+                halign: "center"
             },
             columnStyles: {
-                0: { cellWidth: 60 },
-                1: { halign: 'center' },
-                2: { halign: 'center' },
-                3: { halign: 'center' },
-                4: { halign: 'right' },
-                5: { halign: 'right' }
+                0: { cellWidth: colW[0], halign: "center" },
+                1: { cellWidth: colW[1], halign: "center" },
+                2: { cellWidth: colW[2], halign: "center" },
+                3: { cellWidth: colW[3], halign: "right" },
+                4: { cellWidth: colW[4], halign: "right" }
             }
         });
 
+        y = doc.lastAutoTable.finalY;
 
-        y = doc.lastAutoTable.finalY + 10;
+        // 5. Split Box: Description & Taxes
+        const splitH = 58;
+        doc.rect(margin, y, contentWidth, splitH);
+        doc.line(midX, y, midX, y + splitH);
 
-
-        // 5. TOTALS & AMOUNT IN WORDS
-        const totalsX = pageWidth / 2;
-        const totalsY = y;
-        const totalLabelX = totalsX;
-        const totalValueX = pageWidth - margin;
-
-
-        const totalRows = [
-            ["Assessable Value", data.total_assessable],
-            ["Charity", data.total_charity],
-            ["Freight Charges", data.freight_charges],
-            ["GST Total", num(data.total_gst) + num(data.total_sgst) + num(data.total_cgst) + num(data.total_igst)],
-        ];
-
-
-        doc.setFontSize(10);
-        totalRows.forEach(([label, value], i) => {
-            doc.setFont("helvetica", "normal");
-            doc.text(label, totalLabelX, totalsY + (i * 7));
-            doc.setFont("helvetica", "bold");
-            doc.text(`₹${num(value).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, totalValueX, totalsY + (i * 7), { align: 'right' });
-            doc.text(`Rs. ${fmt(value, 2)}`, totalValueX, totalsY + (i * 7), { align: 'right' });
+        // Left Side: Goods Description
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8.5);
+        let descY = y + 6;
+        productDescs.forEach(desc => {
+            doc.text(safe(desc).toUpperCase(), margin + 3, descY);
+            descY += 4.5;
         });
 
+        doc.setFontSize(7.5);
+        doc.text(`HSN CODE: ${hsnCodes.join(", ") || "52052790"}`, margin + 3, y + 20);
 
-        doc.setDrawColor(203, 213, 225);
-        doc.setLineWidth(0.3);
-        doc.line(totalsX, totalsY + (totalRows.length * 7) - 2, totalValueX, totalsY + (totalRows.length * 7) - 2);
-
-
-        const grandTotalY = totalsY + (totalRows.length * 7) + 5;
-        doc.setFontSize(14);
-        doc.setFont("helvetica", "bold");
-        doc.text("GRAND TOTAL", totalLabelX, grandTotalY);
-        doc.setFontSize(18);
-        doc.text(`₹${num(data.net_amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, totalValueX, grandTotalY, { align: 'right' });
-
-        doc.text(`Rs. ${fmt(data.net_amount, 2)}`, totalValueX, grandTotalY, { align: 'right' });
-
-        const amountInWordsY = grandTotalY + 15;
-        doc.setFontSize(8);
-        doc.setFont("helvetica", "bold");
-        doc.text("Amount Chargeable (in words):", margin, amountInWordsY);
-        doc.setFontSize(10);
-        doc.setTextColor("#1d4ed8");
-        doc.text(numberToWords(num(data.net_amount)), margin, amountInWordsY + 5);
-        doc.setTextColor(0);
-
-
-        // 6. FOOTER
-        const footerY = doc.internal.pageSize.getHeight() - 35;
-        doc.setFontSize(8);
         doc.setFont("helvetica", "normal");
-        doc.setTextColor(100, 116, 139);
-        doc.text("We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.", margin, footerY);
+        doc.setFontSize(7);
+        doc.text("Whether the Tax Payable on Reverse Charges Basis ?    Yes / No", margin + 3, y + splitH - 4);
 
+        // Right Side: Tax & Charge Rows
+        const rightLabelX = midX + 3;
+        const rightValX = right - 3;
+        let taxY = y + 5;
+        const taxLineHeight = 5.2;
 
-        doc.setFontSize(10);
+        const renderTaxRow = (lbl, val, isBold = false) => {
+            doc.setFont("helvetica", isBold ? "bold" : "normal");
+            doc.setFontSize(7.5);
+            doc.text(lbl, rightLabelX, taxY);
+            if (val !== undefined && val !== null && val !== '') {
+                doc.text(fmt(val, 2), rightValX, taxY, { align: "right" });
+            }
+            taxY += taxLineHeight;
+        };
+
+        renderTaxRow("TOTAL ASSESSABLE", data.total_assessable || totalAssessable, true);
+        if (num(data.total_charity) > 0) {
+            renderTaxRow("CHARITY", data.total_charity, true);
+        }
+        if (num(data.freight_charges) > 0) {
+            renderTaxRow("FREIGHT", data.freight_charges, true);
+        }
+        renderTaxRow(`C.G.S.T   :   ${cgstPer.toFixed(2)} %`, totalCgst > 0 ? totalCgst : '');
+        renderTaxRow(`S.G.S.T   :   ${sgstPer.toFixed(2)} %`, totalSgst > 0 ? totalSgst : '');
+        renderTaxRow(`I.G.S.T   :   ${igstPer.toFixed(2)} %`, totalIgst > 0 ? totalIgst : '');
+
+        // Subtotal divider line with clean spacing
+        taxY += 1;
+        doc.line(midX, taxY - 1.5, right, taxY - 1.5);
+        taxY += 2;
+        renderTaxRow("", data.sub_total || (totalAssessable + num(data.total_charity) + num(data.freight_charges) + num(data.total_gst) + num(data.total_cgst) + num(data.total_sgst) + num(data.total_igst)), true);
+
+        renderTaxRow(`TCS         :   ${tcsPer.toFixed(3)} %`, data.total_tcs || 0);
+
+        // Net Amount divider line with generous clearance
+        taxY += 1;
+        doc.line(midX, taxY - 1.5, right, taxY - 1.5);
+        taxY += 3.8;
         doc.setFont("helvetica", "bold");
-        doc.setTextColor(0);
-        doc.text("For KAYAAR EXPORTS PRIVATE LIMITED", pageWidth - margin, footerY + 15, { align: 'right' });
-        doc.text("Authorised Signatory", pageWidth - margin, footerY + 20, { align: 'right' });
+        doc.setFontSize(8.5);
+        doc.text("Net Amount", rightLabelX, taxY);
+        doc.text(fmt(netAmount, 2), rightValX, taxY, { align: "right" });
 
+        // 6. Rupees in Words Box
+        y += splitH;
+        const wordsH = 8;
+        doc.rect(margin, y, contentWidth, wordsH);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(7.5);
+        doc.text("Rupees :", margin + 3, y + 5.5);
+        doc.text(numberToWords(netAmount), margin + 18, y + 5.5);
 
-        doc.save(`${data.invoice_no}.pdf`);
+        // 7. Declaration & Signatures Box
+        y += wordsH;
+        const signH = 34;
+        doc.rect(margin, y, contentWidth, signH);
+        doc.line(midX, y, midX, y + signH);
+
+        // Left Side Declaration
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(6.5);
+        const decText = "Certified that the particulars given above are true and Correct and Amount indicated represents the price actually charged and that there are no following of additional consideration directly or indirectly from the buyer";
+        doc.text(doc.splitTextToSize(decText, midX - margin - 6), margin + 3, y + 4.5);
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(7);
+        doc.text("E.& O.E", margin + 3, y + 17);
+
+        doc.text("Prepared by", margin + 15, y + signH - 4);
+        doc.text("Checked by", margin + 65, y + signH - 4);
+
+        // Right Side Signature
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(7.5);
+        doc.text("For KAYAAR EXPORTS PRIVATE LIMITED", midX + (right - midX) / 2, y + 5.5, { align: "center" });
+        doc.text("Director/Authorised Signatory", midX + (right - midX) / 2, y + signH - 4, { align: "center" });
+
+        doc.save(`${data.invoice_no || 'invoice'}.pdf`);
     };
     const exportToJSON = () => {
         // 1. Prepare the data object
@@ -908,16 +889,21 @@ const InvoicePreparation = () => {
             ["Delivery At", formData.delivery || '', "", "Transport", transport.account_name || ''],
             [],
             ["S.No", "Description of Goods", "HSN Code", "Bags/Packs", "Total Kgs", "From-To", "Rate/Kg", "Assessable Value"],
-            ...(gridRows.map((row, idx) => [
-                idx + 1,
-                row.product_description || (listData.products.find(p => String(p.id) === String(row.product_id))?.product_name || ''),
-                getHSN(row.product_id),
-                num(row.packs),
-                num(row.total_kgs),
-                `${row.from_no || ''} - ${row.to_no || ''}`,
-                num(row.rate),
-                num(row.assessable_value)
-            ])),
+            ...(gridRows.map((row, idx) => {
+                const rowWeight = num(row.total_kgs);
+                const rowAssessable = num(row.assessable_value || (rowWeight * num(row.rate)));
+                const assessableRatePerKg = rowWeight > 0 ? (rowAssessable / rowWeight) : num(row.rate);
+                return [
+                    idx + 1,
+                    row.product_description || (listData.products.find(p => String(p.id) === String(row.product_id))?.product_name || ''),
+                    getHSN(row.product_id),
+                    num(row.packs),
+                    rowWeight,
+                    `${row.from_no || ''} - ${row.to_no || ''}`,
+                    Number(assessableRatePerKg.toFixed(2)),
+                    rowAssessable
+                ];
+            })),
             [],
             ["", "", "", "", "", "Assessable Value", "", num(formData.total_assessable)],
             ["", "", "", "", "", "Charity", "", num(formData.total_charity)],
@@ -1002,14 +988,19 @@ const InvoicePreparation = () => {
 
         // 1. FLOW: Get Tax and TCS Percentages
         const gstPer = num(config.gst_percentage);
-        const sgstPer = num(config.sgst_percentage);
-        const cgstPer = num(config.cgst_percentage);
+        let sgstPer = num(config.sgst_percentage);
+        let cgstPer = num(config.cgst_percentage);
         const igstPer = num(config.igst_percentage);
         const cenvatPer = num(config.cenvat_percentage);
         const dutyPer = num(config.duty_percentage);
         const cessPer = num(config.cess_percentage);
         const hcessPer = num(config.hr_sec_cess_percentage);
         const tcsPer = num(config.tcs_percentage || 0);
+
+        if (igstPer === 0 && cgstPer === 0 && sgstPer === 0 && gstPer > 0) {
+            cgstPer = gstPer / 2;
+            sgstPer = gstPer / 2;
+        }
 
         // Total tax percentage (Sum of SGST+CGST or just IGST)
         const splitGstPer = sgstPer + cgstPer;
@@ -1096,10 +1087,17 @@ const InvoicePreparation = () => {
                 ? (accessibleValue * num(item.other_per)) / 100
                 : num(item.other_amt);
 
+            const igstAmount = igstPer > 0 ? gstAmount : 0;
+            const sgstAmount = igstPer > 0 ? 0 : (sgstPer > 0 ? (gstAmount * sgstPer / taxPercentage) : (gstAmount / 2));
+            const cgstAmount = igstPer > 0 ? 0 : (cgstPer > 0 ? (gstAmount * cgstPer / taxPercentage) : (gstAmount / 2));
+
             hTotals.assess += accessibleValue;
             hTotals.charity += charity;
             hTotals.freight += rowFreight;
             hTotals.gst += gstAmount;
+            hTotals.cgst += cgstAmount;
+            hTotals.sgst += sgstAmount;
+            hTotals.igst += igstAmount;
             hTotals.tcs += tcsAmount;
             hTotals.gross += totalInvoiceAmount;
             hTotals.vat = (hTotals.vat || 0) + vatAmount;
@@ -1126,9 +1124,9 @@ const InvoicePreparation = () => {
                 charity_amt: money(charity),
                 freight_amt: money(rowFreight),
                 // Handle SGST/CGST split or IGST
-                igst_amt: igstPer > 0 ? money(gstAmount) : 0,
-                sgst_amt: sgstPer > 0 ? money(gstAmount / 2) : 0,
-                cgst_amt: cgstPer > 0 ? money(gstAmount / 2) : 0,
+                igst_amt: money(igstAmount),
+                sgst_amt: money(sgstAmount),
+                cgst_amt: money(cgstAmount),
                 gst_amt: igstPer > 0 ? 0 : money(gstAmount),
                 vat_amt: money(vatAmount),
                 cenvat_amt: money(cenvatAmount),
@@ -1156,9 +1154,9 @@ const InvoicePreparation = () => {
             freight_charges: load ? money(hTotals.freight) : num(hFreight),
             // Display full GST amount as the combined CGST + SGST value.
             total_gst: igstPer > 0 ? 0 : money(hTotals.gst),
-            total_igst: igstPer > 0 ? money(hTotals.gst) : 0,
-            total_sgst: sgstPer > 0 ? money(hTotals.gst / 2) : 0,
-            total_cgst: cgstPer > 0 ? money(hTotals.gst / 2) : 0,
+            total_igst: igstPer > 0 ? money(hTotals.igst) : 0,
+            total_sgst: money(hTotals.sgst),
+            total_cgst: money(hTotals.cgst),
             total_vat: money(hTotals.vat || 0),
             total_cenvat: money(hTotals.cenvat),
             total_duty: money(hTotals.duty),
@@ -1334,31 +1332,37 @@ const InvoicePreparation = () => {
     };
 
     const updateGrid = (idx, field, val) => {
-        setGridRows(prev => {
-            const updated = [...prev];
-            const row = { ...updated[idx], [field]: val };
+    setGridRows(prev => {
+        const updated = [...prev];
+        const row = { ...updated[idx], [field]: val };
 
-            if (field === 'packs') {
-                row.total_kgs = num(val) * num(row.avg_content);
-                console.log(`%c PACKS CHANGED: ${row.product_description}`, "color: #f59e0b;");
-                console.log(`New Kgs: ${val} packs x ${row.avg_content}kg = ${row.total_kgs}`);
-            }
+        if (field === 'packs') {
+            row.total_kgs = num(val) * num(row.avg_content);
+            console.log(`%c PACKS CHANGED: ${row.product_description}`, "color: #f59e0b;");
+            console.log(`New Kgs: ${val} packs x ${row.avg_content}kg = ${row.total_kgs}`);
+        }
 
-            if (field === 'total_kgs') {
-                const p = num(row.packs);
-                row.avg_content = p > 0 ? (num(val) / p).toFixed(3) : 0;
-                console.log(`%c KGS CHANGED: ${row.product_description}`, "color: #f59e0b;");
-                console.log(`New Avg Content: ${val}kg / ${p} packs = ${row.avg_content}`);
-            }
+        if (field === 'avg_content') {
+            row.total_kgs = num(row.packs) * num(val);
+            console.log(`%c AVG CONTENT CHANGED: ${row.product_description}`, "color: #f59e0b;");
+            console.log(`New Kgs: ${row.packs} packs x ${val}kg = ${row.total_kgs}`);
+        }
 
-            if (field === 'broker_code1') {
-                row.broker_code = val;
-            }
+        if (field === 'total_kgs') {
+            const p = num(row.packs);
+            row.avg_content = p > 0 ? (num(val) / p).toFixed(3) : 0;
+            console.log(`%c KGS CHANGED: ${row.product_description}`, "color: #f59e0b;");
+            console.log(`New Avg Content: ${val}kg / ${p} packs = ${row.avg_content}`);
+        }
 
-            updated[idx] = row;
-            return runCalculations(updated, formData.invoice_type_id, formData.freight_charges, formData.sales_type);
-        });
-    };
+        if (field === 'broker_code1') {
+            row.broker_code = val;
+        }
+
+        updated[idx] = row;
+        return runCalculations(updated, formData.invoice_type_id, formData.freight_charges, formData.sales_type);
+    });
+};
 
     const valueOrFallback = (value, fallback = '') => (
         value === undefined || value === null || value === '' ? fallback : value
@@ -2188,8 +2192,12 @@ const InvoicePreparation = () => {
                                                             />
                                                         </td>
                                                         <td className="p-0 border-r w-32">
-                                                            <input type="number" className="w-full h-full p-2 text-center bg-emerald-50 text-emerald-700 outline-none font-bold"
-                                                                value={r.avg_content || 0} readOnly />
+                                                            <input
+                                                                type="number"
+                                                                className="w-full h-full p-2 text-center bg-emerald-50 text-emerald-700 outline-none focus:bg-emerald-100 font-bold"
+                                                                value={r.avg_content || 0}
+                                                                onChange={e => updateGrid(i, 'avg_content', e.target.value)}
+                                                            />
                                                         </td>
                                                         <td className="p-0 border-r w-32">
                                                             <input
@@ -2291,10 +2299,20 @@ const InvoicePreparation = () => {
                                     </button>
                                 )}
 
+                                {/* PRINT INVOICE BUTTON */}
+                                {/* <button
+                                    onClick={() => handlePrint({ ...formData, Details: gridRows, InvoiceDetails: gridRows })}
+                                    disabled={gridRows.length === 0}
+                                    className="bg-indigo-600 text-white px-5 py-2 text-[11px] font-black rounded flex items-center gap-2 shadow hover:bg-indigo-700 transition-all"
+                                >
+                                    <Printer size={16} /> PRINT INVOICE
+                                </button> */}
+
                                 {/* EXPORT PDF BUTTON */}
                                 <button
                                     onClick={exportToPDF}
-                                    disabled={gridRows.length === 0} className="bg-emerald-600 text-white px-6 py-2 text-[11px] font-black rounded flex items-center gap-2 shadow hover:bg-emerald-700"
+                                    disabled={gridRows.length === 0}
+                                    className="bg-emerald-600 text-white px-5 py-2 text-[11px] font-black rounded flex items-center gap-2 shadow hover:bg-emerald-700 transition-all"
                                 >
                                     <FileText size={16} /> DOWNLOAD PDF
                                 </button>
@@ -2518,30 +2536,28 @@ const InvoicePreparation = () => {
             {/* PRINT STYLES - CLEAN A4 BILL ONLY */}
             <style>{`
                 @media print {
-
-  body * {
-      display: none !important;
-  }
-
-  #printable-invoice-wrapper,
-  #printable-invoice-wrapper * {
-      display: block !important;
-  }
-
-  #printable-invoice-wrapper {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      background: white;
-  }
-
-  @page {
-      size: A4;
-      margin: 10mm;
-  }
-
-}
+                    body * {
+                        visibility: hidden !important;
+                    }
+                    #printable-invoice-wrapper,
+                    #printable-invoice-wrapper * {
+                        visibility: visible !important;
+                    }
+                    #printable-invoice-wrapper {
+                        position: absolute !important;
+                        top: 0 !important;
+                        left: 0 !important;
+                        width: 100% !important;
+                        max-width: 100% !important;
+                        margin: 0 !important;
+                        padding: 0 !important;
+                        background: white !important;
+                    }
+                    @page {
+                        size: A4 portrait;
+                        margin: 8mm;
+                    }
+                }
             `}</style>
         </div>
     );
